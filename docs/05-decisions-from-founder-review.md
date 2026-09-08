@@ -1,19 +1,32 @@
-# Open Questions for the Founder
+# Decisions from Founder Review
 
-The plan proceeds on the stated assumptions. Answers change scope or ordering as
-noted; none of them blocks M0–M2.
+The open questions raised in the v2 brief were answered by the founder. This file
+records each answer, the decision it became, and where the plan changed. Anything
+still genuinely open is listed at the end.
 
-| # | Question | Current assumption | What changes if the answer differs |
-|---|----------|--------------------|------------------------------------|
-| Q1 | **Who is the identity authority at target clubs?** Do they have supporter/membership IDs and SSO we can anchor on, or only email logins? | Clubs have a membership/supporter number and a login; we consume a signed assertion from their IdP. | Weak identity → identity anchors (M4) move earlier and become a headline feature; sales messaging leans harder on "levers, not magic". |
-| Q2 | **Do target clubs control their own checkout, or does a ticketing platform (Ticketmaster, SeatGeek, SecuTix, Future Ticketing, Tixngo…) own it?** Which platforms? | Mixed; at least some design partners can add middleware to their checkout. | Platform-owned checkout → Mode B proxy rises in priority and a platform partnership/adapter must precede club sales (risk R6). |
-| Q3 | **Licensing.** Protocol and SDKs permissive (Apache-2.0) is recommended regardless. For the gateway core: Apache-2.0 (maximum adoption), BSL 1.1 (blocks hosted competitors, converts to open source later) or AGPL? | Undecided; repo stays private until decided. | Decides what is published at M8 and how the OSS/Core boundary is drawn. |
-| Q4 | **Team.** Who builds this and in what language are they strongest? | 1–2 engineers comfortable in Go. | A TypeScript-only team would justify revisiting ADR-008 before M1. |
-| Q5 | **Is a hosted public sandbox acceptable for sales** (`demo.bruiser-gateway.com`), given the product is self-hosted? | Yes, as a sales asset only. | If not, the demo is video + local Compose only. |
-| Q6 | **Inter-customer fairness.** Is it firmly out of scope (Bruiser sits behind the club's waiting room), or is replacing Queue-it-style products a future ambition? | Out of scope for V1 and V1.5. | If in scope long-term, the V1.5 bounded waiting design should be built to generalise. |
-| Q7 | **Design partners.** Are any clubs already in conversation? Tier? | None yet. | An existing partner sets the first real adapter and pulls M3 details forward. |
-| Q8 | **Agent-side ecosystem.** Do we want to publish an MCP server / tool definitions so agent frameworks speak Bruiser natively, and if so how early? | Yes, at V1.5. | Earlier → adds an agent-side SDK to M3. |
-| Q9 | **Data residency and retention.** UK GDPR posture, audit retention defaults, any club requiring EU/UK-only processing? | Self-hosted by the merchant solves residency; retention configurable, default 13 months. | Specific requirements feed the M8 compliance notes and Core audit features. |
-| Q10 | **Budget for an external security review** before the first production deployment? | Yes, scheduled at M8. | If not, M8 exit criteria weaken and the sales narrative should not claim external review. |
-| Q11 | **Name.** Is "Bruiser" final? It reads as aggressive for a fairness product aimed at supporter trust. | Final for engineering; naming is a brand decision. | Rename is cheap before M8, expensive after. |
-| Q12 | **Pricing units.** Is Core a flat £20k regardless of scale, or does it have a ceiling (e.g. customers/events per year) above which Enterprise applies? | Flat within a documented fair-use envelope. | Affects what the gateway must meter and report (Core analytics). |
+| # | Topic | Founder decision | Where it landed |
+|---|-------|------------------|-----------------|
+| Q1 | Identity authority | Anchor to the club's existing authenticated supporter/customer identity. Membership/supporter IDs preferred; existing account login acceptable initially. No separate Bruiser identity system unless necessary. | Brief §4; design §5.1; ADR-015 |
+| Q2 | Checkout ownership / integration | Mixed setups expected. Platform-agnostic; no dependency on any ticketing-platform partnership. First customers are clubs with a technically viable path to make Bruiser authoritative at the admission point: club-controlled checkout, a supported platform integration point, or a reverse-proxy/API-gateway arrangement. Bruiser sits in front of existing infrastructure, never replaces it. | Brief §9, §20; design §9 (P1/P2/P3); ADR-002; execution plan M3, commercial track, R6 |
+| Q3 | Licensing | Protocol, schemas, specifications and SDKs: Apache-2.0. Gateway core: BSL 1.1, subject to legal review. Repository private until the OSS/Core boundary is formally decided. | Brief §10, §17; design §16; ADR-014; execution plan M0, M8 |
+| Q4 | Team / language | 1–2 engineers comfortable in Go. Go preferred for the gateway; architecture must not become unnecessarily language-dependent. | Design rule 9 (protocol-first); ADR-008 unchanged |
+| Q5 | Hosted sandbox | Yes — encouraged as a sales and developer-discovery asset. Production stays self-hosted. | Brief §11; design §15; ADR-016; execution plan M6, M8 |
+| Q6 | Inter-customer fairness | Out of scope for V1 and V1.5. Not replacing waiting-room products. | Unchanged (brief §2, §8; ADR-006) |
+| Q7 | Design partners | None confirmed. Immediate commercial priority alongside development; use club conversations to validate integration requirements. | Brief §20; execution plan commercial track (Stage A starts now), R13; `06-integration-discovery.md` |
+| Q8 | Agent ecosystem | Yes to MCP server / tool definitions and agent SDKs eventually, but enforcement must never depend on agents voluntarily using Bruiser tooling. | Brief §9 (transparent enforcement), §10, principle 3; design §5.1a, §9; ADR-002a; V1.5 track |
+| Q9 | Data residency / retention | Merchant self-hosting is the primary residency control. Retention configurable, default 13 months, subject to legal/security review and merchant requirements. | Brief §11, §16; design §13; ADR-018; execution plan M7 |
+| Q10 | External security review | Yes; budgeted; part of M8 production-readiness criteria. | Execution plan M8 exit criteria |
+| Q11 | Name | Keep "Bruiser" / "Bruiser Gateway". Trademark clearance before significant commercial investment or launch. | Execution plan commercial track item 5; M8 exit criteria |
+| Q12 | Pricing | Core £20k/yr within a documented fair-use envelope (not unlimited). Enterprise from £100k+/yr. Keep pricing simple; no per-request metering initially. | Brief §17; design §13 (usage figures, informational only); ADR-017 |
+| Q13 | Authority / bypass prevention | Bruiser must be authoritative over the scarce-inventory operation it protects. Direct paths that bypass Bruiser must be removed, restricted or otherwise prevented. Target architecture: client/agent → Bruiser → existing ticketing/commerce system → inventory. | Brief §9, principle 2; design rule 7, §9.5 authority check; ADR-002; execution plan M3, M6 bypass demo, R4, R12 |
+| — | Key product principle | Bruiser is not a distributed-lock product. Coordination technology is an implementation detail. The product is the identity, execution-control, lease, concurrency, policy, queueing, handoff, audit and merchant-integration layer around scarce-inventory transactions. Positioned as a control layer for autonomous commerce — not bot detection, DDoS, a ticketing platform or a locking service. | Brief §19, principle 8; design rule 5; ADR-001; commercial track positioning discipline |
+
+## Still open (do not block engineering)
+
+| Item | Owner | Needed by |
+|------|-------|-----------|
+| BSL 1.1 parameters (Additional Use Grant wording, Change Date) confirmed by counsel; OSS/Core boundary signed off | Founder + counsel | M8 publication |
+| Fair-use envelope numbers (peak concurrent executions, events/year, deployments) | Founder, with first design partners | Core licence template, M8 |
+| Trademark search result for "Bruiser Gateway" | Founder + counsel | Before hosted demo goes public (M6) and before launch |
+| Which three clubs become design partners, and which enforcement pattern each needs | Founder (commercial track Stage A) | Shapes M3 scope; ideally before M3 starts |
+| Anchor set per design partner (membership number, household, payment fingerprint availability) | Discovery calls | M4 |
