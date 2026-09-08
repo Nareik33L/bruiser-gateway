@@ -22,12 +22,14 @@ designed for but not built in V1.
    Coordination technology is an implementation detail behind the `Store`
    interface and is never part of the product's definition.
 6. **Tenant in every row, every query, every token.**
-7. **Bruiser is authoritative or it is not deployed.** Every path to the protected
-   allocation operation passes an enforcement point (§9). The authority check
-   proves it; integration is not complete until it passes.
+7. **Authority is the requirement; the deployment method is an implementation
+   detail.** Every path to the protected allocation operation passes an admission
+   check (§9). Bruiser is sold as the control layer, never as middleware, a proxy
+   or an API gateway. The Authority Check proves it; integration is not complete
+   until it reports PASS.
 8. **Enforcement never depends on the client knowing Bruiser exists.** Edge and
-   proxy patterns acquire executions transparently from the merchant's own
-   session; protocol-aware clients get richer behaviour, not different rules.
+   Proxy methods acquire executions transparently from the merchant's own
+   session; Bruiser-aware clients get richer behaviour, not different rules.
 9. **Protocol-first.** OpenAPI, JSON Schema, token spec and conformance suite are
    the definition; the Go binary is one implementation of them.
 
@@ -226,7 +228,7 @@ never mints its own customer identifiers and never stores credentials.
 
 ### 5.1a Merchant session → implicit session (transparent enforcement)
 
-For clients that do not speak the protocol (§9, patterns P2/P3), Bruiser derives
+For clients that do not speak the protocol (§9, Edge and Proxy methods), Bruiser derives
 the customer from the merchant's **existing session credential** on the
 allocation request itself. A merchant configures one *customer extractor*:
 
@@ -272,7 +274,7 @@ PASETO v4.public, signed with the merchant's current Ed25519 key (`kid` in foote
 `exp` always equals the lease's current `expires_at`, so a token can never outlive
 its lease. Renewal issues a new token (new `exp`, new `jti`, same `fnc`).
 
-### 5.3 Merchant-side verification (pattern P1, in-app middleware)
+### 5.3 Merchant-side verification (Embedded)
 
 ```
 verify(token):
@@ -309,7 +311,7 @@ header honoured on mutating requests; `request_id` echoed in responses and audit
 | `GET /v1/executions/{id}/watch` | SSE / long-poll until state changes | stream | |
 | `GET /v1/domains/current?resource&action` | what is active in my domain right now | 200 | |
 | `POST /v1/introspect` `{token}` | merchant-side liveness check (merchant credential) | 200 `{active, execution}` | |
-| `POST /v1/authorize` | edge admission check (pattern P2; merchant credential): given the original request's method, path, resource, action and credentials, decide allow/deny and acquire transparently if needed | 200 allow + headers to inject (`X-Bruiser-Execution`, `X-Bruiser-Fence`) | 401, 403 DENIED, 409 BUSY (edge maps to 429/503 with `Retry-After`), 503 UNAVAILABLE |
+| `POST /v1/authorize` | Edge admission check (merchant credential): given the original request's method, path, resource, action and credentials, decide allow/deny and acquire transparently if needed | 200 allow + headers to inject (`X-Bruiser-Execution`, `X-Bruiser-Fence`) | 401, 403 DENIED, 409 BUSY (edge maps to 429/503 with `Retry-After`), 503 UNAVAILABLE |
 | `GET /.well-known/bruiser/jwks.json` | public keys | 200 | |
 | `GET /.well-known/bruiser/protocol` | protocol version & capabilities | 200 | |
 
@@ -324,7 +326,7 @@ BUSY body:
 
 `can_preempt: true` is how a browser learns it may "take control".
 
-**Proxy endpoints (pattern P3):** `POST /v1/proxy/{adapter}/{op}` for `op ∈ search |
+**Proxy endpoints (Proxy method):** `POST /v1/proxy/{adapter}/{op}` for `op ∈ search |
 hold | release | purchase | cancel`, plus a transparent HTTP reverse-proxy listener
 that applies *route rules* to the merchant's own URL space. `search` is
 uncontrolled; the rest require a matching ACTIVE execution for the caller —
@@ -391,20 +393,22 @@ type Adapter interface {
 must be stateless with respect to Bruiser and idempotent on retry. V1 ships
 `adapter/simtix` (HTTP) and `adapter/memory` (tests).
 
-## 9. Enforcement patterns and authority
+## 9. Deployment methods and the Authority Check
 
-Bruiser is only meaningful if it is authoritative at the **admission point** — the
-operation that consumes or reserves scarce inventory. The lease core is identical
-across patterns; what differs is where the check happens and how bypass is closed.
+Authority is the requirement. Embedded, Edge and Proxy are how a merchant places
+the control layer in front of existing infrastructure — they are not different
+products. The lease core, policy engine, tokens, audit and Authority Check are
+identical in every method; what differs is where the admission check happens and
+how bypass is closed.
 
-### 9.1 P1 — In-app middleware
+### 9.1 Embedded — in-application middleware
 
 The merchant's checkout verifies the execution token (§5.3) via an SDK. Bruiser is
 out of the data path. Bypass closure: every allocation route in the application is
 behind the middleware; there is no unauthenticated allocation API. Fits clubs that
 control their checkout code.
 
-### 9.2 P2 — Edge / API-gateway integration
+### 9.2 Edge — API gateway / WAF / Worker
 
 The merchant's existing edge calls `POST /v1/authorize` before forwarding
 allocation requests. Bruiser ships reference configurations for:
@@ -437,13 +441,13 @@ edge (mTLS, private network, or a per-deployment shared secret the edge adds). I
 the client already holds an explicit execution token it is verified; otherwise the
 customer is extracted (§5.1a) and an execution acquired transparently.
 
-### 9.3 P3 — Bruiser reverse proxy
+### 9.3 Proxy — reverse proxy
 
 Bruiser terminates allocation traffic for configured routes and forwards to the
 origin (or via an adapter), attaching fence and identity. The same route rules
 apply. Bypass closure: origin allocation endpoints are reachable only from the
 Bruiser proxy (network policy / allowlist / mTLS). Fits merchants who can change
-neither the application nor an edge, and the simulator/demo. This pattern places
+neither the application nor an edge, and the simulator/demo. This method places
 Bruiser in the data path, so its HA and fail-closed behaviour matter most here;
 the Helm chart's defaults assume it.
 
@@ -451,16 +455,16 @@ the Helm chart's defaults assume it.
 
 An execution is a serialisation point; downstream should treat one execution as one
 shopper (one basket, one hold set). To prevent a customer collapsing many clients
-onto one execution and hammering the origin, patterns P2/P3 enforce, per execution,
+onto one execution and hammering the origin, Edge and Proxy enforce, per execution,
 a **max in-flight requests** (default 2) and a **rate limit** (default 5 rps),
-node-locally in V1. P1 SDKs expose the same limits as an optional local guard.
-Exceeding returns 429 with `Retry-After` and an `EXECUTION_THROTTLED` audit event
-when sustained.
+node-locally in V1. Embedded SDKs expose the same limits as an optional local
+guard. Exceeding returns 429 with `Retry-After` and an `EXECUTION_THROTTLED` audit
+event when sustained.
 
-### 9.5 The authority check
+### 9.5 Bruiser Authority Check (product feature)
 
-`bruiser authority-check --target <merchant config>` is a CLI (and admin-UI action)
-that, against a staging or production environment:
+`bruiser authority-check --target <merchant config>` is a CLI and an admin-UI
+action. Against a staging or production environment it:
 
 1. enumerates the allocation routes from route rules / SDK registration;
 2. attempts each route **without** any Bruiser execution, with an expired token,
@@ -468,23 +472,39 @@ that, against a staging or production environment:
    where network access permits;
 3. probes for common bypasses: alternative hostnames, HTTP vs HTTPS origin, legacy
    API versions, mobile API paths, GraphQL mutations, direct origin IP;
-4. reports PASS/FAIL per route with evidence, and writes an `AUTHORITY_CHECK`
+4. reports PASS/FAIL per probe with evidence, and writes an `AUTHORITY_CHECK`
    audit event.
 
-The check is part of the integration guide, part of the demo (a bypass attempt
-that fails), and a gate in the design-partner onboarding checklist. It cannot prove
-the absence of paths it does not know about, so the integration questionnaire
-([06-integration-discovery.md](06-integration-discovery.md)) asks the merchant to
-enumerate them, and the report lists what was covered.
+Example output:
 
-### 9.6 Choosing a pattern
+```
+Bruiser Authority Check
 
-| Merchant situation | Pattern |
-|--------------------|---------|
-| Owns checkout code, can add a dependency | P1 (preferred: Bruiser out of the data path) |
-| Checkout is a platform, but club controls the edge/CDN/API gateway in front of it | P2 |
-| Platform exposes a supported pre-allocation hook or webhook | P2 via hook, or adapter-specific variant |
-| No control over app or edge, but can route DNS/network for allocation endpoints | P3 |
+  PASS — Browser allocation route protected
+  PASS — Mobile API protected
+  PASS — Agent API protected
+  PASS — Expired token rejected
+  PASS — Tampered token rejected
+  PASS — Direct allocation bypass blocked
+
+  Overall Result: PASS
+```
+
+A deployment that cannot achieve PASS is not production-ready. The check is part
+of the integration guide, part of the demo (lockdown off → FAIL with the named
+open path; lockdown on → PASS), and the go-live gate in the design-partner
+onboarding checklist. It cannot prove the absence of paths it does not know about,
+so the integration questionnaire ([06-integration-discovery.md](06-integration-discovery.md))
+asks the merchant to enumerate them, and the report lists what was covered.
+
+### 9.6 Choosing a deployment method
+
+| Merchant situation | Method |
+|--------------------|--------|
+| Owns checkout code, can add a dependency | **Embedded** (preferred when available: Bruiser out of the data path) |
+| Checkout is a platform, but club controls the edge/CDN/API gateway/WAF in front of it | **Edge** |
+| Platform exposes a supported pre-allocation hook or webhook | **Edge** via hook, or adapter-specific variant |
+| No control over app or edge, but can route DNS/network for allocation endpoints | **Proxy** |
 | No viable way to make Bruiser authoritative | Not a V1 customer; record requirements and defer |
 
 ## 10. SimTix — simulated ticketing system
@@ -493,9 +513,9 @@ Separate binary. Events with N seats, price bands, time-limited holds (default
 120 s), purchase, cancel; per-account limit (e.g. 4 seats) enforced *non-atomically*
 by default to mirror common real-world behaviour (toggle to atomic for honest
 comparison); a club-style login issuing a session cookie/JWT (so transparent
-enforcement can be demonstrated); optional P1 token verification via the Go SDK;
-an `--enforcement` flag selecting P1, P2 (SimTix behind a bundled NGINX
-`auth_request` config) or P3 (behind the Bruiser proxy), and `--origin-lockdown`
+enforcement can be demonstrated); optional Embedded token verification via the Go SDK;
+an `--enforcement` flag selecting `embedded`, `edge` (SimTix behind a bundled NGINX
+`auth_request` config) or `proxy` (behind the Bruiser proxy), and `--origin-lockdown`
 to reject traffic not carrying the edge secret; request log with timing;
 Prometheus metrics; a reset endpoint. Deliberately simple and deliberately
 representative of the failure modes Bruiser addresses (hold churn, duplicate
@@ -543,15 +563,38 @@ Metrics (Prometheus): `bruiser_acquire_total{outcome,rule}`,
 `bruiser_active_executions{merchant}`, `bruiser_busy_cache_hit_ratio`,
 `bruiser_lease_expired_total`, `bruiser_handoff_total{mode}`,
 `bruiser_store_op_seconds{op}`, `bruiser_store_unavailable`,
-`bruiser_downstream_requests_total{adapter,op}`.
+`bruiser_downstream_requests_total{adapter,op}`,
+`bruiser_allocation_attempts_total{resource,outcome}`,
+`bruiser_executions_forwarded_total{resource}`,
+`bruiser_eaf{resource,window}` (gauge).
+
+**Execution Amplification Factor (primary KPI).**
+
+```
+EAF = incoming allocation attempts ÷ authorised executions forwarded
+```
+
+Incoming = every scarce-inventory request Bruiser saw (GRANTED, BUSY, DENIED,
+transparent acquire, throttled). Authorised forwarded = requests Bruiser allowed
+through to the merchant (one per ACTIVE execution's first forwarded allocation,
+plus any subsequent in-flight requests that execution is permitted). Reported as
+two gauges the admin UI leads with:
+
+- `observed_eaf` — incoming ÷ authorised. Alice's 10,000 agents produce ~10,000×.
+- `downstream_eaf` — authorised forwarded ÷ distinct customers who attempted.
+  Under `max_active: 1` this sits at 1×.
+
+Windows: live (last 60 s), current on-sale, last 24 h, last 30 d. Per merchant,
+per resource, per customer. Informational only; never used for billing or
+throttling.
 
 Traces: one span per request with `merchant`, `domain`, `execution`, `fence`
 attributes. Logs: JSON, `request_id` correlated to audit events.
 
 **Usage figures (fair-use transparency, not metering):** the admin UI and
 `/admin/v1/stats` expose peak concurrent executions (rolling 30 days), executions
-per month and distinct resources protected. These are informational; the gateway
-never throttles or licenses on them.
+per month, distinct resources protected, peak observed EAF and peak downstream
+EAF. These are informational; the gateway never throttles or licenses on them.
 
 **Audit retention:** `audit.retention` per merchant, default `13 months`. A daily
 job deletes (or, if `audit.archive` is configured, exports then deletes) events past
@@ -580,7 +623,7 @@ themselves audited.
 ## 15. Deployment
 
 **Compose (dev/demo):** `caddy` LB → `gateway ×3` → `postgres`; plus `simtix`
-(with its NGINX edge for P2), `swarm`, `dashboard`. One command, seeded merchant,
+(with its NGINX edge for Edge), `swarm`, `dashboard`. One command, seeded merchant,
 seeded policy, seeded route rules, dev IdP secret.
 
 **Helm (prod):** `Deployment` with HPA, `PodDisruptionBudget`, readiness on store,
@@ -623,7 +666,7 @@ internal/api/public/    v1 handlers        internal/api/admin/
 internal/audit/         emitter, exporters
 internal/adapter/       interface, simtix, memory
 internal/enforce/       route rules, /v1/authorize, transparent acquire, per-execution limits
-internal/proxy/         P3 reverse proxy
+internal/proxy/         Proxy method reverse proxy
 internal/authority/     authority-check probes and report
 web/admin/              templates, htmx, SSE
 deploy/compose/ deploy/helm/
@@ -646,7 +689,7 @@ who need different terms.
   a revoked execution — so no caching of positive answers beyond a few hundred ms).
 - Anchor hashing/normalisation rules (belongs in the protocol spec).
 - Whether per-execution in-flight limits (§9.4) need to be store-coordinated for
-  P3 deployments with many proxy replicas, or whether node-local is sufficient in
+  Proxy deployments with many proxy replicas, or whether node-local is sufficient in
   practice.
 - Customer extractor for opaque merchant sessions: introspection latency on the
   allocation path; cache TTL vs. logout propagation.

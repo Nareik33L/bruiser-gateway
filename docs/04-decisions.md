@@ -26,39 +26,50 @@ appears in positioning, and the product is not "a lock" (founder principle).
 pressure that the busy cache and pooling cannot absorb, or an enterprise requires
 active-active multi-region grants.
 
-## ADR-002 — Bruiser must be authoritative at the admission point; three enforcement patterns
+## ADR-002 — Authority is the requirement; Embedded / Edge / Proxy are deployment methods
 
 **Decision.** Integration is defined as making Bruiser authoritative over the
-protected allocation operation and closing every bypass path. Three enforcement
-patterns are supported as equals, chosen per merchant: **P1** in-app middleware
-verifying the execution token; **P2** edge/API-gateway calling `/v1/authorize`;
-**P3** Bruiser reverse proxy. Every deployment runs the authority check before
-go-live. Where no pattern can make Bruiser authoritative, the merchant is not a V1
-customer.
+protected allocation operation and closing every bypass path. Three **deployment
+methods** are supported as equals, chosen from the merchant's existing
+infrastructure: **Embedded** (in-application middleware verifying the execution
+token); **Edge** (API gateway / WAF / Worker calling `/v1/authorize`); **Proxy**
+(Bruiser reverse proxy). They are how a merchant places the control layer, not
+different products. Bruiser is never sold as middleware, a proxy or an API
+gateway. Every deployment runs the Bruiser Authority Check before go-live; a club
+that cannot achieve PASS is not production-ready. Where no method can make Bruiser
+authoritative, the merchant is not a V1 customer.
 
-**Why.** Founder decisions Q2 and Q13: target clubs have mixed setups; Bruiser must
-be platform-agnostic and must not depend on a ticketing-platform partnership; and
-policy cannot be guaranteed if direct paths exist. P1 is still recommended where
-available because it keeps Bruiser out of the purchase data path and degrades most
+**Why.** Founder decisions Q2 and Q13, restated as product philosophy: authority
+is the requirement; the deployment method is an implementation detail. Target
+clubs have mixed setups; Bruiser must be platform-agnostic and must not depend on
+a ticketing-platform partnership. Embedded is still recommended where available
+because it keeps Bruiser out of the purchase data path and degrades most
 gracefully, but it is a preference within the requirement, not the requirement.
 
 **Consequences.** Route rules, `/v1/authorize`, transparent acquire and reference
 edge configurations become V1 scope (M3). SDKs in the merchant's language remain
-necessary for P1. The authority check becomes a product feature and a sales gate.
+necessary for Embedded. The Authority Check is a named product feature, a go-live
+gate and a sales/demo artefact.
 
 **Revisit when.** A supported platform integration point emerges that warrants a
-dedicated adapter-specific pattern.
+dedicated adapter-specific method.
 
-## ADR-002a — Enforcement never depends on the client knowing Bruiser
+## ADR-002a — Transparent enforcement: two client classes, one set of rules
 
-**Decision.** In P2/P3 Bruiser extracts the customer from the merchant's existing
-session credential and acquires the execution transparently on first allocation
-request. Bruiser-aware clients get explicit acquire/renew/watch/handoff; unaware
-clients are still controlled. SDKs and MCP tooling are adoption aids only.
+**Decision.** Bruiser never relies on agents voluntarily integrating. Two client
+classes exist:
 
-**Why.** Founder decision Q8/Q13: the merchant gateway must enforce regardless of
-which agent or client makes the request. A control layer that only controls
-cooperative agents controls nothing.
+- **Bruiser-aware** — explicit acquire, renew, handoff, watch; better UX.
+- **Bruiser-unaware** — merchant's existing authenticated session; Bruiser
+  extracts customer identity and acquires the execution automatically.
+
+In Edge and Proxy the unaware path is the default: extract from the merchant
+session, acquire on first allocation request. The same concurrency policy applies
+to both classes. SDKs and MCP tooling are adoption aids only.
+
+**Why.** Founder decision Q8/Q13 and the Transparent Enforcement principle: the
+merchant remains protected regardless of the client. A control layer that only
+controls cooperative agents controls nothing.
 
 **Consequences.** A configurable customer extractor (JWT / cookie-JWT /
 introspection / edge-signed header); coarse principal typing for unaware clients;
@@ -226,3 +237,27 @@ runs; retention changes and purges are audited.
 
 **Why.** Founder decision Q9. Covers a full season plus dispute lag; merchants
 adjust to their own legal requirements.
+
+## ADR-019 — Execution Amplification Factor is the primary operational KPI
+
+**Decision.** EAF = incoming allocation attempts ÷ authorised executions
+forwarded. The admin dashboard, demo and sales conversation lead with it.
+Reported as observed EAF (how much autonomous demand was absorbed) and
+downstream EAF (should sit at 1× under `max_active: 1`), per merchant / resource
+/ customer, over selectable windows. Never used for billing or throttling.
+
+**Why.** Turns the 10,000-agent story into a number a ticketing office can watch.
+Makes the product claim measurable rather than rhetorical.
+
+## ADR-020 — Commercial messaging rule is binding
+
+**Decision.** Customer-facing copy never describes Bruiser as a Redis lock, bot
+detection, DDoS protection, a ticketing platform, middleware, a proxy or an API
+gateway. It always describes Bruiser as: the authoritative control layer for
+autonomous commerce that ensures one customer remains one customer, regardless
+of how many agents they deploy. Coordination technology and deployment methods
+are implementation details.
+
+**Why.** Founder product principle. Selling a lock or a proxy invites a build-vs-buy
+comparison Bruiser loses; selling authority invites a fairness conversation Bruiser
+wins.
