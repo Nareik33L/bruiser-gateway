@@ -38,6 +38,7 @@ make eaf-nightly
 | Store outage fail-closed | `TestFailClosedOnStoreOutage` (503 / 5xx, not ALLOW) |
 | Persistence across replica / new process | `TestPersistenceAcrossReplica`, `TestRestartNewProcessSameStore` |
 | Embedded / Edge / Proxy share the same admission rule | Placement parity + Embedded token test |
+| Installed Embedded / Edge / Proxy behave the same | `TestV1DeploymentAcceptance` — auth, identity, acquire, renew, release, queue, handoff, revoke, expiry, origin lockdown, Dry Run, 10%, 100%, Authority Check |
 | Admin is not unlocked by the edge secret or `?secret=` | `TestSecurityAdminAndEdgeSecrets` |
 | Resume is observed but not counted as a new origin forward | `TestMetricsResumeDoesNotCountForwarded` |
 | Distinct admin vs edge secrets in the lab | `internal/testlab` + `startServer` |
@@ -73,6 +74,7 @@ This revision: `make test-race`, `make sdk-test`, `make v1-accept`, and
 
 ## 4. Tests added or strengthened
 
+- `internal/check/deploy_accept_test.go` — one suite against Embedded, Edge, and Proxy install paths
 - `internal/check/v1_accept_test.go` — lifecycle, ramp, authority, placement, amplification
 - `internal/check/check.go` — spoofed identity, unlisted paths, origin-secret spoof, removed proxy headers, authorize edge secret, PASS/FAIL/WARN
 - `internal/check/proxy_test.go` / `eaf_nightly_test.go` — origin `held` assertion
@@ -128,6 +130,13 @@ Still **human-owned** (not software gaps):
   method.
 - Origin lockdown (`X-Bruiser-Origin-Secret`) is on for Edge/Proxy.
   Embedded origins verify the execution JWT + fence.
+- Embedded Dry Run does not mint an execution token. A `RequireExecution`
+  origin therefore stays locked at 0% / out-of-ramp; the app is expected
+  to continue without calling origin under Bruiser's token. Edge/Proxy 0%
+  stamps the origin secret so unaware traffic still reaches the locked
+  origin. `TestV1DeploymentAcceptance` asserts both. `bruiser
+  authority-check` is the Edge/Proxy front; Embedded authority is missing
+  / tampered / valid execution JWT against the origin.
 - Postgres is the backing store (one logical database, one or more
   Bruiser replicas).
 - Merchant identity is already authenticated; Bruiser consumes it.
