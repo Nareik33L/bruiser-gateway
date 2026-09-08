@@ -77,7 +77,7 @@ func TestAdminStatusAndAuditExport(t *testing.T) {
 	}
 	html, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != 200 || !strings.Contains(string(html), "Observed EAF") || !strings.Contains(string(html), "Queue depth") || !strings.Contains(string(html), "Not a waiting room") || !strings.Contains(string(html), "What Bruiser would have stopped") || !strings.Contains(string(html), "Emergency controls") {
+	if resp.StatusCode != 200 || !strings.Contains(string(html), "Observed EAF") || !strings.Contains(string(html), "Queue depth") || !strings.Contains(string(html), "Not a waiting room") || !strings.Contains(string(html), "What Bruiser would have stopped") || !strings.Contains(string(html), "Enforcement ramp") {
 		t.Fatalf("admin page %d", resp.StatusCode)
 	}
 }

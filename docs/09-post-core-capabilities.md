@@ -31,7 +31,8 @@ Keep the club’s existing stack. Add Bruiser.
 | One-command install | Compose, Helm, Edge, Proxy — already the placement methods |
 | Diagnostics | `bruiser doctor` — PASS / WARN / FAIL |
 | Config validation | `bruiser config validate` (also `profile validate`) |
-| Transparent dry-run | `BRUISER_MODE=dry-run` or admin controls; same path, never blocks |
+| Transparent dry-run | `BRUISER_MODE=dry-run` or admin **0%** — 100% observe, 0% enforce |
+| Progressive enforcement | `enforce_percent` 0→10→25→50→75→100; same path; customer-stable |
 | Authority Check | `bruiser authority-check` — go-live gate (already shipped) |
 | Health / readiness | `/healthz`, `/readyz` (store, signing key, mode) |
 | Emergency controls | `GET/PUT /v1/admin/controls`, drain, auditable |
@@ -64,7 +65,10 @@ Every affected request records a hypothetical decision: `WOULD_ALLOW`,
 `WOULD_QUEUE`, `WOULD_REJECT`, `WOULD_EXPIRE`. Admin: **What Bruiser would
 have stopped** (`GET /v1/admin/dry-run`).
 
-Install → Dry Run → Observe → Tune → Enforce. Same architecture.
+Install → Dry Run (0%) → 10% → Observe → Increase → 100%. Same architecture.
+`PUT /v1/admin/controls` changes the percent without a redeploy. Assignment
+is per customer. Scope can limit the ramp to an event, route, pool, cohort,
+environment or policy.
 
 The queue in dry-run is still **intra-customer**: Alice’s extra agents
 *would* wait for Alice. Bob is never lined up behind Alice.

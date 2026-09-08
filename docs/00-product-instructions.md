@@ -124,11 +124,11 @@ subject to Bruiser.
 Bruiser-aware agents get a better experience (acquire, renew, watch, release,
 handoff). Bruiser-unaware clients receive the same rules.
 
-Transparent **dry-run** (`BRUISER_MODE=dry-run` or admin controls) uses this
-same path and the same policies, records `WOULD_*` decisions, and never
-blocks. It is how a club answers “what would Bruiser have done?” before
-enforcement. Supporting ops (`bruiser doctor`, `config validate`, emergency
-controls, `/readyz`) are scoped in
+Transparent **dry-run** is 0% progressive enforcement: the same path and
+policies, `WOULD_*` recorded, nothing blocked. The merchant then ramps
+10% → 25% → 50% → 75% → 100% without a redeploy. Observation stays at 100%.
+“Don’t trust us. Start at 10%.” Supporting ops (`bruiser doctor`,
+`config validate`, emergency 0%, `/readyz`) are scoped in
 [09-post-core-capabilities.md](09-post-core-capabilities.md) and must not
 delay the core product.
 

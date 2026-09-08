@@ -128,16 +128,13 @@ func (s *Server) admit(ctx context.Context, method, path, eventID string, r *htt
 		if reason == "" {
 			reason = "denied"
 		}
+		s.recordDecision(ctx, false, cust.CustomerID, "", resource, route.Action, d.RuleName, "DENIED", reason, reqID, "")
 		return admitResult{status: http.StatusForbidden, body: map[string]any{"error": "DENIED", "reason": reason, "rule_name": d.RuleName}}
 	}
 
-	if ctl.PassThrough() {
-		h.Set("X-Bruiser-Control", "bypass")
-		s.eaf.record(resource, cust.CustomerID, "bypass")
-		return admitResult{status: http.StatusOK, allow: true, headers: h, body: map[string]any{"status": "ALLOW", "action": route.Action, "control": "bypass", "rule_name": d.RuleName}}
-	}
-	if ctl.DryRun() {
-		return s.admitDryRun(ctx, h, cust.CustomerID, cust.PrincipalID, resource, route.Action, d, reqID)
+	ramp := s.rampInput(cust.CustomerID, resource, route.Action, d.RuleName, eventID, path, cust.Anchors)
+	if !ctl.ShouldEnforce(ramp) {
+		return s.admitDryRun(ctx, h, cust.CustomerID, cust.PrincipalID, resource, route.Action, d, reqID, ctl.EffectivePercent())
 	}
 
 	principalID := cust.PrincipalID
@@ -180,6 +177,9 @@ func (s *Server) admit(ctx context.Context, method, path, eventID string, r *htt
 		return s.admitStoreError(err)
 	}
 	acquireTotal.WithLabelValues("transparent_"+acq.Status, rule).Inc()
+	s.recordAcquire(ctx, true, cust.CustomerID, principalID, resource, route.Action, rule, acq, reqID)
+	h.Set("X-Bruiser-Enforced", "1")
+	h.Set("X-Bruiser-Ramp", strconv.Itoa(ctl.EffectivePercent()))
 
 	switch acq.Status {
 	case lease.StatusGranted, lease.StatusAlreadyHeld:
@@ -251,7 +251,7 @@ func (s *Server) admit(ctx context.Context, method, path, eventID string, r *htt
 	}
 }
 
-func (s *Server) admitDryRun(ctx context.Context, h http.Header, customerID, principalID, resource, action string, d policy.Decision, reqID string) admitResult {
+func (s *Server) admitDryRun(ctx context.Context, h http.Header, customerID, principalID, resource, action string, d policy.Decision, reqID string, percent int) admitResult {
 	if principalID == "" {
 		principalID = id.New("p")
 	}
@@ -265,20 +265,24 @@ func (s *Server) admitDryRun(ctx context.Context, h http.Header, customerID, pri
 	if h == nil {
 		h = make(http.Header)
 	}
-	h.Set("X-Bruiser-Control", "dry-run")
+	h.Set("X-Bruiser-Control", "observe")
 	h.Set("X-Bruiser-Dry-Run", would)
 	h.Set("X-Bruiser-Dry-Run-Reason", reason)
+	h.Set("X-Bruiser-Enforced", "0")
+	h.Set("X-Bruiser-Ramp", strconv.Itoa(percent))
 	return admitResult{
 		status:  http.StatusOK,
 		allow:   true,
 		headers: h,
 		body: map[string]any{
-			"status":      "ALLOW",
-			"would":       would,
-			"reason":      reason,
-			"action":      action,
-			"customer_id": customerID,
-			"rule_name":   d.RuleName,
+			"status":           "ALLOW",
+			"would":            would,
+			"reason":           reason,
+			"action":           action,
+			"customer_id":      customerID,
+			"rule_name":        d.RuleName,
+			"enforced":         false,
+			"enforce_percent":  percent,
 		},
 	}
 }
