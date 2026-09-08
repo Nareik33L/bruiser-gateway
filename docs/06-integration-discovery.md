@@ -1,12 +1,18 @@
 # Integration Discovery Questionnaire
 
-Used in design-partner discovery calls. The purpose is to answer one question per
-club: **is there a technically viable path to make Bruiser authoritative at the
-scarce-inventory admission point, and which enforcement pattern is it?** A club
-with no viable path is deferred with its requirements recorded — never force-fitted.
+Used in Stage A design-partner discovery calls. The purpose is to answer one
+question per club: **is there a technically viable path to make Bruiser
+authoritative at the scarce-inventory admission point, and which deployment
+method is it (Embedded, Edge or Proxy)?** A club that cannot achieve Authority
+Check PASS is not production-ready and is deferred with its requirements
+recorded — never force-fitted.
 
-Secondary purposes: learn which identity anchors exist (feeds policy design), and
-learn the club's operational constraints (feeds deployment and support scope).
+Secondary purposes: learn which identity source and anchors exist (feeds policy
+design), and learn the club's operational constraints (feeds deployment and
+support scope).
+
+This discovery process is a core product activity, not a post-MVP sales exercise.
+It starts immediately, before significant engineering investment.
 
 Run it with the head of digital/IT or their lead engineer present; the ticketing
 office answers the commercial and fairness questions. Fill in the summary at the
@@ -39,14 +45,14 @@ Bruiser must be authoritative over it. Everything else follows from mapping it.
 ## B. Control over the path
 
 6. Who owns and can change the **application code** at the admission point?
-   (Club → P1 possible.)
-7. Is there a **reverse proxy, API gateway, CDN or WAF** the club controls in front
+   (Club → **Embedded** possible.)
+7. Is there a **reverse proxy, API gateway, CDN, WAF or Worker** the club controls in front
    of the admission point? Which product (Cloudflare, Akamai, Fastly, AWS ALB/API
    Gateway, Azure Front Door, NGINX, Envoy, Kong, Tyk…)? Can it call an external
-   authorisation endpoint or run a worker? (Club → P2 possible.)
+   authorisation endpoint or run a worker? (Club → **Edge** possible.)
 8. Can the club **route** the admission-point hostnames or paths (DNS, network
    policy, allowlists) so that they are reachable only via a component the club
-   deploys? (Club → P3 possible.)
+   deploys? (Club → **Proxy** possible.)
 9. Does the ticketing platform expose a **supported pre-allocation hook**, webhook,
    plugin point or external-authorisation feature? Documentation available?
 10. Can the origin be configured to **refuse allocation requests that did not pass
@@ -119,9 +125,10 @@ Bruiser must be authoritative over it. Everything else follows from mapping it.
 | Ticketing platform / checkout owner | |
 | Admission-point operations (reserve / commit) | |
 | Known routes to admission point (from A4/A5) | |
-| Control: app code (P1) / edge (P2) / routing (P3) / platform hook | |
+| Control: app code (Embedded) / edge-WAF-worker (Edge) / routing (Proxy) / platform hook | |
 | Origin lockdown feasible? Owner and lead time | |
-| **Viable enforcement pattern** | P1 / P2 / P3 / platform hook / **none** |
+| **Viable deployment method** | Embedded / Edge / Proxy / platform hook / **none** |
+| Authority Check PASS achievable? | yes / no / unknown |
 | Supporter identifier and where it appears in the session | |
 | Anchors available | |
 | Waiting room present? | |
@@ -132,13 +139,14 @@ Bruiser must be authoritative over it. Everything else follows from mapping it.
 
 ## What happens next per outcome
 
-- **P1 viable:** send the SDK integration guide for their language; agree the route
+- **Embedded viable:** send the SDK integration guide for their language; agree the route
   list; schedule staging pilot after M3.
-- **P2 viable:** confirm the edge product; send the matching reference config;
+- **Edge viable:** confirm the edge/WAF/worker product; send the matching reference config;
   agree route rules and the origin lockdown mechanism.
-- **P3 viable:** agree the routed hostnames/paths, network policy and HA
+- **Proxy viable:** agree the routed hostnames/paths, network policy and HA
   expectations; note that Bruiser is in the data path here.
-- **Platform hook:** obtain documentation; assess whether it fits P2 or needs an
-  adapter variant; record as a requirement for the Core roadmap.
-- **None viable:** record requirements and blockers; ask what would need to change
-  (usually a platform feature or a contract renewal); stay in touch.
+- **Platform hook:** obtain documentation; assess whether it fits Edge or needs an
+  adapter-specific variant; record as a requirement for the Core roadmap.
+- **None viable / Authority Check cannot PASS:** record requirements and blockers; ask
+  what would need to change (usually a platform feature or a contract renewal);
+  stay in touch. Not a V1 customer.

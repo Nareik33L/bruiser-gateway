@@ -5,7 +5,9 @@ than dates. Each milestone is sized by what changes and how invasive it is, so
 progress can be judged by what is demonstrably true, not by elapsed time.
 
 Assumed team: one or two engineers plus the founder on the commercial track. Every
-milestone ends with something runnable and a tagged release.
+milestone ends with something runnable and a tagged release. **Stage A commercial
+discovery starts immediately**, before significant engineering investment; it is a
+core product activity, not a post-MVP sales exercise.
 
 Effort key — **S**: a few focused sessions, one subsystem. **M**: several
 subsystems, meaningful test surface. **L**: cross-cutting, needs its own test
@@ -19,7 +21,7 @@ harness or external dependency.
 M0 Foundations
  └─ M1 The primitive (single node)
      └─ M2 Distributed correctness  ◄── the gate that proves the thesis
-         ├─ M3 Merchant integration & authority (P1/P2/P3, transparent enforcement, authority check, SimTix)
+         ├─ M3 Merchant integration & authority (Embedded / Edge / Proxy, transparent enforcement, Authority Check, SimTix)
          ├─ M4 Policy engine
          └─ M5 Handoff & revoke
              └─ M6 Demo
@@ -30,8 +32,9 @@ M0 Foundations
 
 M3, M4 and M5 are independent of each other once M2 lands and can run in parallel
 if there are two engineers. M3 is the largest of the three and should start first;
-its P2/P3 sub-tracks are the ones most likely to be reshaped by design-partner
-discovery.
+its Edge/Proxy sub-tracks are the ones most likely to be reshaped by design-partner
+discovery. Stage A commercial discovery starts immediately, in parallel with M0,
+and is a core product activity — not a post-MVP sales exercise.
 
 ---
 
@@ -128,48 +131,60 @@ Risk
 ## M3 — Merchant integration and authority (L)
 
 **Goal:** a merchant can make Bruiser authoritative at their admission point via
-any of the three enforcement patterns, enforcement works for clients that have never
-heard of Bruiser, and we can prove no bypass path is open.
+any of the three deployment methods (Embedded, Edge, Proxy), enforcement works for
+clients that have never heard of Bruiser, the Authority Check proves it, and EAF
+is measurable.
 
 This milestone grew from M to L after the founder decisions on authority (Q13) and
 platform-agnostic integration (Q2). It is the milestone most shaped by design-partner
 conversations; the integration-discovery questionnaire
-([06-integration-discovery.md](06-integration-discovery.md)) feeds it.
+([06-integration-discovery.md](06-integration-discovery.md)) feeds it. Stage A
+discovery should already be underway before this milestone starts.
 
 Scope
 
-- **P1 — in-app middleware.** Token verification rules and `POST /v1/introspect`.
-  `sdk/go` (`net/http`), `sdk/node` (Express/Fastify), `sdk/python` (ASGI). Each:
-  JWKS fetch/cache, offline verification, fence tracking hook, optional
-  introspection, optional per-execution local limits, one-line install.
-- **P2 — edge/API-gateway.** Route rules (path/method → resource/action);
+- **Embedded — in-application middleware.** Token verification rules and
+  `POST /v1/introspect`. `sdk/go` (`net/http`), `sdk/node` (Express/Fastify),
+  `sdk/python` (ASGI). Each: JWKS fetch/cache, offline verification, fence tracking
+  hook, optional introspection, optional per-execution local limits, one-line install.
+- **Edge — API gateway / WAF / Worker.** Route rules (path/method → resource/action);
   `POST /v1/authorize`; reference configs for NGINX `auth_request`, Envoy
   `ext_authz`, Kong plugin, Cloudflare Worker, AWS API Gateway authorizer; edge→origin
   secret/mTLS guidance.
-- **P3 — reverse proxy.** `internal/proxy` transparent HTTP proxy applying route
+- **Proxy — reverse proxy.** `internal/proxy` transparent HTTP proxy applying route
   rules; `internal/adapter` interface, `adapter/memory`, `adapter/simtix`; proxy
   endpoints with fence attached.
-- **Transparent enforcement.** Customer extractors (JWT, cookie-JWT, introspection,
-  edge-signed header); implicit sessions; transparent acquire on first allocation
-  request; per-execution in-flight and rate limits.
-- **Authority check.** `bruiser authority-check`: route enumeration, no-token /
-  expired / tampered / stale-fence probes, common-bypass probes, PASS/FAIL report,
-  `AUTHORITY_CHECK` audit event.
+- **Transparent enforcement.** Two client classes: Bruiser-aware (explicit APIs)
+  and Bruiser-unaware (merchant session, automatic acquire, same rules). Customer
+  extractors (JWT, cookie-JWT, introspection, edge-signed header); implicit sessions;
+  per-execution in-flight and rate limits.
+- **Bruiser Authority Check.** `bruiser authority-check`: route enumeration,
+  no-token / expired / tampered / stale-fence probes, common-bypass probes, the
+  PASS/FAIL report in the product-feature format (browser / mobile / agent routes,
+  expired, tampered, direct bypass), `AUTHORITY_CHECK` audit event. A deployment
+  that cannot achieve PASS is not production-ready.
+- **EAF instrumentation.** Counters for incoming allocation attempts and authorised
+  executions forwarded; `observed_eaf` and `downstream_eaf` gauges.
 - **SimTix** (`cmd/simtix`): events, seats, price bands, holds with TTL, purchase,
   cancel, non-atomic per-account limit (toggle), club-style login issuing a session
-  JWT, `--enforcement p1|p2|p3`, `--origin-lockdown`, request log, metrics, reset.
-- Integration guide per pattern: "Make Bruiser authoritative in 30 minutes", with the
-  authority check as the final step. Onboarding checklist for design partners.
+  JWT, `--enforcement embedded|edge|proxy`, `--origin-lockdown`, request log,
+  metrics, reset.
+- Integration guide per deployment method: "Make Bruiser authoritative in 30
+  minutes", with the Authority Check as the final step. Onboarding checklist for
+  design partners.
 
 Exit criteria
 
-- SimTix under P1 rejects a hold with an expired, tampered or stale-fence token and
-  accepts a valid one; the same scenario under P2 (NGINX) and P3 (proxy) has the
-  identical downstream effect. All three in CI.
+- SimTix under Embedded rejects a hold with an expired, tampered or stale-fence
+  token and accepts a valid one; the same scenario under Edge (NGINX) and Proxy
+  has the identical downstream effect. All three in CI.
 - An `unaware` swarm profile (merchant session only, no Bruiser protocol) is
-  controlled under P2 and P3: one execution per customer, second agent BUSY.
-- Authority check against SimTix with `--origin-lockdown` reports PASS on every
-  route; with lockdown off it reports FAIL and names the open path. Both in CI.
+  controlled under Edge and Proxy: one execution per customer, second agent BUSY.
+- Authority Check against SimTix with `--origin-lockdown` reports Overall Result
+  PASS (including "Direct allocation bypass blocked"); with lockdown off it
+  reports FAIL and names the open path. Both in CI.
+- 1 customer × 10,000 unaware/aware agents against SimTix reports observed EAF
+  ≈ 10,000× and downstream EAF = 1×.
 - A Node and a Python sample app verify tokens using the SDKs, in CI.
 
 ---
@@ -232,11 +247,14 @@ Scope
 
 - `cmd/swarm` with behaviour profiles and `--bypass`; results JSON.
 - Dashboard (served by gateway or a small separate binary): live counters via SSE;
-  side-by-side "Without Bruiser / With Bruiser" panels; seats-per-customer
-  histogram; downstream request counter; SimTix p99.
+  side-by-side "Without Bruiser / With Bruiser" panels; **EAF as the headline
+  number** (observed vs downstream); seats-per-customer histogram; downstream
+  request counter; SimTix p99; live Authority Check result in the product-feature
+  format.
 - `docker compose --profile demo up` one-liner; `make demo-1x10000`,
   `make demo-1000x10`, `make demo-handoff`, `make demo-bypass`, `make demo-unaware`.
-- A 90-second scripted walkthrough (`docs/demo.md`) and a recorded video.
+- A 90-second scripted walkthrough (`docs/demo.md`) and a recorded video. Script
+  leads with EAF moving from 10,000× to 1× downstream, then Authority Check PASS.
 - Numbers asserted by an automated demo test so the demo cannot silently regress.
 - First cut of the **hosted demo**: the Compose demo deployed read-only at
   `sandbox.bruiser-gateway.com` with the live dashboard and a "run scenario" button
@@ -244,13 +262,16 @@ Scope
 
 Exit criteria
 
-- On a laptop: 1 × 10,000 completes with 1 GRANTED, 9,999 BUSY, SimTix sees one
-  execution; without Bruiser SimTix receives 10,000 holds with visible churn.
+- On a laptop: 1 × 10,000 completes with 1 GRANTED, 9,999 BUSY, observed EAF ≈
+  10,000×, downstream EAF = 1×, SimTix sees one execution; without Bruiser SimTix
+  receives 10,000 holds with visible churn.
 - 1,000 × 10 completes with each customer holding ≤ 1 seat and downstream
   requests ≈ number of customers.
 - Bypass scenario: with lockdown off an agent going straight to SimTix succeeds and
-  the authority check reports FAIL; with lockdown on the request is refused and the
-  check reports PASS. Unaware scenario: protocol-ignorant agents are controlled.
+  the Authority Check reports Overall Result FAIL naming the open path; with
+  lockdown on the request is refused and the check reports PASS including
+  "Direct allocation bypass blocked". Unaware scenario: protocol-ignorant agents
+  are controlled under the same EAF.
 - Someone outside the team can run the demo from the README without help, and a
   prospect can watch it run at the hosted URL.
 
@@ -262,23 +283,26 @@ Exit criteria
 
 Scope
 
-- Admin UI (templates + htmx + SSE): status, active/waiting executions, per-customer
-  view with `[Revoke]` / `[Take control]`, policy view/validate, audit search with
-  "why?" view for a request.
+- Admin UI (templates + htmx + SSE): **EAF as the headline KPI** (observed and
+  downstream, per merchant / event / customer, selectable window); status,
+  active/waiting executions, per-customer view with `[Revoke]` / `[Take control]`,
+  policy view/validate, audit search with "why?" view for a request.
 - Admin auth: API keys with RBAC; separate listener.
 - Prometheus metrics per technical design §13; OpenTelemetry traces; example
-  Grafana dashboard; alert rules (store unavailable, grant latency, expiry spike).
+  Grafana dashboard led by EAF; alert rules (store unavailable, grant latency,
+  expiry spike, downstream EAF departing 1×).
 - Audit export: JSONL file, webhook, OTel log exporter. Audit retention
   (default 13 months) with purge/archive job and `AUDIT_PURGED` events.
 - Usage figures panel (peak concurrent executions, executions/month, resources
-  protected) — informational only, for fair-use transparency.
-- Authority-check results and last-run status surfaced in the UI.
+  protected, peak EAF) — informational only, for fair-use transparency.
+- Authority Check last-run result in the product-feature format, with `[Run check]`.
 
 Exit criteria
 
-- From the UI alone: find Alice, see her active execution, revoke it, and read the
-  audit trail explaining a prior BUSY response with rule name and reason.
-- Grafana dashboard renders all headline metrics during the demo.
+- From the UI alone: see merchant EAF; find Alice, see her per-customer EAF and
+  active execution, revoke it, and read the audit trail explaining a prior BUSY
+  response with rule name and reason; run the Authority Check and read PASS.
+- Grafana dashboard renders all headline metrics during the demo, EAF first.
 - Retention job purges (or archives) events older than the configured window in a
   test with a shortened window; the purge is itself audited.
 
@@ -364,41 +388,56 @@ Exit criteria
 | API contract | OpenAPI-driven tests; SDK sample apps | every PR |
 | Torture (short) | 3 in-process nodes, fixed seeds, all faults | every PR |
 | Torture (long) | 5 containers, random seeds, ≥ 10⁶ ops | nightly |
-| Enforcement parity | same scenarios under P1, P2 (NGINX) and P3 with identical downstream effect | every PR |
-| Authority | `authority-check` against SimTix with lockdown on (PASS) and off (FAIL) | every PR |
+| Enforcement parity | same scenarios under Embedded, Edge (NGINX) and Proxy with identical downstream effect | every PR |
+| Authority | `authority-check` against SimTix with lockdown on (Overall PASS) and off (FAIL, named path) | every PR |
 | Demo assertion | Compose profile; headline numbers checked | nightly and before release |
 | Load | k6 scenarios; published p50/p99 | before release |
 | Security | `govulncheck`, container scanning, dependency review | every PR |
 
 ---
 
-## Commercial track (starts now, in parallel with M0–M8)
+## Commercial track (starts immediately, in parallel with M0–M8)
 
-There are no confirmed design partners. Acquiring them is an immediate priority,
-not something that waits for code: the conversations validate integration
-requirements that shape M3, and M3 is on the critical path. The track is
-sequenced by which engineering artefact each stage needs.
+Stage A commercial discovery starts **before significant engineering investment**.
+It is a core product activity, not a post-MVP sales exercise: the conversations
+validate integration requirements that shape M3, and M3 is on the critical path.
+There are no confirmed design partners. The track is sequenced by which
+engineering artefact each stage needs.
 
-**Stage A — needs only these documents (during M0–M2)**
+**Stage A — starts immediately; needs only these documents**
+
+Objectives, against a list of 20–30 football clubs:
+
+- identify the ticketing platform
+- determine the viable deployment method (Embedded / Edge / Proxy)
+- confirm the identity source
+- confirm that authority can be achieved
+- qualify or disqualify the opportunity
+- secure 2–3 design partners
 
 1. **Target list.** 20–30 clubs across the Premier League, Championship and League
    One. For each, from public information: ticketing platform, whether checkout is
    club-run or platform-run, presence of a CDN/WAF/API gateway, membership scheme,
-   supporter-ID scheme, recent bot/fairness incidents, ticketing-office and
+   supporter-ID scheme, recent fairness incidents, ticketing-office and
    IT/digital contacts.
 2. **Outreach.** Two entry points per club: ticketing/supporter-services (pain
    owner) and head of digital/IT (integration owner). Message is the proposition,
-   not the technology: "one supporter remains one supporter, however many agents
-   they deploy; you keep the infrastructure".
+   never the deployment method or the coordination technology:
+
+   > The authoritative control layer for autonomous commerce that ensures one
+   > customer remains one customer, regardless of how many agents they deploy.
+
 3. **Discovery calls** run against
    [06-integration-discovery.md](06-integration-discovery.md). Output per club:
-   admission-point map, viable enforcement pattern (P1/P2/P3/none), identity
-   anchors available, decision-maker, blockers. Clubs with no viable pattern are
-   deferred with their requirements recorded — not force-fitted.
-4. **Design-partner offer.** Target 3 signed partners. Terms: pilot on the club's
-   staging environment, free during pilot, joint authority-check sign-off, in
-   exchange for requirements access, a reference and first option on Core pricing.
-   Prefer a spread of enforcement patterns across the three so V1 proves all of them.
+   admission-point map, viable deployment method (Embedded / Edge / Proxy / none),
+   identity source, whether Authority Check PASS is achievable, decision-maker,
+   blockers. Clubs with no viable method are deferred with their requirements
+   recorded — not force-fitted.
+4. **Design-partner offer.** Target 2–3 signed partners. Terms: pilot on the club's
+   staging environment, free during pilot, joint Authority Check sign-off as the
+   go-live gate, in exchange for requirements access, a reference and first option
+   on Core pricing. Prefer a spread of deployment methods across the partners so
+   V1 proves all of them.
 5. **Legal and brand.** Instruct counsel on BSL 1.1 parameters and the OSS/Core
    boundary; trademark search and filing for "Bruiser Gateway" (must clear before
    public launch or significant marketing spend); draft Core licence and SLA
@@ -407,8 +446,8 @@ sequenced by which engineering artefact each stage needs.
 **Stage B — needs the M2 proof (torture results) and design (M2–M5)**
 
 6. **Technical validation with partner engineers.** Walk their engineers through the
-   design, the invariant, the enforcement pattern chosen for them and the authority
-   check. Their objections become M3 scope; their environment becomes an
+   design, the invariant, the deployment method chosen for them, EAF and the
+   Authority Check. Their objections become M3 scope; their environment becomes an
    enforcement-parity test case.
 7. **Pricing validation.** Five conversations with ticketing-office and IT leads
    validating £20k / £100k+, the fair-use envelope dimensions, and what "supported"
@@ -418,21 +457,21 @@ sequenced by which engineering artefact each stage needs.
 
 **Stage C — needs the demo (M6 onwards)**
 
-9. **Demo assets.** Hosted demo at `sandbox.bruiser-gateway.com`; 90-second video;
-   live demo in every prospect meeting.
+9. **Demo assets.** Hosted demo at `sandbox.bruiser-gateway.com`; 90-second video
+   led by EAF and Authority Check PASS; live demo in every prospect meeting.
 10. **Positioning content.** Launch post; protocol draft published for comment on the
     public protocol repository; a fairness/dispute-resolution note for
-    supporter-liaison and ticketing-office staff. Positioning discipline: control
-    layer for autonomous commerce — never "bot detection", "DDoS", "ticketing
-    platform" or "distributed lock".
+    supporter-liaison and ticketing-office staff. Messaging rule (ADR-020) is
+    binding: never Redis lock, bot detection, DDoS, ticketing platform,
+    middleware, proxy or API gateway; always the authoritative control layer.
 11. **Pilot go-lives.** Staging pilots with each partner using the onboarding
-    checklist; authority check PASS is the go/no-go; convert to Core at V1.
+    checklist; Authority Check PASS is the go/no-go; convert to Core at V1.
 
 **Stage D — from V1**
 
-12. Reference customers, case studies with agreed metrics (downstream request
-    reduction, duplicate allocations prevented, disputes resolved from audit), and
-    the first Enterprise conversations.
+12. Reference customers, case studies with agreed metrics (EAF, duplicate
+    allocations prevented, disputes resolved from audit), and the first
+    Enterprise conversations.
 
 ---
 
@@ -441,18 +480,18 @@ sequenced by which engineering artefact each stage needs.
 | ID | Risk | Effect | Mitigation |
 |----|------|--------|------------|
 | R1 | Multi-accounting undermines the per-customer guarantee | thesis looks weak in diligence | State the boundary honestly; identity anchors (household, membership, payment); partner with clubs' membership systems |
-| R2 | Merchant integration effort blocks adoption | no production deployments | Three enforcement patterns; SDKs in three languages; reference edge configs; "30-minute" guide per pattern; SimTix as reference; design-partner discovery shapes M3 |
-| R3 | Gateway seen as SPOF for purchases | vendor/CTO rejection | P1 preferred where possible (out of data path); fail-closed semantics documented; HA Helm chart; P3 defaults assume in-path HA |
-| R4 | Agents or clients bypass the gateway | control is cosmetic | Authority is a requirement (ADR-002); authority check is a product feature and go-live gate; transparent enforcement covers unaware clients; origin lockdown guidance |
-| R5 | Commoditisation ("just a lock") | pricing pressure | Positioning discipline (never a lock product); protocol, SDKs, enforcement patterns, authority check, handoff, audit, policy, ops maturity; sell the maintained standard |
-| R6 | Ticketing platforms, not clubs, own checkout | P1 unavailable at many clubs | Platform-agnostic by design; P2 where the club controls the edge, P3 where it controls routing; qualify clubs by viable pattern; defer the rest with requirements recorded; no dependency on platform partnerships |
+| R2 | Merchant integration effort blocks adoption | no production deployments | Three deployment methods (Embedded / Edge / Proxy); SDKs in three languages; reference edge configs; "30-minute" guide per method; SimTix as reference; Stage A discovery shapes M3 |
+| R3 | Gateway seen as SPOF for purchases | vendor/CTO rejection | Embedded preferred where possible (out of data path); fail-closed semantics documented; HA Helm chart; Proxy defaults assume in-path HA |
+| R4 | Agents or clients bypass the gateway | control is cosmetic | Authority is the requirement (ADR-002); Authority Check is a named product feature and go-live gate; transparent enforcement covers unaware clients; origin lockdown guidance |
+| R5 | Commoditisation ("just a lock") | pricing pressure | Messaging rule (ADR-020); protocol, SDKs, deployment methods, Authority Check, EAF, handoff, audit, policy, ops maturity; sell the maintained standard |
+| R6 | Ticketing platforms, not clubs, own checkout | Embedded unavailable at many clubs | Platform-agnostic by design; Edge where the club controls the edge/WAF/worker, Proxy where it controls routing; qualify clubs by viable method; defer the rest with requirements recorded; no dependency on platform partnerships |
 | R7 | Store design fails torture testing | schedule risk at M2 | Store interface isolates change; alternative coordination backends possible without API change |
 | R8 | Over-engineering V1 | delay, dilution | Hard "not in V1" list; milestone exit criteria; M2 gate before demo work |
 | R9 | Accessibility/regulatory (agents acting for supporters who need them) | reputational | Handoff preserves customer control; agents are first-class, never blocked as a class |
 | R10 | Licence execution stalls (legal review, boundary decision) | public launch delayed | Layout supports the split from M0; Apache-2.0 protocol repository can publish independently of the gateway decision; tag V1 privately if needed |
 | R11 | Transparent enforcement misidentifies customers (extractor misconfiguration) | wrong customer denied or two customers merged | Extractor validation tooling; staging pilot with real sessions; authority/extractor checks in onboarding; audit shows extracted identity per decision |
 | R12 | Authority check gives false confidence about unknown paths | bypass in production | Report states coverage explicitly; questionnaire forces path enumeration; periodic re-runs; partner engineers sign off the route list |
-| R13 | No design partner signs | V1 built without validation | Stage A outreach starts now; 20–30 club list; qualify by viable pattern; broaden to non-football scarce-inventory merchants with the same pattern if football stalls |
+| R13 | No design partner signs | V1 built without validation | Stage A starts immediately, before significant engineering investment; 20–30 club list; qualify by viable deployment method; broaden to non-football scarce-inventory merchants with the same method if football stalls |
 
 ---
 
@@ -462,14 +501,15 @@ sequenced by which engineering artefact each stage needs.
   types, repeatedly.
 - The 1 × 10,000, 1,000 × 10, handoff, bypass and unaware-agent demos run from one
   command and their numbers are asserted in CI.
-- A merchant can make Bruiser authoritative via P1 (Go, Node or Python middleware),
-  P2 (edge `/v1/authorize` with reference configs) or P3 (reverse proxy), with
-  identical downstream effect, and the authority check passes against their
-  environment.
+- A merchant can make Bruiser authoritative via Embedded (Go, Node or Python
+  middleware), Edge (`/v1/authorize` with reference configs) or Proxy, with
+  identical downstream effect, and the Authority Check reports Overall Result PASS
+  against their environment. A club that cannot achieve PASS is not production-ready.
 - Clients that do not speak the protocol are controlled via transparent enforcement.
+- Observed EAF and downstream EAF are the headline KPI in the admin UI and demo.
 - Policy is expressed in YAML, hot-reloaded, versioned and audited.
-- Admin UI supports revoke, take-control, "why was this denied?", usage figures and
-  authority-check status.
+- Admin UI supports revoke, take-control, "why was this denied?", EAF, usage
+  figures and Authority Check status.
 - Metrics, traces, logs, audit export and audit retention exist and are documented.
 - Helm install on a fresh cluster passes the demo; hosted sandbox is live.
 - Threat model written; independent security review completed; no open high/critical.
