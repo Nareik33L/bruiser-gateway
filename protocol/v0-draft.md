@@ -19,7 +19,7 @@ The Go gateway is one implementation of this protocol.
 | GET | `GET /v1/executions/{id}` | yes |
 | REVOKE | `POST /v1/executions/{id}/revoke` | yes |
 | HANDOFF | `POST /v1/executions/{id}/handoff` | yes |
-| AUTHORIZE | `POST /v1/authorize` | yes (Edge) |
+| AUTHORIZE | `POST /v1/authorize` | yes (Edge; unmatched routes pass through) |
 | INTROSPECT | `POST /v1/introspect` | yes |
 | POLICY | `GET/PUT /v1/policy` | yes (NOTIFY + poll reload) |
 | ADMIN | `GET /admin`, `/v1/admin/*` | yes |

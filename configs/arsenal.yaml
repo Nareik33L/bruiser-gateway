@@ -2,6 +2,7 @@ merchant_id: arsenal
 name: Arsenal FC
 profile: arsenal-like-premier-league
 assumptions: unverified-best-guess
+unmatched: allow
 
 identity:
   extractor: cookie-jwt

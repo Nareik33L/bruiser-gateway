@@ -124,6 +124,10 @@ func ParseSession(token string, pub ed25519.PublicKey) (SessionClaims, error) {
 }
 
 func ParseAssertionHS256(token, secret, audience string) (CustomerAssertion, error) {
+	return ParseAssertionHS256Claim(token, secret, "sub")
+}
+
+func ParseAssertionHS256Claim(token, secret, subjectClaim string) (CustomerAssertion, error) {
 	var claims jwt.MapClaims
 	parsed, err := jwt.ParseWithClaims(token, &claims, func(t *jwt.Token) (any, error) {
 		if t.Method.Alg() != jwt.SigningMethodHS256.Alg() {
@@ -134,7 +138,15 @@ func ParseAssertionHS256(token, secret, audience string) (CustomerAssertion, err
 	if err != nil || !parsed.Valid {
 		return CustomerAssertion{}, ErrUnauthorized
 	}
-	sub, _ := claims.GetSubject()
+	if subjectClaim == "" {
+		subjectClaim = "sub"
+	}
+	sub, _ := claims[subjectClaim].(string)
+	if sub == "" {
+		if subjectClaim == "sub" {
+			sub, _ = claims.GetSubject()
+		}
+	}
 	if sub == "" {
 		return CustomerAssertion{}, ErrUnauthorized
 	}

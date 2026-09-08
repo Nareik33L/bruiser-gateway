@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Nareik33L/bruiser-gateway/internal/auth"
 	"github.com/Nareik33L/bruiser-gateway/internal/id"
+	"github.com/Nareik33L/bruiser-gateway/internal/identity"
 	"github.com/Nareik33L/bruiser-gateway/internal/lease"
 	"github.com/Nareik33L/bruiser-gateway/internal/merchant"
 	pgstore "github.com/Nareik33L/bruiser-gateway/internal/store/postgres"
@@ -62,7 +62,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	if method == "" {
 		method = r.Method
 	}
-	res := s.admit(r.Context(), method, path, eventID, cookieValue(r, s.profile.Identity.Cookie), bearer(r), requestID(r))
+	res := s.admit(r.Context(), method, path, eventID, r, requestID(r))
 	writeAdmit(w, res)
 }
 
@@ -79,10 +79,14 @@ func writeAdmit(w http.ResponseWriter, res admitResult) {
 	writeJSON(w, res.status, res.body)
 }
 
-func (s *Server) admit(ctx context.Context, method, path, eventID, cookie, bearerTok, reqID string) admitResult {
+func (s *Server) admit(ctx context.Context, method, path, eventID string, r *http.Request, reqID string) admitResult {
 	h := make(http.Header)
 	route, params, ok := s.profile.MatchRoute(method, path)
 	if !ok {
+		if s.profile.UnmatchedAllow() {
+			h.Set("X-Bruiser-Control", "none")
+			return admitResult{status: http.StatusOK, allow: true, headers: h, body: map[string]string{"status": "ALLOW", "action": "unmatched"}}
+		}
 		return admitResult{status: http.StatusForbidden, body: map[string]string{"error": "unrouted", "path": path}}
 	}
 	if !route.Controlled() {
@@ -90,18 +94,13 @@ func (s *Server) admit(ctx context.Context, method, path, eventID, cookie, beare
 		return admitResult{status: http.StatusOK, allow: true, headers: h, body: map[string]string{"status": "ALLOW", "action": route.Action}}
 	}
 
-	raw := cookie
-	if raw == "" {
-		raw = bearerTok
-	}
-	if raw == "" {
-		s.eaf.record(resourceOrPath(route, params, eventID), "", "unauthorized")
-		return admitResult{status: http.StatusUnauthorized, body: map[string]string{"error": "missing box office session"}}
-	}
-	assertion, err := auth.ParseAssertionHS256(raw, s.cfg.DevHMACSecret, "bruiser")
+	cust, err := identity.Extract(s.profile.Identity, s.cfg.DevHMACSecret,
+		cookieValue(r, s.profile.Identity.Cookie), bearer(r),
+		headerValue(r, s.profile.Identity.Header),
+		headerValue(r, s.profile.Identity.PrincipalHeader))
 	if err != nil {
 		s.eaf.record(resourceOrPath(route, params, eventID), "", "unauthorized")
-		return admitResult{status: http.StatusUnauthorized, body: map[string]string{"error": "invalid box office session"}}
+		return admitResult{status: http.StatusUnauthorized, body: map[string]string{"error": "missing merchant session"}}
 	}
 
 	resource := route.ResourceFor(params, eventID)
@@ -109,13 +108,13 @@ func (s *Server) admit(ctx context.Context, method, path, eventID, cookie, beare
 		return admitResult{status: http.StatusBadRequest, body: map[string]string{"error": "could not derive resource"}}
 	}
 
-	d := s.evaluate(s.cfg.MerchantID, assertion.CustomerID, "agent", resource, route.Action, assertion.Anchors)
+	d := s.evaluate(s.cfg.MerchantID, cust.CustomerID, "agent", resource, route.Action, cust.Anchors)
 	if d.ControlNone {
 		h.Set("X-Bruiser-Control", "none")
 		return admitResult{status: http.StatusOK, allow: true, headers: h, body: map[string]string{"status": "ALLOW", "action": route.Action, "rule_name": d.RuleName}}
 	}
 	if d.Denied {
-		s.eaf.record(resource, assertion.CustomerID, "denied")
+		s.eaf.record(resource, cust.CustomerID, "denied")
 		reason := d.Reason
 		if reason == "" {
 			reason = "denied"
@@ -123,9 +122,9 @@ func (s *Server) admit(ctx context.Context, method, path, eventID, cookie, beare
 		return admitResult{status: http.StatusForbidden, body: map[string]any{"error": "DENIED", "reason": reason, "rule_name": d.RuleName}}
 	}
 
-	principalID := assertion.JTI
+	principalID := cust.PrincipalID
 	if principalID == "" {
-		principalID = assertion.CustomerID
+		principalID = id.New("p")
 	}
 	principalID = "unaware:" + principalID
 	sessID := id.Session()
@@ -133,8 +132,8 @@ func (s *Server) admit(ctx context.Context, method, path, eventID, cookie, beare
 	if err := s.store.InsertSession(ctx, pgstore.SessionRow{
 		ID:            sessID,
 		MerchantID:    s.cfg.MerchantID,
-		CustomerID:    assertion.CustomerID,
-		Anchors:       assertion.Anchors,
+		CustomerID:    cust.CustomerID,
+		Anchors:       cust.Anchors,
 		PrincipalType: "agent",
 		PrincipalID:   principalID,
 		ExpiresAt:     exp,
@@ -146,7 +145,7 @@ func (s *Server) admit(ctx context.Context, method, path, eventID, cookie, beare
 	acq, err := s.leases.Acquire(ctx, lease.AcquireRequest{
 		MerchantID:  s.cfg.MerchantID,
 		DomainKey:   d.DomainKey,
-		CustomerID:  assertion.CustomerID,
+		CustomerID:  cust.CustomerID,
 		Principal:   lease.Principal{Type: "agent", ID: principalID},
 		SessionID:   sessID,
 		Resource:    resource,
@@ -165,14 +164,14 @@ func (s *Server) admit(ctx context.Context, method, path, eventID, cookie, beare
 
 	switch acq.Status {
 	case lease.StatusGranted, lease.StatusAlreadyHeld:
-		s.eaf.record(resource, assertion.CustomerID, "allow")
+		s.eaf.record(resource, cust.CustomerID, "allow")
 		tok, err := s.signer.SignExecution(*acq.Execution)
 		if err != nil {
 			return admitResult{status: http.StatusInternalServerError, body: map[string]string{"error": "sign"}}
 		}
 		h.Set("X-Bruiser-Execution", tok)
 		h.Set("X-Bruiser-Fence", strconv.FormatInt(acq.Execution.Fence, 10))
-		h.Set("X-Bruiser-Customer", assertion.CustomerID)
+		h.Set("X-Bruiser-Customer", cust.CustomerID)
 		if s.cfg.OriginSecret != "" {
 			h.Set("X-Bruiser-Origin-Secret", s.cfg.OriginSecret)
 		}
@@ -185,13 +184,13 @@ func (s *Server) admit(ctx context.Context, method, path, eventID, cookie, beare
 				"status":             "ALLOW",
 				"execution_id":       acq.Execution.ID,
 				"fence":              acq.Execution.Fence,
-				"customer_id":        assertion.CustomerID,
+				"customer_id":        cust.CustomerID,
 				"expires_at":         acq.Execution.ExpiresAt.UTC().Format(time.RFC3339Nano),
 				"heartbeat_after_ms": s.cfg.HeartbeatInterval.Milliseconds(),
 			},
 		}
 	case lease.StatusBusy:
-		s.eaf.record(resource, assertion.CustomerID, "busy")
+		s.eaf.record(resource, cust.CustomerID, "busy")
 		retry := time.Until(acq.Busy.ExpiresAt).Milliseconds()
 		if retry < 0 {
 			retry = 1000
@@ -209,7 +208,7 @@ func (s *Server) admit(ctx context.Context, method, path, eventID, cookie, beare
 			},
 		}
 	default:
-		s.eaf.record(resource, assertion.CustomerID, "denied")
+		s.eaf.record(resource, cust.CustomerID, "denied")
 		return admitResult{status: http.StatusForbidden, body: map[string]string{"error": acq.Reason}}
 	}
 }
@@ -263,7 +262,7 @@ func (s *statusRecorder) WriteHeader(status int) {
 }
 
 func cookieValue(r *http.Request, name string) string {
-	if name == "" {
+	if r == nil || name == "" {
 		return ""
 	}
 	c, err := r.Cookie(name)
@@ -271,6 +270,13 @@ func cookieValue(r *http.Request, name string) string {
 		return ""
 	}
 	return c.Value
+}
+
+func headerValue(r *http.Request, name string) string {
+	if r == nil || name == "" {
+		return ""
+	}
+	return r.Header.Get(name)
 }
 
 func resourceOrPath(route merchant.Route, params map[string]string, eventID string) string {
