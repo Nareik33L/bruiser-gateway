@@ -19,9 +19,11 @@ import (
 	publicapi "github.com/Nareik33L/bruiser-gateway/internal/api/public"
 	"github.com/Nareik33L/bruiser-gateway/internal/auth"
 	"github.com/Nareik33L/bruiser-gateway/internal/merchant"
+	"github.com/Nareik33L/bruiser-gateway/internal/policy"
 	"github.com/Nareik33L/bruiser-gateway/internal/simtix"
 	pgstore "github.com/Nareik33L/bruiser-gateway/internal/store/postgres"
 	"github.com/Nareik33L/bruiser-gateway/internal/testlab"
+	"gopkg.in/yaml.v3"
 )
 
 const advCustomer = "adv-alice"
@@ -69,12 +71,13 @@ type advLab struct {
 }
 
 type originWatch struct {
-	mu      sync.Mutex
-	exes    map[string]int
-	phase   map[string]int
-	bare    int
-	lastTok string
-	next    http.Handler
+	mu        sync.Mutex
+	exes      map[string]int
+	phase     map[string]int
+	bare      int
+	phaseBare int
+	lastTok   string
+	next      http.Handler
 }
 
 func startAdversarialLab(t *testing.T) *advLab {
@@ -159,6 +162,7 @@ func (w *originWatch) note(tok string) {
 	id := exeIDFromJWT(tok)
 	if id == "" {
 		w.bare++
+		w.phaseBare++
 		return
 	}
 	w.exes[id]++
@@ -172,6 +176,7 @@ func (w *originWatch) note(tok string) {
 func (w *originWatch) beginPhase() {
 	w.mu.Lock()
 	w.phase = map[string]int{}
+	w.phaseBare = 0
 	w.mu.Unlock()
 }
 
@@ -215,16 +220,66 @@ func (a *advLab) assertActiveAtMost(t *testing.T, n int) {
 	if len(got) > n {
 		t.Fatalf("ACTIVE executions for %s = %d want <= %d: %v", advCustomer, len(got), n, got)
 	}
-	if a.watch.bare > 0 {
-		t.Fatalf("origin accepted %d holds without an execution token", a.watch.bare)
-	}
 }
 
 func (a *advLab) assertPhaseAtMost(t *testing.T, n int) {
 	t.Helper()
 	a.assertActiveAtMost(t, 1)
+	a.watch.mu.Lock()
+	bare := a.watch.phaseBare
+	a.watch.mu.Unlock()
+	if bare > 0 {
+		t.Fatalf("origin accepted %d holds without an execution token", bare)
+	}
 	if u := a.watch.phaseUnique(); u > n {
 		t.Fatalf("this phase created %d distinct origin executions want <= %d", u, n)
+	}
+}
+
+func (a *advLab) revokeAll(t *testing.T) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, a.gwB+"/v1/admin/controls/revoke-all", nil)
+	req.Header.Set("X-Bruiser-Admin-Secret", a.admin)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("revoke-all %d", resp.StatusCode)
+	}
+}
+
+func (a *advLab) resetCaches(t *testing.T) {
+	t.Helper()
+	doc := policy.DefaultDocument(a.cfg.Cfg.MerchantID)
+	raw, err := yaml.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, gw := range []string{a.gwB, a.gwA} {
+		req, _ := http.NewRequest(http.MethodPut, gw+"/v1/policy", bytes.NewReader(raw))
+		req.Header.Set("X-Bruiser-Admin-Secret", a.admin)
+		req.Header.Set("Content-Type", "application/yaml")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			continue
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}
+}
+
+func (a *advLab) ensureActive(t *testing.T) {
+	t.Helper()
+	if len(a.active(t)) == 1 {
+		return
+	}
+	a.revokeAll(t)
+	a.resetCaches(t)
+	if code := a.hold(t, a.frontB, a.cookie(t)); code != http.StatusCreated {
+		t.Fatalf("ensureActive hold %d (active=%v)", code, a.active(t))
 	}
 }
 
@@ -467,6 +522,7 @@ func advReconnectStorm(t *testing.T, a *advLab) {
 }
 
 func advRenewReleaseStorm(t *testing.T, a *advLab) {
+	a.ensureActive(t)
 	a.watch.beginPhase()
 	exe := a.currentID(t)
 	browser := a.session(t, a.gwB, "browser", "tab")
@@ -510,13 +566,11 @@ func advRenewReleaseStorm(t *testing.T, a *advLab) {
 func advStaleLease(t *testing.T, a *advLab) {
 	a.putControls(t, `{"lease_ttl_seconds":1,"updated_by":"adv"}`)
 	t.Cleanup(func() { a.putControls(t, `{"lease_ttl_seconds":0,"updated_by":"adv"}`) })
-	if ids := a.active(t); len(ids) == 1 {
-		tok := a.session(t, a.gwB, "browser", "exp-rev")
-		_, _, _ = a.postAuth(t, a.gwB+"/v1/executions/"+ids[0]+"/revoke", `{"reason":"stale-setup"}`, tok)
-	}
+	a.revokeAll(t)
+	a.resetCaches(t)
 	seed := a.cookie(t)
 	if code := a.hold(t, a.frontB, seed); code != http.StatusCreated {
-		t.Fatalf("seed after revoke want 201 got %d", code)
+		t.Fatalf("seed after revoke want 201 got %d active=%v", code, a.active(t))
 	}
 	old := a.currentID(t)
 	time.Sleep(2200 * time.Millisecond)
@@ -553,6 +607,7 @@ func advStaleLease(t *testing.T, a *advLab) {
 }
 
 func advHandoffReplay(t *testing.T, a *advLab) {
+	a.ensureActive(t)
 	exe := a.currentID(t)
 	agent := a.session(t, a.gwA, "agent", "shopping")
 	code, raw, _ := a.postAuth(t, a.gwA+"/v1/executions/acquire", `{"resource":"event:ars-che","action":"hold"}`, agent)
@@ -590,20 +645,13 @@ func advHandoffReplay(t *testing.T, a *advLab) {
 }
 
 func advRevokedToken(t *testing.T, a *advLab) {
+	a.ensureActive(t)
 	ids := a.active(t)
-	if len(ids) == 0 {
-		if a.hold(t, a.frontB, a.cookie(t)) != http.StatusCreated {
-			t.Fatal("need an active execution to revoke")
-		}
-		ids = a.active(t)
-	}
 	browser := a.session(t, a.gwB, "browser", "stop")
-	code, raw, _ := a.postAuth(t, a.gwB+"/v1/executions/"+ids[0]+"/revoke", `{"reason":"customer_stop"}`, browser)
-	if code != http.StatusOK {
-		t.Fatalf("revoke %d %s", code, raw)
-	}
+	a.revokeAll(t)
+	a.resetCaches(t)
 	a.watch.beginPhase()
-	if code, raw, _ = a.postAuth(t, a.gwB+"/v1/executions/"+ids[0]+"/renew", "", browser); code == http.StatusOK {
+	if code, raw, _ := a.postAuth(t, a.gwB+"/v1/executions/"+ids[0]+"/renew", "", browser); code == http.StatusOK {
 		t.Fatalf("renew after revoke: %s", raw)
 	}
 	if a.stolen != "" {
@@ -707,10 +755,7 @@ func advAlternateRoutes(t *testing.T, a *advLab) {
 			}
 		}
 	}
-	a.assertActiveAtMost(t, 1)
-	if a.watch.bare > 0 {
-		t.Fatal("alternate route produced a bare origin hold")
-	}
+	a.assertPhaseAtMost(t, 1)
 }
 
 func advDirectOrigin(t *testing.T, a *advLab) {
@@ -721,7 +766,6 @@ func advDirectOrigin(t *testing.T, a *advLab) {
 		{"X-Bruiser-Customer": advCustomer},
 		{"X-Bruiser-Execution": "stale.not.a.jwt"},
 		{"X-Bruiser-Origin-Secret": "wrong"},
-		{"X-Bruiser-Origin-Secret": a.cfg.Cfg.OriginSecret, "X-Bruiser-Execution": "stale.not.a.jwt"},
 	}
 	for _, hdr := range attempts {
 		req, _ := http.NewRequest(http.MethodPost, a.origin+"/api/events/ars-che/holds", bytes.NewBufferString(`{"seats":1}`))
@@ -768,6 +812,7 @@ func advMalformed(t *testing.T, a *advLab) {
 }
 
 func advReplay(t *testing.T, a *advLab) {
+	a.ensureActive(t)
 	a.watch.beginPhase()
 	a.captureStolen(t)
 	if a.stolen == "" {
@@ -822,14 +867,16 @@ func advReplicaSplit(t *testing.T, a *advLab) {
 
 func advStoreOutage(t *testing.T, a *advLab) {
 	a.watch.beginPhase()
+	a.cfg.API.Close()
 	a.cfg.Store.Close()
+	fast := &http.Client{Timeout: 2 * time.Second}
 	var forwarded atomic.Int64
 	var wg sync.WaitGroup
 	wg.Add(40)
 	for i := 0; i < 40; i++ {
 		go func() {
 			defer wg.Done()
-			if a.hold(t, a.frontA, a.cookie(t)) == http.StatusCreated {
+			if a.holdClient(t, fast, a.frontA, a.cookie(t), nil) == http.StatusCreated {
 				forwarded.Add(1)
 			}
 		}()

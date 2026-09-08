@@ -39,6 +39,7 @@ make eaf-nightly
 | Persistence across replica / new process | `TestPersistenceAcrossReplica`, `TestRestartNewProcessSameStore` |
 | Embedded / Edge / Proxy share the same admission rule | Placement parity + Embedded token test |
 | Installed Embedded / Edge / Proxy behave the same | `TestV1DeploymentAcceptance` — auth, identity, acquire, renew, release, queue, handoff, revoke, expiry, origin lockdown, Dry Run, 10%, 100%, Authority Check |
+| One customer cannot produce two active origin executions under attack | `TestV1AdversarialOneCustomer` — 400-way acquire, renew/release, reconnect, expiry resurrection, handoff/revoke replay, identity and merchant switching, unlisted routes, direct origin, malformed/replayed credentials, replica split, store outage, process restart, timeouts |
 | Admin is not unlocked by the edge secret or `?secret=` | `TestSecurityAdminAndEdgeSecrets` |
 | Resume is observed but not counted as a new origin forward | `TestMetricsResumeDoesNotCountForwarded` |
 | Distinct admin vs edge secrets in the lab | `internal/testlab` + `startServer` |
@@ -57,9 +58,11 @@ broken and are closed in this slice:
 - Lab admin secret aliased the edge secret; `?secret=` leaked on `/admin`.
 
 This revision: `make test-race`, `make sdk-test`, and `make v1-accept`
-(including `TestV1DeploymentAcceptance` on Embedded, Edge, and Proxy)
+(including `TestV1DeploymentAcceptance` and `TestV1AdversarialOneCustomer`)
 are green. `make eaf-nightly` (1×10,000, origin `held=1`) was green on
-the previous revision of this branch.
+an earlier revision of this branch. Emergency `revoke-all` now resets
+the in-process busy cache on that replica (spurious BUSY only; it could
+not double-grant).
 
 ## 3. WARN — limitations that do not block V1
 
@@ -76,6 +79,7 @@ the previous revision of this branch.
 
 ## 4. Tests added or strengthened
 
+- `internal/check/adversarial_test.go` — final attack pass: one customer, one active origin execution
 - `internal/check/deploy_accept_test.go` — one suite against Embedded, Edge, and Proxy install paths
 - `internal/check/v1_accept_test.go` — lifecycle, ramp, authority, placement, amplification
 - `internal/check/check.go` — spoofed identity, unlisted paths, origin-secret spoof, removed proxy headers, authorize edge secret, PASS/FAIL/WARN

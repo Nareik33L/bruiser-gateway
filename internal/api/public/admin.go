@@ -417,6 +417,9 @@ func (s *Server) adminRevokeAll(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, err)
 		return
 	}
+	if cache, ok := s.leases.(*lease.BusyCache); ok {
+		cache.Reset()
+	}
 	revokeTotal.Add(float64(n))
 	writeJSON(w, http.StatusOK, map[string]any{"revoked": n})
 }
