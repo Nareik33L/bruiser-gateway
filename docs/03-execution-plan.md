@@ -19,7 +19,7 @@ harness or external dependency.
 M0 Foundations
  └─ M1 The primitive (single node)
      └─ M2 Distributed correctness  ◄── the gate that proves the thesis
-         ├─ M3 Merchant integration (tokens, SDK, SimTix, proxy)
+         ├─ M3 Merchant integration & authority (P1/P2/P3, transparent enforcement, authority check, SimTix)
          ├─ M4 Policy engine
          └─ M5 Handoff & revoke
              └─ M6 Demo
@@ -29,7 +29,9 @@ M0 Foundations
 ```
 
 M3, M4 and M5 are independent of each other once M2 lands and can run in parallel
-if there are two engineers.
+if there are two engineers. M3 is the largest of the three and should start first;
+its P2/P3 sub-tracks are the ones most likely to be reshaped by design-partner
+discovery.
 
 ---
 
@@ -46,9 +48,11 @@ Scope
   logging, config loading (env + file), graceful shutdown.
 - Postgres migrations tooling; initial schema from the technical design §4.1.
 - Injected `Clock` interface everywhere time is read (prerequisite for torture tests).
-- `docs/protocol/v0-draft.md` skeleton; ADR log started (`04-decisions.md`).
-- Licence files per the founder's licensing decision (open question Q3); until
-  decided, no licence is published and the repo stays private.
+- `protocol/` directory established as the Apache-2.0 boundary (OpenAPI skeleton,
+  JSON Schema stubs, `v0-draft.md`); ADR log started (`04-decisions.md`).
+- Repository laid out for the Apache-2.0 / BSL 1.1 split (technical design §16).
+  Licence files are drafted but not committed until legal review signs off; the
+  repository stays private.
 
 Exit criteria
 
@@ -99,7 +103,7 @@ Scope
 - `cmd/torture`: N gateways (in-process first, then containers), M×K principals,
   randomised ops, fault injection (kill node, pause store, latency, clock skew,
   drop NOTIFY, restart mid-transaction), full history capture.
-- Invariant checker I1–I7 (technical design §11) with minimal-history dump on failure.
+- Invariant checker I1–I7 (technical design §12) with minimal-history dump on failure.
 - Compose profile with 3 gateways behind Caddy.
 - Nightly long-running torture job in CI; a short deterministic-seed variant on
   every PR.
@@ -121,29 +125,51 @@ Risk
 
 ---
 
-## M3 — Merchant integration (M)
+## M3 — Merchant integration and authority (L)
 
-**Goal:** a merchant can enforce Bruiser with a middleware, or via proxy, and we
-have a realistic simulated merchant.
+**Goal:** a merchant can make Bruiser authoritative at their admission point via
+any of the three enforcement patterns, enforcement works for clients that have never
+heard of Bruiser, and we can prove no bypass path is open.
+
+This milestone grew from M to L after the founder decisions on authority (Q13) and
+platform-agnostic integration (Q2). It is the milestone most shaped by design-partner
+conversations; the integration-discovery questionnaire
+([06-integration-discovery.md](06-integration-discovery.md)) feeds it.
 
 Scope
 
-- Token verification rules and `POST /v1/introspect`.
-- `sdk/go` verification middleware (`net/http`), then `sdk/node` (Express/Fastify
-  middleware) and `sdk/python` (ASGI middleware). Each: JWKS fetch/cache, offline
-  verification, fence tracking hook, optional introspection, one-line install.
-- `internal/adapter` interface; `adapter/memory`; `adapter/simtix`.
-- Proxy endpoints (Mode B) with fence attached to downstream calls.
+- **P1 — in-app middleware.** Token verification rules and `POST /v1/introspect`.
+  `sdk/go` (`net/http`), `sdk/node` (Express/Fastify), `sdk/python` (ASGI). Each:
+  JWKS fetch/cache, offline verification, fence tracking hook, optional
+  introspection, optional per-execution local limits, one-line install.
+- **P2 — edge/API-gateway.** Route rules (path/method → resource/action);
+  `POST /v1/authorize`; reference configs for NGINX `auth_request`, Envoy
+  `ext_authz`, Kong plugin, Cloudflare Worker, AWS API Gateway authorizer; edge→origin
+  secret/mTLS guidance.
+- **P3 — reverse proxy.** `internal/proxy` transparent HTTP proxy applying route
+  rules; `internal/adapter` interface, `adapter/memory`, `adapter/simtix`; proxy
+  endpoints with fence attached.
+- **Transparent enforcement.** Customer extractors (JWT, cookie-JWT, introspection,
+  edge-signed header); implicit sessions; transparent acquire on first allocation
+  request; per-execution in-flight and rate limits.
+- **Authority check.** `bruiser authority-check`: route enumeration, no-token /
+  expired / tampered / stale-fence probes, common-bypass probes, PASS/FAIL report,
+  `AUTHORITY_CHECK` audit event.
 - **SimTix** (`cmd/simtix`): events, seats, price bands, holds with TTL, purchase,
-  cancel, non-atomic per-account limit (toggle), Mode A verification via `sdk/go`,
-  request log, metrics, reset.
-- Integration guide: "Add Bruiser to an existing checkout in 30 minutes".
+  cancel, non-atomic per-account limit (toggle), club-style login issuing a session
+  JWT, `--enforcement p1|p2|p3`, `--origin-lockdown`, request log, metrics, reset.
+- Integration guide per pattern: "Make Bruiser authoritative in 30 minutes", with the
+  authority check as the final step. Onboarding checklist for design partners.
 
 Exit criteria
 
-- SimTix in Mode A rejects a hold with an expired, tampered or stale-fence token
-  and accepts a valid one, covered by tests.
-- Same scenario passes through Mode B proxy with identical downstream effect.
+- SimTix under P1 rejects a hold with an expired, tampered or stale-fence token and
+  accepts a valid one; the same scenario under P2 (NGINX) and P3 (proxy) has the
+  identical downstream effect. All three in CI.
+- An `unaware` swarm profile (merchant session only, no Bruiser protocol) is
+  controlled under P2 and P3: one execution per customer, second agent BUSY.
+- Authority check against SimTix with `--origin-lockdown` reports PASS on every
+  route; with lockdown off it reports FAIL and names the open path. Both in CI.
 - A Node and a Python sample app verify tokens using the SDKs, in CI.
 
 ---
@@ -209,9 +235,12 @@ Scope
   side-by-side "Without Bruiser / With Bruiser" panels; seats-per-customer
   histogram; downstream request counter; SimTix p99.
 - `docker compose --profile demo up` one-liner; `make demo-1x10000`,
-  `make demo-1000x10`, `make demo-handoff`.
+  `make demo-1000x10`, `make demo-handoff`, `make demo-bypass`, `make demo-unaware`.
 - A 90-second scripted walkthrough (`docs/demo.md`) and a recorded video.
 - Numbers asserted by an automated demo test so the demo cannot silently regress.
+- First cut of the **hosted demo**: the Compose demo deployed read-only at
+  `sandbox.bruiser-gateway.com` with the live dashboard and a "run scenario" button
+  (self-service developer merchants arrive at M8; see ADR-016).
 
 Exit criteria
 
@@ -219,7 +248,11 @@ Exit criteria
   execution; without Bruiser SimTix receives 10,000 holds with visible churn.
 - 1,000 × 10 completes with each customer holding ≤ 1 seat and downstream
   requests ≈ number of customers.
-- Someone outside the team can run the demo from the README without help.
+- Bypass scenario: with lockdown off an agent going straight to SimTix succeeds and
+  the authority check reports FAIL; with lockdown on the request is refused and the
+  check reports PASS. Unaware scenario: protocol-ignorant agents are controlled.
+- Someone outside the team can run the demo from the README without help, and a
+  prospect can watch it run at the hosted URL.
 
 ---
 
@@ -233,15 +266,21 @@ Scope
   view with `[Revoke]` / `[Take control]`, policy view/validate, audit search with
   "why?" view for a request.
 - Admin auth: API keys with RBAC; separate listener.
-- Prometheus metrics per technical design §12; OpenTelemetry traces; example
+- Prometheus metrics per technical design §13; OpenTelemetry traces; example
   Grafana dashboard; alert rules (store unavailable, grant latency, expiry spike).
-- Audit export: JSONL file, webhook, OTel log exporter.
+- Audit export: JSONL file, webhook, OTel log exporter. Audit retention
+  (default 13 months) with purge/archive job and `AUDIT_PURGED` events.
+- Usage figures panel (peak concurrent executions, executions/month, resources
+  protected) — informational only, for fair-use transparency.
+- Authority-check results and last-run status surfaced in the UI.
 
 Exit criteria
 
 - From the UI alone: find Alice, see her active execution, revoke it, and read the
   audit trail explaining a prior BUSY response with rule name and reason.
 - Grafana dashboard renders all headline metrics during the demo.
+- Retention job purges (or archives) events older than the configured window in a
+  test with a shortened window; the purge is itself audited.
 
 ---
 
@@ -259,17 +298,29 @@ Scope
 - Helm chart with HPA, PDB, NetworkPolicy, ServiceMonitor, migration Job;
   zero-downtime upgrade test.
 - Load test (k6) profiles and published numbers.
-- Protocol v0.1 spec finalised in `docs/protocol/`; OpenAPI document; SDK docs.
-- Operations docs: deployment, upgrade, backup/restore, incident runbooks.
-- External security review scheduled; findings triaged.
+- Protocol v0.1 spec finalised in `protocol/`; OpenAPI document; JSON Schemas;
+  token spec; audit vocabulary; SDK docs.
+- Operations docs: deployment, upgrade, backup/restore, incident runbooks, and the
+  authority-check runbook for go-live.
+- **Independent external security review** (budgeted, founder decision Q10);
+  findings triaged; no open high/critical before release.
+- **Licensing execution:** legal review of BSL 1.1 parameters; LICENSE files
+  committed; `protocol/`, `sdk/`, `deploy/edge/` published to a public
+  `bruiser-protocol` repository under Apache-2.0; gateway repository published
+  under BSL 1.1 once the OSS/Core boundary is formally signed off.
+- **Hosted sandbox** completed: self-service throwaway merchants, hosted docs,
+  abuse limits, nightly reset (ADR-016).
 - Versioning and release process; changelog; signed tags.
 
 Exit criteria
 
-- All torture, demo, integration and load suites green in CI.
+- All torture, demo, integration, authority and load suites green in CI.
 - Fresh Kubernetes cluster → Helm install → demo passes, documented step by step.
 - Security review has no open high/critical findings.
-- V1.0.0 tagged; OSS repository published per licensing decision.
+- Trademark clearance for "Bruiser Gateway" complete (blocks public launch, not the
+  tag).
+- V1.0.0 tagged; protocol repository public under Apache-2.0; gateway published
+  under BSL 1.1 per the formal boundary decision.
 
 ---
 
@@ -280,14 +331,19 @@ Exit criteria
 - Bounded waiting set (`waiting.mode: bounded`) with promotion and claim window;
   `EXECUTION_QUEUED` semantics.
 - MCP server / tool definitions so agent frameworks acquire, renew, release and
-  hand off natively; reference agent using it against SimTix.
+  hand off natively; reference agent using it against SimTix. These improve the
+  agent's experience (watch instead of retry, clean handoff); enforcement never
+  depends on them (ADR-002a).
 - Agent-side SDK clients (not only merchant verification).
 - Protocol conformance test suite that any "Bruiser-compatible gateway" can run.
+- Additional customer extractors and edge references driven by design-partner
+  environments.
 
 **Core (commercial)**
 
-- Admin SSO (OIDC), audit retention policies and export scheduling, analytics
-  views, supported upgrade tooling, first real adapter (chosen with design partner).
+- Admin SSO (OIDC), audit export scheduling and archive targets, analytics views,
+  supported upgrade tooling, first real adapter or platform-hook variant (chosen
+  with the first design partner).
 
 **Enterprise**
 
@@ -308,39 +364,75 @@ Exit criteria
 | API contract | OpenAPI-driven tests; SDK sample apps | every PR |
 | Torture (short) | 3 in-process nodes, fixed seeds, all faults | every PR |
 | Torture (long) | 5 containers, random seeds, ≥ 10⁶ ops | nightly |
+| Enforcement parity | same scenarios under P1, P2 (NGINX) and P3 with identical downstream effect | every PR |
+| Authority | `authority-check` against SimTix with lockdown on (PASS) and off (FAIL) | every PR |
 | Demo assertion | Compose profile; headline numbers checked | nightly and before release |
 | Load | k6 scenarios; published p50/p99 | before release |
 | Security | `govulncheck`, container scanning, dependency review | every PR |
 
 ---
 
-## Commercial track (in parallel with M2–M8)
+## Commercial track (starts now, in parallel with M0–M8)
 
-The engineering plan is only half the plan. These actions do not depend on code
-being finished, and several feed requirements back into M3/M4.
+There are no confirmed design partners. Acquiring them is an immediate priority,
+not something that waits for code: the conversations validate integration
+requirements that shape M3, and M3 is on the critical path. The track is
+sequenced by which engineering artefact each stage needs.
 
-1. **Design-partner programme.** Target 3 clubs (Championship / League One clubs
-   with in-house or flexible ticketing are the most likely to control their
-   checkout). Offer: pilot on their staging environment, free during pilot, in
-   exchange for requirements, a reference and first option on Core pricing.
-2. **Checkout-ownership survey.** For each target club: who runs checkout, which
-   platform, is there an API, can middleware be added? The answers decide the first
-   real adapter and whether platform partnerships are needed before club sales
-   (see risk R6).
-3. **Identity survey.** What customer identifiers and anchors do clubs already have
-   (membership numbers, supporter IDs, household records)? Feeds M4 anchor design.
-4. **Demo assets** from M6: hosted read-only demo video; optionally a public sandbox
-   at `demo.bruiser-gateway.com` (a hosted instance for sales only; does not change
-   the self-hosted product model).
-5. **Positioning content.** "One supporter remains one supporter" launch post; the
-   protocol draft published for comment; a fairness/dispute-resolution note aimed
-   at supporter-liaison and ticketing-office staff, not just CTOs.
-6. **Licensing and trademark.** Decide OSS licence (Q3); file trademark for
-   "Bruiser Gateway"; prepare Core licence terms and SLA template.
-7. **Pricing validation.** Five conversations with ticketing-office and IT leads at
-   target clubs validating the £20k / £100k tiers and what "supported" must mean.
-8. **Security narrative.** Have the threat model and design reviewed by an external
-   party early enough to cite in the first sales conversations.
+**Stage A — needs only these documents (during M0–M2)**
+
+1. **Target list.** 20–30 clubs across the Premier League, Championship and League
+   One. For each, from public information: ticketing platform, whether checkout is
+   club-run or platform-run, presence of a CDN/WAF/API gateway, membership scheme,
+   supporter-ID scheme, recent bot/fairness incidents, ticketing-office and
+   IT/digital contacts.
+2. **Outreach.** Two entry points per club: ticketing/supporter-services (pain
+   owner) and head of digital/IT (integration owner). Message is the proposition,
+   not the technology: "one supporter remains one supporter, however many agents
+   they deploy; you keep the infrastructure".
+3. **Discovery calls** run against
+   [06-integration-discovery.md](06-integration-discovery.md). Output per club:
+   admission-point map, viable enforcement pattern (P1/P2/P3/none), identity
+   anchors available, decision-maker, blockers. Clubs with no viable pattern are
+   deferred with their requirements recorded — not force-fitted.
+4. **Design-partner offer.** Target 3 signed partners. Terms: pilot on the club's
+   staging environment, free during pilot, joint authority-check sign-off, in
+   exchange for requirements access, a reference and first option on Core pricing.
+   Prefer a spread of enforcement patterns across the three so V1 proves all of them.
+5. **Legal and brand.** Instruct counsel on BSL 1.1 parameters and the OSS/Core
+   boundary; trademark search and filing for "Bruiser Gateway" (must clear before
+   public launch or significant marketing spend); draft Core licence and SLA
+   templates; fair-use envelope wording.
+
+**Stage B — needs the M2 proof (torture results) and design (M2–M5)**
+
+6. **Technical validation with partner engineers.** Walk their engineers through the
+   design, the invariant, the enforcement pattern chosen for them and the authority
+   check. Their objections become M3 scope; their environment becomes an
+   enforcement-parity test case.
+7. **Pricing validation.** Five conversations with ticketing-office and IT leads
+   validating £20k / £100k+, the fair-use envelope dimensions, and what "supported"
+   must mean.
+8. **Security narrative.** External review of the threat model and design early
+   enough to cite in sales conversations; the full independent review lands at M8.
+
+**Stage C — needs the demo (M6 onwards)**
+
+9. **Demo assets.** Hosted demo at `sandbox.bruiser-gateway.com`; 90-second video;
+   live demo in every prospect meeting.
+10. **Positioning content.** Launch post; protocol draft published for comment on the
+    public protocol repository; a fairness/dispute-resolution note for
+    supporter-liaison and ticketing-office staff. Positioning discipline: control
+    layer for autonomous commerce — never "bot detection", "DDoS", "ticketing
+    platform" or "distributed lock".
+11. **Pilot go-lives.** Staging pilots with each partner using the onboarding
+    checklist; authority check PASS is the go/no-go; convert to Core at V1.
+
+**Stage D — from V1**
+
+12. Reference customers, case studies with agreed metrics (downstream request
+    reduction, duplicate allocations prevented, disputes resolved from audit), and
+    the first Enterprise conversations.
 
 ---
 
@@ -349,15 +441,18 @@ being finished, and several feed requirements back into M3/M4.
 | ID | Risk | Effect | Mitigation |
 |----|------|--------|------------|
 | R1 | Multi-accounting undermines the per-customer guarantee | thesis looks weak in diligence | State the boundary honestly; identity anchors (household, membership, payment); partner with clubs' membership systems |
-| R2 | Merchant integration effort blocks adoption | no production deployments | Mode A middleware in three languages; Mode B proxy; "30-minute integration" guide; SimTix as reference |
-| R3 | Gateway seen as SPOF for purchases | vendor/CTO rejection | Mode A keeps Bruiser out of data path; fail-closed semantics documented; HA Helm chart |
-| R4 | Agents bypass the gateway | control is cosmetic | Enforcement is defined as the merchant requiring the token; first integration step is closing the unauthenticated path |
-| R5 | Commoditisation ("just a Redis lock") | pricing pressure | Protocol, SDKs, handoff, audit, policy, ops maturity; sell the maintained standard |
-| R6 | Ticketing platforms, not clubs, own checkout | club cannot deploy Mode A | Survey early; adapter strategy; platform partnerships; target clubs with own platforms first |
+| R2 | Merchant integration effort blocks adoption | no production deployments | Three enforcement patterns; SDKs in three languages; reference edge configs; "30-minute" guide per pattern; SimTix as reference; design-partner discovery shapes M3 |
+| R3 | Gateway seen as SPOF for purchases | vendor/CTO rejection | P1 preferred where possible (out of data path); fail-closed semantics documented; HA Helm chart; P3 defaults assume in-path HA |
+| R4 | Agents or clients bypass the gateway | control is cosmetic | Authority is a requirement (ADR-002); authority check is a product feature and go-live gate; transparent enforcement covers unaware clients; origin lockdown guidance |
+| R5 | Commoditisation ("just a lock") | pricing pressure | Positioning discipline (never a lock product); protocol, SDKs, enforcement patterns, authority check, handoff, audit, policy, ops maturity; sell the maintained standard |
+| R6 | Ticketing platforms, not clubs, own checkout | P1 unavailable at many clubs | Platform-agnostic by design; P2 where the club controls the edge, P3 where it controls routing; qualify clubs by viable pattern; defer the rest with requirements recorded; no dependency on platform partnerships |
 | R7 | Store design fails torture testing | schedule risk at M2 | Store interface isolates change; alternative coordination backends possible without API change |
 | R8 | Over-engineering V1 | delay, dilution | Hard "not in V1" list; milestone exit criteria; M2 gate before demo work |
 | R9 | Accessibility/regulatory (agents acting for supporters who need them) | reputational | Handoff preserves customer control; agents are first-class, never blocked as a class |
-| R10 | Licence choice deters adoption or invites cloud-hosting competitors | strategic | Permissive licence for protocol/SDKs regardless; decide gateway licence with counsel (Q3) |
+| R10 | Licence execution stalls (legal review, boundary decision) | public launch delayed | Layout supports the split from M0; Apache-2.0 protocol repository can publish independently of the gateway decision; tag V1 privately if needed |
+| R11 | Transparent enforcement misidentifies customers (extractor misconfiguration) | wrong customer denied or two customers merged | Extractor validation tooling; staging pilot with real sessions; authority/extractor checks in onboarding; audit shows extracted identity per decision |
+| R12 | Authority check gives false confidence about unknown paths | bypass in production | Report states coverage explicitly; questionnaire forces path enumeration; periodic re-runs; partner engineers sign off the route list |
+| R13 | No design partner signs | V1 built without validation | Stage A outreach starts now; 20–30 club list; qualify by viable pattern; broaden to non-football scarce-inventory merchants with the same pattern if football stalls |
 
 ---
 
@@ -365,13 +460,19 @@ being finished, and several feed requirements back into M3/M4.
 
 - The invariant holds under the torture suite across ≥ 3 gateways with all fault
   types, repeatedly.
-- The 1 × 10,000, 1,000 × 10 and handoff demos run from one command and their
-  numbers are asserted in CI.
-- A merchant can enforce Bruiser with a middleware (Go, Node or Python) or via proxy.
+- The 1 × 10,000, 1,000 × 10, handoff, bypass and unaware-agent demos run from one
+  command and their numbers are asserted in CI.
+- A merchant can make Bruiser authoritative via P1 (Go, Node or Python middleware),
+  P2 (edge `/v1/authorize` with reference configs) or P3 (reverse proxy), with
+  identical downstream effect, and the authority check passes against their
+  environment.
+- Clients that do not speak the protocol are controlled via transparent enforcement.
 - Policy is expressed in YAML, hot-reloaded, versioned and audited.
-- Admin UI supports revoke, take-control and "why was this denied?".
-- Metrics, traces, logs and audit export exist and are documented.
-- Helm install on a fresh cluster passes the demo.
-- Threat model written; external security review completed; no open high/critical.
-- Protocol v0.1 and OpenAPI published; SDK docs published.
+- Admin UI supports revoke, take-control, "why was this denied?", usage figures and
+  authority-check status.
+- Metrics, traces, logs, audit export and audit retention exist and are documented.
+- Helm install on a fresh cluster passes the demo; hosted sandbox is live.
+- Threat model written; independent security review completed; no open high/critical.
+- Protocol v0.1, OpenAPI, schemas and SDKs published under Apache-2.0; gateway
+  licensed under BSL 1.1 per the signed-off boundary; trademark cleared.
 - Everything in `docs/` reflects what shipped.
