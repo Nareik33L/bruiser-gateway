@@ -19,6 +19,7 @@ type Config struct {
 	OriginURL     string
 	BruiserURL    string
 	EdgeSecret    string
+	OriginSecret  string
 	MaxInFlight   int
 	RatePerSec    float64
 	AuthorizePath string
@@ -60,6 +61,11 @@ func (p *Proxy) Handler() http.Handler {
 		req.Host = p.origin.Host
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for name := range r.Header {
+			if strings.HasPrefix(http.CanonicalHeaderKey(name), "X-Bruiser-") {
+				r.Header.Del(name)
+			}
+		}
 		body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 		_ = r.Body.Close()
 		r.Body = io.NopCloser(bytes.NewReader(body))
@@ -128,8 +134,8 @@ func (p *Proxy) Handler() http.Handler {
 		r.Header.Set("X-Bruiser-Execution", exe)
 		r.Header.Set("X-Bruiser-Fence", authResp.Header.Get("X-Bruiser-Fence"))
 		r.Header.Set("X-Bruiser-Customer", authResp.Header.Get("X-Bruiser-Customer"))
-		if sec := authResp.Header.Get("X-Bruiser-Origin-Secret"); sec != "" {
-			r.Header.Set("X-Bruiser-Origin-Secret", sec)
+		if p.cfg.OriginSecret != "" {
+			r.Header.Set("X-Bruiser-Origin-Secret", p.cfg.OriginSecret)
 		}
 		rp.ServeHTTP(w, r)
 	})

@@ -91,6 +91,9 @@ func runSoak(t *testing.T, dur time.Duration, agents int, sampleEvery time.Durat
 	cfg.LeaseTTL = 15 * time.Second
 	cfg.AdminSecret = "admin-secret-dev"
 	cfg.EdgeSecret = "edge-secret-dev"
+	cfg.DevAssertions = true
+	cfg.RateSessions, cfg.RateAcquire, cfg.RateRenew, cfg.RateRelease = 1e6, 1e6, 1e6, 1e6
+	cfg.RateAuthorize, cfg.RateMerchant, cfg.RateCustomer, cfg.RatePrincipal = 1e6, 1e6, 1e6, 1e6
 	if err := store.EnsureMerchant(ctx, cfg.MerchantID, "soak", cfg.DevHMACSecret); err != nil {
 		t.Fatal(err)
 	}

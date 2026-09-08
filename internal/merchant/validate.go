@@ -61,6 +61,9 @@ func (p Profile) ValidateIssues() []Issue {
 			out = append(out, Issue{"WARN", "identity.hmac_secret_env", env + " is not set in this environment"})
 		}
 	}
+	if strings.EqualFold(ext, "header") {
+		out = append(out, Issue{"WARN", "identity.extractor", "unsigned identity headers are only valid behind a trusted edge; prefer oidc/jwks/cookie-jwt"})
+	}
 	if p.Mode != "" && !strings.EqualFold(p.Mode, "enforce") && !strings.EqualFold(p.Mode, "dry-run") {
 		out = append(out, Issue{"FAIL", "mode", "mode must be enforce or dry-run"})
 	}

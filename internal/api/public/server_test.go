@@ -44,6 +44,9 @@ func startServer(t *testing.T) (*httptest.Server, config.Config) {
 	cfg.LeaseTTL = 15 * time.Second
 	cfg.EdgeSecret = "edge-secret-dev"
 	cfg.AdminSecret = "admin-secret-dev"
+	cfg.DevAssertions = true
+	cfg.RateSessions, cfg.RateAcquire, cfg.RateAuthorize = 1e6, 1e6, 1e6
+	cfg.RateMerchant, cfg.RateCustomer, cfg.RatePrincipal = 1e6, 1e6, 1e6
 	if err := store.EnsureMerchant(ctx, cfg.MerchantID, "test", cfg.DevHMACSecret); err != nil {
 		t.Fatal(err)
 	}

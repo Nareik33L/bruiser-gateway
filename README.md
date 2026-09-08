@@ -95,9 +95,10 @@ Vendor telemetry is **off** unless `BRUISER_TELEMETRY=1`.
 
 ## Status
 
-**V1 is frozen.** No new product features. Remaining work is human-owned
-(LICENSE/counsel, trademark, external security review, hosted sandbox DNS,
-image signing keys, Stage A outbound).
+**V1 is frozen. RC1 is the production candidate.** No new product
+features. Remaining work is human-owned
+(LICENSE/counsel, trademark, hosted sandbox DNS, image signing keys,
+Stage A outbound). See [docs/11-rc1.md](docs/11-rc1.md).
 
 The tree has Edge, Proxy, Go/Node/Python Embedded SDKs, Authority Check,
 EAF (`make eaf-nightly` 10,000× burst; `make soak` 30-minute 10k churn),

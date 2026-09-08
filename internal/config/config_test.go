@@ -63,7 +63,20 @@ func TestValidateRejectsAdminFallback(t *testing.T) {
 	c.EdgeSecret = "prod-edge-unique"
 	c.OriginSecret = "prod-origin-unique"
 	c.DevHMACSecret = "prod-hmac-unique"
+	c.DevAssertions = false
+	c.JWKSURL = "https://idp.example/.well-known/jwks.json"
+	c.Issuer = "https://idp.example"
+	c.Audience = "bruiser"
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
+	}
+	c.DevAssertions = true
+	if err := c.Validate(); err == nil {
+		t.Fatal("production must refuse development assertions")
+	}
+	c.DevAssertions = false
+	c.JWKSURL = ""
+	if err := c.Validate(); err == nil {
+		t.Fatal("production must require JWKS")
 	}
 }

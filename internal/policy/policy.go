@@ -8,6 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/Nareik33L/bruiser-gateway/internal/lease"
+	"github.com/Nareik33L/bruiser-gateway/internal/resource"
 )
 
 const (
@@ -44,6 +45,31 @@ type Rule struct {
 	Control         string   `yaml:"control" json:"control"`
 	OnMissingAnchor string   `yaml:"on_missing_anchor" json:"on_missing_anchor"`
 	Waiting         Waiting  `yaml:"waiting" json:"waiting"`
+	Budget          Budget   `yaml:"budget" json:"budget"`
+}
+
+// Budget is the merchant-configured cap on protected operations for one
+// execution. Zero means unlimited. Specific counters share one ops_used
+// tally so a club can name the scarce action without hard-coding tickets.
+type Budget struct {
+	MaxOps       int `yaml:"max_ops" json:"max_ops"`
+	MaxProtected int `yaml:"max_protected_operations" json:"max_protected_operations"`
+	MaxBasket    int `yaml:"max_basket_additions" json:"max_basket_additions"`
+	MaxAlloc     int `yaml:"max_allocations" json:"max_allocations"`
+	MaxCheckout  int `yaml:"max_checkout_actions" json:"max_checkout_actions"`
+}
+
+func (b Budget) Max() int {
+	n := b.MaxOps
+	for _, v := range []int{b.MaxProtected, b.MaxBasket, b.MaxAlloc, b.MaxCheckout} {
+		if v > n {
+			n = v
+		}
+	}
+	if n < 0 {
+		return 0
+	}
+	return n
 }
 
 // Waiting is optional intra-customer concurrency, not a waiting room.
@@ -78,6 +104,7 @@ type Decision struct {
 	MaxLifetime time.Duration
 	Precedence  []string
 	MaxWaiters  int
+	MaxOps      int
 	ControlNone bool
 	Denied      bool
 	Reason      string
@@ -186,6 +213,11 @@ func Compile(d Document) (Compiled, error) {
 }
 
 func (c Compiled) Evaluate(req Request) Decision {
+	if canon, err := resource.Canonical(req.Resource); err == nil {
+		req.Resource = canon
+	} else if req.Resource != "" {
+		return Decision{RuleName: "resource", Denied: true, Reason: "malformed_resource"}
+	}
 	for _, r := range c.rules {
 		if !matchRule(r.Rule, req) {
 			continue
@@ -208,6 +240,7 @@ func (c Compiled) Evaluate(req Request) Decision {
 			MaxLifetime: r.lifetime,
 			Precedence:  r.Precedence,
 			MaxWaiters:  r.Waiting.MaxWaiters,
+			MaxOps:      r.Budget.Max(),
 		}
 	}
 	if c.fallback == FallbackAllowUncontrolled {

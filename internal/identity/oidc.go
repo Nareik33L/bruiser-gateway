@@ -47,6 +47,13 @@ var globalJWKS = &jwksCache{
 	fetched: map[string]time.Time{},
 }
 
+func (c *jwksCache) invalidate(url string) {
+	c.mu.Lock()
+	delete(c.keys, url)
+	delete(c.fetched, url)
+	c.mu.Unlock()
+}
+
 func (c *jwksCache) get(ctx context.Context, client *http.Client, url string) (jwksDoc, error) {
 	c.mu.Lock()
 	if doc, ok := c.keys[url]; ok && time.Since(c.fetched[url]) < 5*time.Minute {
@@ -99,28 +106,46 @@ func fromOIDC(ctx context.Context, in Input) (Customer, error) {
 		return Customer{}, err
 	}
 	claims := jwt.MapClaims{}
-	parsed, err := jwt.ParseWithClaims(tok, claims, func(t *jwt.Token) (any, error) {
-		kid, _ := t.Header["kid"].(string)
-		key, err := matchJWK(doc, kid, t.Method.Alg())
-		if err != nil {
-			return nil, err
+	keyFunc := func(doc jwksDoc) func(*jwt.Token) (any, error) {
+		return func(t *jwt.Token) (any, error) {
+			kid, _ := t.Header["kid"].(string)
+			return matchJWK(doc, kid, t.Method.Alg())
 		}
-		return key, nil
-	}, jwt.WithValidMethods([]string{"RS256", "EdDSA", "ES256"}))
+	}
+	parsed, err := jwt.ParseWithClaims(tok, claims, keyFunc(doc),
+		jwt.WithLeeway(auth.Skew), jwt.WithValidMethods([]string{"RS256", "EdDSA", "ES256"}))
+	if err != nil {
+		globalJWKS.invalidate(url)
+		doc, err2 := globalJWKS.get(ctx, in.HTTP, url)
+		if err2 != nil {
+			return Customer{}, auth.ErrUnauthorized
+		}
+		claims = jwt.MapClaims{}
+		parsed, err = jwt.ParseWithClaims(tok, claims, keyFunc(doc),
+			jwt.WithLeeway(auth.Skew), jwt.WithValidMethods([]string{"RS256", "EdDSA", "ES256"}))
+	}
 	if err != nil || parsed == nil || !parsed.Valid {
 		return Customer{}, auth.ErrUnauthorized
 	}
-	if iss := strings.TrimSpace(in.Identity.Issuer); iss != "" {
+	issWant := strings.TrimSpace(in.Identity.Issuer)
+	if in.RequireIssuer && issWant == "" {
+		return Customer{}, auth.ErrUnauthorized
+	}
+	if issWant != "" {
 		got, _ := claims.GetIssuer()
-		if got != iss {
+		if got != issWant {
 			return Customer{}, auth.ErrUnauthorized
 		}
 	}
-	if aud := strings.TrimSpace(in.Identity.Audience); aud != "" {
+	audWant := strings.TrimSpace(in.Identity.Audience)
+	if in.RequireAudience && audWant == "" {
+		return Customer{}, auth.ErrUnauthorized
+	}
+	if audWant != "" {
 		ok := false
 		if list, err := claims.GetAudience(); err == nil {
 			for _, a := range list {
-				if a == aud {
+				if a == audWant {
 					ok = true
 					break
 				}
@@ -129,6 +154,14 @@ func fromOIDC(ctx context.Context, in Input) (Customer, error) {
 		if !ok {
 			return Customer{}, auth.ErrUnauthorized
 		}
+	}
+	if mid, _ := claims["mid"].(string); mid == "" {
+		mid, _ = claims["merchant_id"].(string)
+		if in.MerchantID != "" && mid != "" && mid != in.MerchantID {
+			return Customer{}, auth.ErrUnauthorized
+		}
+	} else if in.MerchantID != "" && mid != in.MerchantID {
+		return Customer{}, auth.ErrUnauthorized
 	}
 	name := claim(in.Identity)
 	sub, _ := claims[name].(string)

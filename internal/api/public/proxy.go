@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -24,6 +25,11 @@ func (s *Server) ProxyHandler(originURL string) (http.Handler, error) {
 		req.Host = ou.Host
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for name := range r.Header {
+			if strings.HasPrefix(http.CanonicalHeaderKey(name), "X-Bruiser-") {
+				r.Header.Del(name)
+			}
+		}
 		body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 		_ = r.Body.Close()
 
@@ -44,10 +50,13 @@ func (s *Server) ProxyHandler(originURL string) (http.Handler, error) {
 		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		r.ContentLength = int64(len(body))
-		for _, k := range []string{"X-Bruiser-Execution", "X-Bruiser-Fence", "X-Bruiser-Customer", "X-Bruiser-Origin-Secret"} {
+		for _, k := range []string{"X-Bruiser-Execution", "X-Bruiser-Fence", "X-Bruiser-Customer"} {
 			if v := res.headers.Get(k); v != "" {
 				r.Header.Set(k, v)
 			}
+		}
+		if s.cfg.OriginSecret != "" {
+			r.Header.Set("X-Bruiser-Origin-Secret", s.cfg.OriginSecret)
 		}
 		rp.ServeHTTP(w, r)
 	}), nil

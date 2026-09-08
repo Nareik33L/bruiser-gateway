@@ -361,6 +361,64 @@ func Run(cfg Config) (Report, error) {
 		return pass("spoofed host/path headers did not allocate (%d)", resp.StatusCode)
 	}))
 
+	rep.Probes = append(rep.Probes, probe("Resource variants share one domain", func() Probe {
+		tok, err := auth.IssueBoxOfficeSession(cfg.HMACSecret, fmt.Sprintf("canon-%d", time.Now().UnixNano()), time.Hour)
+		if err != nil {
+			return fail("%s", err.Error())
+		}
+		hdr := cookieHeader(tok)
+		code1, body1 := postJSON(client, edge+"/api/events/ars-che/holds", hdr, map[string]int{"seats": 1})
+		if code1 < 200 || code1 >= 300 {
+			return fail("canonical hold failed (%d) %s", code1, body1)
+		}
+		code2, body2 := postJSON(client, edge+"/api/events/ARS-CHE/holds", hdr, map[string]int{"seats": 1})
+		if code2 == http.StatusConflict {
+			return fail("case variant created a second domain (%d) %s", code2, body2)
+		}
+		if code2 >= 200 && code2 < 300 {
+			return pass("EVENT/ars-che variants stayed on one execution")
+		}
+		return fail("variant hold %d %s", code2, body2)
+	}))
+
+	rep.Probes = append(rep.Probes, probe("Forged execution rejected at origin", func() Probe {
+		if origin == "" {
+			return fail("--origin is required")
+		}
+		code, body := postJSON(client, origin+holdPath, map[string]string{
+			"X-Bruiser-Execution": "forged.not.signed",
+			"X-Bruiser-Fence":     "1",
+		}, map[string]int{"seats": 1})
+		if code >= 200 && code < 300 {
+			return fail("origin accepted forged execution (%d) %s", code, body)
+		}
+		return pass("forged execution rejected (%d)", code)
+	}))
+
+	rep.Probes = append(rep.Probes, probe("Modified fence rejected", func() Probe {
+		if origin == "" {
+			return fail("--origin is required")
+		}
+		code, body := postJSON(client, origin+holdPath, map[string]string{
+			"X-Bruiser-Execution": "stale.not.a.valid.execution",
+			"X-Bruiser-Fence":     "999999",
+		}, map[string]int{"seats": 1})
+		if code >= 200 && code < 300 {
+			return fail("origin accepted modified fence (%d) %s", code, body)
+		}
+		return pass("modified fence rejected (%d)", code)
+	}))
+
+	rep.Probes = append(rep.Probes, probe("Unsigned identity rejected outside trusted edge", func() Probe {
+		code, body := postJSON(client, edge+holdPath, map[string]string{
+			"X-Customer-Id": "spoofed-customer",
+		}, map[string]int{"seats": 1})
+		if code >= 200 && code < 300 {
+			return fail("unsigned identity allocated (%d) %s", code, body)
+		}
+		return pass("unsigned identity rejected (%d)", code)
+	}))
+
 	rep.Probes = append(rep.Probes, probe("Legitimate Bruiser-mediated allocation succeeds", func() Probe {
 		if edge == "" {
 			return fail("front URL not set")

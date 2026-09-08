@@ -1,8 +1,9 @@
 # Bruiser Gateway — V1 readiness
 
-Feature-complete V1 is **frozen**. No new product features. This document
-records whether the existing implementation is production-functional, what
-was proven, and what remains a deployment limitation.
+Feature-complete V1 is **frozen**. RC1 closed the independent security
+review without adding commercial features. This document records whether
+the existing implementation is production-functional, what was proven,
+and what remains a deployment limitation. See [docs/11-rc1.md](11-rc1.md).
 
 Operational edges closed in this revision: process-local EAF gauges
 documented (do not sum), unsigned header identity documented as a
@@ -78,7 +79,7 @@ green on this revision.
 | Busy cache is in-process | Correctness is the store. A replica restart rebuilds the cache. |
 | 10,000-agent burst is nightly | Default CI uses 200 + 3×250. `make eaf-nightly` is the 1×10,000 burst. `make soak` is the 30-minute 10k churn. |
 | `fail_closed=false` and `enforcement=false` | Operator-chosen fail-open. Default is fail-closed on allocation. |
-| Header-extractor identity | Bruiser trusts the merchant’s authenticated identity boundary. Unsigned headers must only be accepted from a trusted edge. JWT/OIDC/edge-signed is the V1 demonstration. Not a V1 blocker. |
+| Header-extractor identity | Unsigned headers are rejected unless the caller is a trusted edge. Production requires JWKS/OIDC. |
 | P1 items | Full MCP server, OTel, admin SSO, Testcontainers, published k6, Helm ZDT, protocol v1 — not required for Stage A. |
 
 ## 4. Tests added or strengthened

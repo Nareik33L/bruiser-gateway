@@ -1,8 +1,8 @@
 # Bruiser Gateway — Threat model (lab)
 
-This is an engineering threat model, **not** an independent security review.
-A production deployment still needs an external review before go-live
-(product instructions §19).
+This is an engineering threat model. RC1 closed the independent review
+findings in [docs/11-rc1.md](../11-rc1.md). A production deployment still
+needs counsel/LICENSE and image signing (human-owned).
 
 ## Assets
 
@@ -21,8 +21,9 @@ A production deployment still needs an external review before go-live
    (cookie JWT, bearer JWT, header, introspection, edge-signed HMAC, OIDC/JWKS).
    A forged session is a forged customer. Unsigned identity headers are only
    safe when a trusted, authenticated edge is the only party that can set them.
-2. **Bruiser → origin.** Origin must reject unfenced or secret-less allocation
-   (Authority Check). Parallel paths are the primary bypass.
+2. **Bruiser → origin.** Origin verifies the execution JWT and fence.
+   The origin secret is a hop credential configured on the edge, never
+   returned by `/v1/authorize`. Parallel paths remain the primary bypass.
 3. **Agent / browser → Bruiser.** Unaware clients are still enforced. MCP/SDK
    are convenience only.
 4. **Operator → admin API.** Shared `BRUISER_ADMIN_SECRET` today. Not

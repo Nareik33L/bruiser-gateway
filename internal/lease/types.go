@@ -78,6 +78,8 @@ type Execution struct {
 	EndReason     string
 	SuccessorID   string
 	QueuePosition int
+	OpsUsed       int
+	MaxOps        int
 }
 
 func (e Execution) IsActive(now time.Time) bool {
@@ -98,6 +100,7 @@ type AcquireRequest struct {
 	MaxLifetime time.Duration
 	Precedence  []string
 	MaxWaiters  int
+	MaxOps      int
 	RequestID   string
 }
 

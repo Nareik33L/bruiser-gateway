@@ -92,6 +92,16 @@ func gatewayWithStore(t testing.TB, profile merchant.Profile, mut func(*config.C
 	cfg.OriginSecret = "origin-lock-dev"
 	cfg.MaxInFlight = 8
 	cfg.RatePerSec = 100
+	cfg.DevAssertions = true
+	cfg.RateSessions = 100000
+	cfg.RateAcquire = 100000
+	cfg.RateRenew = 100000
+	cfg.RateRelease = 100000
+	cfg.RateAuthorize = 100000
+	cfg.RateMerchant = 100000
+	cfg.RateCustomer = 100000
+	cfg.RatePrincipal = 100000
+	cfg.RateIP = 0
 	if mut != nil {
 		mut(&cfg)
 	}

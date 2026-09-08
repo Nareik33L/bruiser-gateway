@@ -25,9 +25,9 @@ clients (browser / app / agents)
 
 Copy `configs/example.yaml` or run `bruiser profile init`. You need three things:
 
-1. **Identity** Bruiser already has — a cookie JWT, a bearer JWT, or a header
-   your edge already sets (`X-Customer-Id`). Bruiser consumes that identifier;
-   it never mints one.
+1. **Identity** Bruiser already has — JWKS/OIDC in production, or a cookie
+   JWT / bearer JWT in the lab. Unsigned headers are only valid from a
+   trusted edge. Bruiser consumes that identifier; it never mints one.
 2. **Allocation routes** — the hold/purchase paths that exist today. Discovery,
    search, login, and static assets are left unmatched and **pass through**.
 3. **Policy** — usually one concurrent execution per customer per resource.
@@ -82,7 +82,8 @@ Dashboard: `GET /admin`.
 | `auto` (default) | Cookie JWT, then `Authorization: Bearer`, then `identity.header` |
 | `cookie-jwt` | Named session cookie (HS256 JWT, `subject_claim`) |
 | `bearer-jwt` | Bearer token, same JWT rules |
-| `header` | Raw customer id (`X-Customer-Id` by default) |
+| `header` | Raw customer id — trusted edge only |
+| `oidc` / `jwks` | Asymmetric JWT via JWKS (production) |
 
 Optional `principal_header` distinguishes two agents of the same customer
 (BUSY). Same cookie `jti` resumes (ALREADY_HELD / heartbeat).

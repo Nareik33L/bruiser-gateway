@@ -36,10 +36,11 @@ func main() {
 
 	if edgeAddr != "" {
 		p, err := edge.New(edge.Config{
-			OriginURL:   env("SIMTIX_ORIGIN_URL", "http://127.0.0.1"+originAddr),
-			BruiserURL:  env("SIMTIX_BRUISER_URL", "http://127.0.0.1:8080"),
-			EdgeSecret:  env("BRUISER_EDGE_SECRET", "edge-secret-dev"),
-			MaxInFlight: 2,
+			OriginURL:    env("SIMTIX_ORIGIN_URL", "http://127.0.0.1"+originAddr),
+			BruiserURL:   env("SIMTIX_BRUISER_URL", "http://127.0.0.1:8080"),
+			EdgeSecret:   env("BRUISER_EDGE_SECRET", "edge-secret-dev"),
+			OriginSecret: env("BRUISER_ORIGIN_SECRET", "origin-lock-dev"),
+			MaxInFlight:  2,
 		})
 		if err != nil {
 			log.Error("edge config", "err", err)

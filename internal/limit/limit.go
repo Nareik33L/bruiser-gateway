@@ -4,7 +4,63 @@ package limit
 import (
 	"sync"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
+
+var rateLimited = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "bruiser_rate_limited_total",
+	Help: "Rejected requests by limiter key class.",
+}, []string{"class"})
+
+// Keyed is a process-local token-bucket map used for sessions/acquire/IP.
+type Keyed struct {
+	RPS   float64
+	Burst int
+	Class string
+
+	mu   sync.Mutex
+	byID map[string]*slot
+}
+
+func NewKeyed(class string, rps float64, burst int) *Keyed {
+	if burst < 1 {
+		burst = int(rps) + 5
+		if burst < 1 {
+			burst = 10
+		}
+	}
+	return &Keyed{RPS: rps, Burst: burst, Class: class, byID: map[string]*slot{}}
+}
+
+func (k *Keyed) Allow(id string, now time.Time) bool {
+	if k == nil || k.RPS <= 0 || id == "" {
+		return true
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	s := k.byID[id]
+	if s == nil {
+		s = &slot{tokens: float64(k.Burst), last: now}
+		k.byID[id] = s
+	}
+	elapsed := now.Sub(s.last).Seconds()
+	if elapsed > 0 {
+		s.tokens += elapsed * k.RPS
+		cap := float64(k.Burst)
+		if s.tokens > cap {
+			s.tokens = cap
+		}
+		s.last = now
+	}
+	if s.tokens < 1 {
+		rateLimited.WithLabelValues(k.Class).Inc()
+		return false
+	}
+	s.tokens--
+	return true
+}
 
 type PerExecution struct {
 	MaxInFlight int

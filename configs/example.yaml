@@ -16,17 +16,18 @@ name: Example merchant
 unmatched: allow
 
 identity:
-  # auto: cookie JWT, then bearer JWT, then X-Customer-Id (or identity.header).
-  # Bruiser consumes that identifier; it does not mint customer identities.
-  # Unsigned headers (extractor: header, or auto's header fallback) must
-  # only be accepted from a trusted/authenticated edge. Prefer cookie-jwt
-  # / bearer-jwt / oidc / edge-signed in production.
+  # Production: oidc/jwks with issuer + audience. HS256 is development-only
+  # (BRUISER_DEV_ASSERTIONS=1) and production refuses to start with it on.
+  # Unsigned headers must only be accepted from a trusted edge.
   extractor: auto
   cookie: session
   header: X-Customer-Id
   principal_header: X-Principal-Id
   subject_claim: sub
   hmac_secret_env: BRUISER_DEV_HMAC_SECRET
+  # jwks_url: https://idp.example/.well-known/jwks.json
+  # issuer: https://idp.example
+  # audience: bruiser
 
 routes:
   # Discovery / static / login: no lease.
@@ -55,6 +56,8 @@ policy:
       scope: [customer, resource]
       max_active: 1
       precedence: [browser, agent]
+      # Optional merchant execution budget (0 = unlimited):
+      # budget: { max_ops: 8, max_checkout_actions: 1 }
       # Optional intra-customer concurrency (not a waiting room):
       # one ACTIVE for this customer; extra agents QUEUED, then BUSY.
       # A second customer on the same resource is a different domain.

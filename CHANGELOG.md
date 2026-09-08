@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### RC1
+
+- Production identity: JWKS/OIDC with issuer, audience, expiry, merchant
+  binding, and fail-closed JWKS cache. HS256 only behind
+  `BRUISER_DEV_ASSERTIONS`; production refuses that mode.
+- Authorize no longer returns the origin secret. Edge/Proxy inject it
+  from local configuration. Origin verifies execution JWT + fence.
+- Canonical resource IDs; merchant execution budget; session logout;
+  replay keys; inbound `X-Bruiser-*` strip; keyed rate limits.
+
 ### Added
 
 - Progressive enforcement ramp (`enforce_percent` 0–100, default 100).

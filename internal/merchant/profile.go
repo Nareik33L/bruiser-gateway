@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Nareik33L/bruiser-gateway/internal/resource"
 	"gopkg.in/yaml.v3"
 )
 
@@ -189,11 +190,14 @@ func matchPath(pattern, path string) (map[string]string, bool) {
 
 func (r Route) ResourceFor(params map[string]string, bodyEventID string) string {
 	if r.ResourceFrom == "event_id" && bodyEventID != "" {
-		return r.ResourcePrefix + bodyEventID
+		return resource.MustCanonical(r.ResourcePrefix + bodyEventID)
 	}
 	res := r.Resource
 	for k, v := range params {
 		res = strings.ReplaceAll(res, "{"+k+"}", v)
+	}
+	if canon := resource.MustCanonical(res); canon != "" {
+		return canon
 	}
 	return res
 }

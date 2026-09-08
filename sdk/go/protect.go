@@ -44,9 +44,12 @@ func (c *FenceCache) Accept(domain string, fence int64) error {
 }
 
 type ProtectConfig struct {
-	Public ed25519.PublicKey
-	Header string // default X-Bruiser-Execution
-	Fences *FenceCache
+	Public     ed25519.PublicKey
+	Header     string // default X-Bruiser-Execution
+	Fences     *FenceCache
+	MerchantID string
+	Resource   string
+	Active     func(executionID string, fence int64) (bool, error)
 }
 
 func TokenFrom(r *http.Request, header string) string {
@@ -83,9 +86,24 @@ func Protect(cfg ProtectConfig) func(http.Handler) http.Handler {
 				http.Error(w, `{"error":"invalid execution token"}`, http.StatusUnauthorized)
 				return
 			}
+			if cfg.MerchantID != "" && claims.MerchantID != cfg.MerchantID {
+				http.Error(w, `{"error":"wrong merchant"}`, http.StatusUnauthorized)
+				return
+			}
+			if cfg.Resource != "" && claims.Resource != cfg.Resource {
+				http.Error(w, `{"error":"resource mismatch"}`, http.StatusForbidden)
+				return
+			}
 			if err := cfg.Fences.Accept(claims.Domain, claims.Fence); err != nil {
 				http.Error(w, `{"error":"stale fence"}`, http.StatusForbidden)
 				return
+			}
+			if cfg.Active != nil {
+				ok, err := cfg.Active(claims.ExecutionID, claims.Fence)
+				if err != nil || !ok {
+					http.Error(w, `{"error":"revoked execution"}`, http.StatusForbidden)
+					return
+				}
 			}
 			next.ServeHTTP(w, r)
 		})

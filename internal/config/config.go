@@ -41,6 +41,19 @@ type Config struct {
 	QueueEnabled      bool
 	EnforcePercent    int
 	Environment       string
+	DevAssertions     bool
+	JWKSURL           string
+	Issuer            string
+	Audience          string
+	RateSessions      float64
+	RateAcquire       float64
+	RateRenew         float64
+	RateRelease       float64
+	RateAuthorize     float64
+	RateMerchant      float64
+	RateCustomer      float64
+	RatePrincipal     float64
+	RateIP            float64
 }
 
 func Load() Config {
@@ -77,7 +90,20 @@ func Load() Config {
 		QueueEnabled:      envBool("BRUISER_QUEUE", true),
 		EnforcePercent:    envInt("BRUISER_ENFORCE_PERCENT", -1),
 		Environment:       env("BRUISER_ENV", env("BRUISER_ENVIRONMENT", "")),
+		JWKSURL:           env("BRUISER_JWKS_URL", ""),
+		Issuer:            env("BRUISER_ISSUER", ""),
+		Audience:          env("BRUISER_AUDIENCE", ""),
+		RateSessions:      envFloat("BRUISER_RATE_SESSIONS", 20),
+		RateAcquire:       envFloat("BRUISER_RATE_ACQUIRE", 20),
+		RateRenew:         envFloat("BRUISER_RATE_RENEW", 40),
+		RateRelease:       envFloat("BRUISER_RATE_RELEASE", 20),
+		RateAuthorize:     envFloat("BRUISER_RATE_AUTHORIZE", 40),
+		RateMerchant:      envFloat("BRUISER_RATE_MERCHANT", 200),
+		RateCustomer:      envFloat("BRUISER_RATE_CUSTOMER", 40),
+		RatePrincipal:     envFloat("BRUISER_RATE_PRINCIPAL", 20),
+		RateIP:            envFloat("BRUISER_RATE_IP", 0),
 	}
+	c.DevAssertions = envBool("BRUISER_DEV_ASSERTIONS", !c.Production())
 	return c
 }
 
@@ -121,6 +147,29 @@ func (c Config) Validate() error {
 	if err := c.ValidateSecrets(); err != nil {
 		return err
 	}
+	if err := c.ValidateIdentity(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ValidateIdentity is the production gate for merchant assertion mode.
+func (c Config) ValidateIdentity() error {
+	if !c.Production() {
+		return nil
+	}
+	if c.DevAssertions {
+		return fmt.Errorf("BRUISER_DEV_ASSERTIONS is enabled; production refuses development HMAC assertion mode")
+	}
+	if strings.TrimSpace(c.JWKSURL) == "" {
+		return fmt.Errorf("BRUISER_JWKS_URL is required in production (asymmetric merchant identity)")
+	}
+	if strings.TrimSpace(c.Issuer) == "" {
+		return fmt.Errorf("BRUISER_ISSUER is required in production")
+	}
+	if strings.TrimSpace(c.Audience) == "" {
+		return fmt.Errorf("BRUISER_AUDIENCE is required in production")
+	}
 	return nil
 }
 
@@ -158,6 +207,9 @@ func (c Config) validateSecrets() error {
 		}
 		if strings.TrimSpace(c.OriginSecret) == "" {
 			return fmt.Errorf("BRUISER_ORIGIN_SECRET is required in production (origin lockdown)")
+		}
+		if isLabSecret(c.OriginSecret) {
+			return fmt.Errorf("BRUISER_ORIGIN_SECRET is a lab/placeholder value; production requires a generated secret")
 		}
 	}
 	return nil

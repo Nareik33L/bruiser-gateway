@@ -176,6 +176,10 @@ process gauges work.
 Bruiser **consumes** the merchant’s authenticated customer identifier.
 It does not mint one and it does not decide who a human is.
 
+Production requires JWKS/OIDC (`BRUISER_JWKS_URL`, issuer, audience).
+`BRUISER_DEV_ASSERTIONS=1` enables HS256 for the lab only; production
+refuses to start if that flag is on. See [docs/12-production-deploy.md](12-production-deploy.md).
+
 - Signed extractors (`cookie-jwt`, `bearer-jwt`, `oidc`, `edge-signed`)
   are the V1 demonstration. The Arsenal-like lab uses a cookie JWT.
 - `identity.extractor: header` (and the `auto` fallback to

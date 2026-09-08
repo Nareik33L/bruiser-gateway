@@ -26,25 +26,33 @@ type Customer struct {
 }
 
 type Input struct {
-	Identity   merchant.Identity
-	Secret     string
-	EdgeSecret string
-	Cookie     string
-	Bearer     string
-	Header     string
-	Principal  string
-	Introspect string
-	HTTP       *http.Client
+	Identity            merchant.Identity
+	Secret              string
+	EdgeSecret          string
+	Cookie              string
+	Bearer              string
+	Header              string
+	Principal           string
+	Introspect          string
+	HTTP                *http.Client
+	MerchantID          string
+	AllowDevAssertions  bool
+	AllowUnsignedHeader bool
+	TrustedEdge         bool
+	RequireIssuer       bool
+	RequireAudience     bool
 }
 
 func Extract(id merchant.Identity, secret, cookie, bearer, headerVal, principalHdr string) (Customer, error) {
 	return ExtractInput(context.Background(), Input{
-		Identity:  id,
-		Secret:    secret,
-		Cookie:    cookie,
-		Bearer:    bearer,
-		Header:    headerVal,
-		Principal: principalHdr,
+		Identity:           id,
+		Secret:             secret,
+		Cookie:             cookie,
+		Bearer:             bearer,
+		Header:             headerVal,
+		Principal:          principalHdr,
+		AllowDevAssertions:  true,
+		AllowUnsignedHeader: true,
 	})
 }
 
@@ -59,11 +67,11 @@ func ExtractInput(ctx context.Context, in Input) (Customer, error) {
 	}
 	switch mode {
 	case "cookie-jwt", "cookie":
-		return fromJWT(in.Secret, claim(id), in.Cookie)
+		return fromJWT(in, in.Cookie)
 	case "bearer-jwt", "bearer", "jwt":
-		return fromJWT(in.Secret, claim(id), in.Bearer)
+		return fromJWT(in, in.Bearer)
 	case "header":
-		return fromHeader(in.Header, in.Principal)
+		return fromHeader(in)
 	case "edge-signed", "signed-header":
 		return fromEdgeSigned(in.Header, firstNonEmpty(in.EdgeSecret, in.Secret))
 	case "introspect", "introspection":
@@ -72,18 +80,18 @@ func ExtractInput(ctx context.Context, in Input) (Customer, error) {
 		return fromOIDC(ctx, in)
 	case "auto":
 		if in.Cookie != "" {
-			if c, err := fromJWT(in.Secret, claim(id), in.Cookie); err == nil {
+			if c, err := fromJWT(in, in.Cookie); err == nil {
 				return c, nil
 			}
 		}
 		if in.Bearer != "" {
-			if c, err := fromJWT(in.Secret, claim(id), in.Bearer); err == nil {
-				return c, nil
-			}
 			if id.JWKSURL != "" {
 				if c, err := fromOIDC(ctx, in); err == nil {
 					return c, nil
 				}
+			}
+			if c, err := fromJWT(in, in.Bearer); err == nil {
+				return c, nil
 			}
 			if c, err := fromIntrospect(ctx, in); err == nil {
 				return c, nil
@@ -93,7 +101,7 @@ func ExtractInput(ctx context.Context, in Input) (Customer, error) {
 			if c, err := fromEdgeSigned(in.Header, firstNonEmpty(in.EdgeSecret, in.Secret)); err == nil {
 				return c, nil
 			}
-			return fromHeader(in.Header, in.Principal)
+			return fromHeader(in)
 		}
 		return Customer{}, auth.ErrUnauthorized
 	default:
@@ -124,34 +132,54 @@ func merchantSource(src string) string {
 	}
 }
 
-func fromJWT(secret, claimName, raw string) (Customer, error) {
-	if raw == "" {
+func fromJWT(in Input, raw string) (Customer, error) {
+	if raw == "" || !in.AllowDevAssertions {
 		return Customer{}, auth.ErrUnauthorized
 	}
-	a, err := auth.ParseAssertionHS256Claim(raw, secret, claimName)
-	if err != nil && claimName != "sub" && claimName != "customer_id" {
+	opts := auth.AssertionOpts{
+		Issuer:     in.Identity.Issuer,
+		Audience:   in.Identity.Audience,
+		MerchantID: in.MerchantID,
+		Claim:      claim(in.Identity),
+	}
+	if in.RequireIssuer && opts.Issuer == "" {
+		return Customer{}, auth.ErrUnauthorized
+	}
+	if in.RequireAudience && opts.Audience == "" {
+		return Customer{}, auth.ErrUnauthorized
+	}
+	a, err := auth.ParseAssertion(raw, in.Secret, opts)
+	if err != nil && opts.Claim != "sub" && opts.Claim != "customer_id" {
 		return Customer{}, err
 	}
 	if err != nil {
-		a, err = auth.ParseAssertionHS256Claim(raw, secret, "customer_id")
+		opts.Claim = "customer_id"
+		a, err = auth.ParseAssertion(raw, in.Secret, opts)
 	}
 	if err != nil {
-		a, err = auth.ParseAssertionHS256Claim(raw, secret, "sub")
+		opts.Claim = "sub"
+		a, err = auth.ParseAssertion(raw, in.Secret, opts)
 	}
 	if err != nil {
 		return Customer{}, err
+	}
+	if in.MerchantID != "" && a.MerchantID != "" && a.MerchantID != in.MerchantID {
+		return Customer{}, auth.ErrUnauthorized
 	}
 	return Customer{CustomerID: a.CustomerID, PrincipalID: a.JTI, Anchors: a.Anchors}, nil
 }
 
-func fromHeader(customer, principal string) (Customer, error) {
-	customer = strings.TrimSpace(customer)
+func fromHeader(in Input) (Customer, error) {
+	if !in.TrustedEdge && !in.AllowUnsignedHeader {
+		return Customer{}, auth.ErrUnauthorized
+	}
+	customer := strings.TrimSpace(in.Header)
 	if customer == "" {
 		return Customer{}, auth.ErrUnauthorized
 	}
 	return Customer{
 		CustomerID:  customer,
-		PrincipalID: strings.TrimSpace(principal),
+		PrincipalID: strings.TrimSpace(in.Principal),
 		Anchors:     map[string]string{},
 	}, nil
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/Nareik33L/bruiser-gateway/internal/auth"
 	"github.com/Nareik33L/bruiser-gateway/internal/config"
 	"github.com/Nareik33L/bruiser-gateway/internal/id"
+	"github.com/Nareik33L/bruiser-gateway/internal/identity"
 	"github.com/Nareik33L/bruiser-gateway/internal/lease"
 	"github.com/Nareik33L/bruiser-gateway/internal/limit"
 	"github.com/Nareik33L/bruiser-gateway/internal/merchant"
@@ -187,6 +188,7 @@ type Server struct {
 	eaf       *eafAcc
 	mux       http.Handler
 	limit     *limit.PerExecution
+	rates     *rateGuards
 	compiled  atomic.Pointer[policy.Compiled]
 	policyVer atomic.Int64
 	stopWatch context.CancelFunc
@@ -203,6 +205,7 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 		profile: profile,
 		eaf:     newEAFAcc(),
 		limit:   limit.New(cfg.MaxInFlight, cfg.RatePerSec),
+		rates:   (&Server{cfg: cfg}).rateGuards(),
 	}
 	if cfg.Burst > 0 {
 		s.limit.Burst = cfg.Burst
@@ -213,6 +216,7 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
+	r.Use(stripInboundBruiser)
 	r.Use(requestDeadline(8 * time.Second))
 	r.Get("/healthz", s.healthz)
 	r.Get("/readyz", s.readyz)
@@ -224,6 +228,9 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 	r.Get("/.well-known/bruiser/protocol", s.protocol)
 	r.Route("/v1", func(r chi.Router) {
 		r.Post("/sessions", s.createSession)
+		r.Post("/sessions/logout", s.logoutSession)
+		r.Post("/sessions/revoke", s.logoutSession)
+		r.Post("/sessions/refresh", s.refreshSession)
 		r.Post("/authorize", s.authorize)
 		r.Post("/introspect", s.introspect)
 		r.Get("/policy", s.getPolicy)
@@ -335,7 +342,11 @@ func (s *Server) protocol(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"protocol":     "bruiser",
 		"version":      "0.1-draft",
-		"capabilities": []string{"IDENTITY", "ACQUIRE", "RENEW", "HEARTBEAT", "RELEASE", "HANDOFF", "REVOKE", "WATCH", "QUEUE", "AUTHORIZE", "INTROSPECT", "POLICY", "ADMIN", "AUTHORITY_CHECK", "DRY_RUN", "RAMP", "CONTROLS"},
+		"capabilities": []string{"IDENTITY", "ACQUIRE", "RENEW", "HEARTBEAT", "RELEASE", "HANDOFF", "REVOKE", "WATCH", "QUEUE", "AUTHORIZE", "INTROSPECT", "POLICY", "ADMIN", "AUTHORITY_CHECK", "DRY_RUN", "RAMP", "CONTROLS", "SESSION_REVOKE", "REPLAY", "BUDGET"},
+		"states": map[string][]string{
+			"decision": {"ALLOW", "BUSY", "QUEUED", "DENIED"},
+			"execution": {lease.StateActive, lease.StateReleased, lease.StateExpired, lease.StateRevoked, lease.StateHandedOff, lease.StateQueued},
+		},
 	})
 }
 
@@ -348,13 +359,19 @@ type sessionReq struct {
 }
 
 func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
-	raw := bearer(r)
-	if raw == "" {
-		writeErr(w, http.StatusUnauthorized, "missing customer assertion")
+	if s.rates != nil && !s.rates.check(w, "sessions", clientIP(r), s.rates.sessions) {
 		return
 	}
-	assertion, err := auth.ParseAssertionHS256(raw, s.cfg.DevHMACSecret, "bruiser")
-	if err != nil {
+	if s.rates != nil && !s.rates.check(w, "merchant", s.cfg.MerchantID, s.rates.merchant) {
+		return
+	}
+	if s.rates != nil && !s.rates.check(w, "ip", clientIP(r), s.rates.ip) {
+		return
+	}
+	in := s.identityInput(r, s.edgeAuthorized(r))
+	in.Identity.Extractor = "auto"
+	cust, err := identity.ExtractInput(r.Context(), in)
+	if err != nil || cust.CustomerID == "" {
 		writeErr(w, http.StatusUnauthorized, "invalid customer assertion")
 		return
 	}
@@ -378,42 +395,105 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.InsertSession(r.Context(), pgstore.SessionRow{
 		ID:            sessID,
 		MerchantID:    s.cfg.MerchantID,
-		CustomerID:    assertion.CustomerID,
-		Anchors:       assertion.Anchors,
+		CustomerID:    cust.CustomerID,
+		Anchors:       cust.Anchors,
 		PrincipalType: body.Principal.Type,
 		PrincipalID:   body.Principal.ID,
 		ExpiresAt:     exp,
+		Version:       1,
 	}); err != nil {
 		s.storeError(w, err)
 		return
 	}
 	token, err := s.signer.SignSession(auth.SessionClaims{
 		MerchantID:    s.cfg.MerchantID,
-		CustomerID:    assertion.CustomerID,
+		CustomerID:    cust.CustomerID,
 		PrincipalType: body.Principal.Type,
 		PrincipalID:   body.Principal.ID,
 		SessionID:     sessID,
-		Anchors:       assertion.Anchors,
+		Version:       1,
+		Anchors:       cust.Anchors,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(exp),
 			IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
-			Subject:   assertion.CustomerID,
+			Subject:   cust.CustomerID,
 		},
 	})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "sign session")
 		return
 	}
-	anchorKeys := make([]string, 0, len(assertion.Anchors))
-	for k := range assertion.Anchors {
+	anchorKeys := make([]string, 0, len(cust.Anchors))
+	for k := range cust.Anchors {
 		anchorKeys = append(anchorKeys, k)
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"session_id":    sessID,
 		"session_token": token,
 		"expires_at":    exp.Format(time.RFC3339Nano),
-		"customer_id":   assertion.CustomerID,
+		"customer_id":   cust.CustomerID,
 		"anchors":       anchorKeys,
+	})
+}
+
+func (s *Server) logoutSession(w http.ResponseWriter, r *http.Request) {
+	raw := bearer(r)
+	if raw == "" {
+		writeErr(w, http.StatusUnauthorized, "missing session token")
+		return
+	}
+	claims, err := auth.ParseSession(raw, s.signer.Public)
+	if err != nil || claims.MerchantID != s.cfg.MerchantID {
+		writeErr(w, http.StatusUnauthorized, "invalid session token")
+		return
+	}
+	if err := s.store.RevokeSession(r.Context(), s.cfg.MerchantID, claims.SessionID); err != nil {
+		s.storeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "REVOKED", "session_id": claims.SessionID})
+}
+
+func (s *Server) refreshSession(w http.ResponseWriter, r *http.Request) {
+	raw := bearer(r)
+	if raw == "" {
+		writeErr(w, http.StatusUnauthorized, "missing session token")
+		return
+	}
+	claims, err := auth.ParseSession(raw, s.signer.Public)
+	if err != nil || claims.MerchantID != s.cfg.MerchantID {
+		writeErr(w, http.StatusUnauthorized, "invalid session token")
+		return
+	}
+	live, err := s.store.LiveSession(r.Context(), s.cfg.MerchantID, claims.SessionID)
+	if err != nil {
+		writeErr(w, http.StatusUnauthorized, "session revoked")
+		return
+	}
+	exp := time.Now().UTC().Add(s.cfg.SessionTTL)
+	token, err := s.signer.SignSession(auth.SessionClaims{
+		MerchantID:    live.MerchantID,
+		CustomerID:    live.CustomerID,
+		PrincipalType: live.PrincipalType,
+		PrincipalID:   live.PrincipalID,
+		SessionID:     live.ID,
+		Version:       live.Version,
+		Anchors:       live.Anchors,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(exp),
+			IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
+			Subject:   live.CustomerID,
+		},
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "sign session")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"session_id":    live.ID,
+		"session_token": token,
+		"expires_at":    exp.Format(time.RFC3339Nano),
+		"status":        "ALLOW",
 	})
 }
 
@@ -437,6 +517,12 @@ func (s *Server) sessionAuth(next http.Handler) http.Handler {
 			writeErr(w, http.StatusUnauthorized, "wrong merchant")
 			return
 		}
+		if claims.SessionID != "" {
+			if _, err := s.store.LiveSession(r.Context(), s.cfg.MerchantID, claims.SessionID); err != nil {
+				writeErr(w, http.StatusUnauthorized, "session revoked")
+				return
+			}
+		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), sessionKey, claims)))
 	})
 }
@@ -453,6 +539,18 @@ type acquireReq struct {
 
 func (s *Server) acquire(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r.Context())
+	if s.rates != nil && !s.rates.check(w, "acquire", sess.CustomerID, s.rates.acquire) {
+		return
+	}
+	if s.rates != nil && !s.rates.check(w, "customer", sess.CustomerID, s.rates.customer) {
+		return
+	}
+	if s.rates != nil && !s.rates.check(w, "principal", sess.PrincipalID, s.rates.principal) {
+		return
+	}
+	if !s.claimReplay(w, r, "acquire") {
+		return
+	}
 	var body acquireReq
 	if !decodeJSON(w, r, &body) {
 		return
@@ -460,6 +558,12 @@ func (s *Server) acquire(w http.ResponseWriter, r *http.Request) {
 	if body.Resource == "" {
 		writeErr(w, http.StatusBadRequest, "resource required")
 		return
+	}
+	if canon, err := canonicalizeResource(body.Resource); err != nil {
+		writeErr(w, http.StatusBadRequest, "malformed resource")
+		return
+	} else {
+		body.Resource = canon
 	}
 	if body.Action == "" {
 		body.Action = "purchase"
@@ -494,6 +598,7 @@ func (s *Server) acquire(w http.ResponseWriter, r *http.Request) {
 		MaxLifetime: d.MaxLifetime,
 		Precedence:  d.Precedence,
 		MaxWaiters:  d.MaxWaiters,
+		MaxOps:      d.MaxOps,
 		RequestID:   reqID,
 	})
 	if err != nil {
@@ -505,6 +610,9 @@ func (s *Server) acquire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	acquireTotal.WithLabelValues(res.Status, d.RuleName).Inc()
+	if res.Execution != nil {
+		_ = s.store.EnsureBudget(r.Context(), s.cfg.MerchantID, res.Execution.ID, d.MaxOps)
+	}
 	s.recordAcquire(r.Context(), true, sess.CustomerID, sess.PrincipalID, body.Resource, body.Action, d.RuleName, res, reqID)
 	w.Header().Set("X-Bruiser-Enforced", "1")
 	w.Header().Set("X-Bruiser-Ramp", strconv.Itoa(ctl.EffectivePercent()))

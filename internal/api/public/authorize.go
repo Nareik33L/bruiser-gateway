@@ -3,7 +3,6 @@ package publicapi
 import (
 	"bytes"
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -35,12 +34,18 @@ type admitResult struct {
 }
 
 func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.EdgeSecret != "" {
-		got := r.Header.Get("X-Bruiser-Edge-Secret")
-		if subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.EdgeSecret)) != 1 {
-			writeErr(w, http.StatusUnauthorized, "bad edge secret")
-			return
-		}
+	if s.cfg.EdgeSecret == "" || !s.edgeAuthorized(r) {
+		writeErr(w, http.StatusUnauthorized, "bad edge secret")
+		return
+	}
+	if s.rates != nil && !s.rates.check(w, "authorize", clientIP(r), s.rates.authorize) {
+		return
+	}
+	if s.rates != nil && !s.rates.check(w, "merchant", s.cfg.MerchantID, s.rates.merchant) {
+		return
+	}
+	if !s.claimReplay(w, r, "authorize") {
+		return
 	}
 	method := r.Header.Get("X-Original-Method")
 	path := r.Header.Get("X-Original-URI")
@@ -96,16 +101,7 @@ func (s *Server) admit(ctx context.Context, method, path, eventID string, r *htt
 		return admitResult{status: http.StatusOK, allow: true, headers: h, body: map[string]string{"status": "ALLOW", "action": route.Action}}
 	}
 
-	cust, err := identity.ExtractInput(ctx, identity.Input{
-		Identity:   s.profile.Identity,
-		Secret:     s.cfg.DevHMACSecret,
-		EdgeSecret: s.cfg.EdgeSecret,
-		Cookie:     cookieValue(r, s.profile.Identity.Cookie),
-		Bearer:     bearer(r),
-		Header:     headerValue(r, s.profile.Identity.Header),
-		Principal:  headerValue(r, s.profile.Identity.PrincipalHeader),
-		Introspect: firstNonEmpty(s.profile.Identity.IntrospectURL, s.cfg.IntrospectURL),
-	})
+	cust, err := identity.ExtractInput(ctx, s.identityInput(r, true))
 	if err != nil {
 		s.eaf.record(resourceOrPath(route, params, eventID), "", "unauthorized")
 		return admitResult{status: http.StatusUnauthorized, body: map[string]string{"error": "missing merchant session"}}
@@ -114,6 +110,11 @@ func (s *Server) admit(ctx context.Context, method, path, eventID string, r *htt
 	resource := route.ResourceFor(params, eventID)
 	if resource == "" {
 		return admitResult{status: http.StatusBadRequest, body: map[string]string{"error": "could not derive resource"}}
+	}
+	if canon, err := canonicalizeResource(resource); err != nil {
+		return admitResult{status: http.StatusBadRequest, body: map[string]string{"error": "malformed resource"}}
+	} else if canon != "" {
+		resource = canon
 	}
 
 	d := s.evaluate(s.cfg.MerchantID, cust.CustomerID, "agent", resource, route.Action, cust.Anchors)
@@ -171,6 +172,7 @@ func (s *Server) admit(ctx context.Context, method, path, eventID string, r *htt
 		MaxLifetime: d.MaxLifetime,
 		Precedence:  d.Precedence,
 		MaxWaiters:  d.MaxWaiters,
+		MaxOps:      d.MaxOps,
 		RequestID:   reqID,
 	})
 	if err != nil {
@@ -195,7 +197,16 @@ func (s *Server) admit(ctx context.Context, method, path, eventID string, r *htt
 		h.Set("X-Bruiser-Execution", tok)
 		h.Set("X-Bruiser-Fence", strconv.FormatInt(acq.Execution.Fence, 10))
 		h.Set("X-Bruiser-Customer", cust.CustomerID)
-		s.stampOrigin(h)
+		_ = s.store.EnsureBudget(ctx, s.cfg.MerchantID, acq.Execution.ID, d.MaxOps)
+		if _, _, err := s.store.ConsumeOp(ctx, s.cfg.MerchantID, acq.Execution.ID); err != nil {
+			return admitResult{status: http.StatusConflict, body: map[string]string{"status": "DENIED", "error": "BUDGET"}}
+		}
+		_ = s.store.WriteAudit(ctx, s.cfg.MerchantID, "AUTHORIZE", acq.Status, reqID, map[string]any{
+			"customer_id":  cust.CustomerID,
+			"execution_id": acq.Execution.ID,
+			"resource":     resource,
+			"action":       route.Action,
+		})
 		return admitResult{
 			status:  http.StatusOK,
 			allow:   true,
@@ -272,7 +283,6 @@ func (s *Server) admitDryRun(ctx context.Context, h http.Header, customerID, pri
 	h.Set("X-Bruiser-Dry-Run-Reason", reason)
 	h.Set("X-Bruiser-Enforced", "0")
 	h.Set("X-Bruiser-Ramp", strconv.Itoa(percent))
-	s.stampOrigin(h)
 	return admitResult{
 		status:  http.StatusOK,
 		allow:   true,
@@ -294,7 +304,6 @@ func (s *Server) admitStoreError(err error) admitResult {
 	if s.failOpen() {
 		h := make(http.Header)
 		h.Set("X-Bruiser-Control", "fail-open")
-		s.stampOrigin(h)
 		return admitResult{status: http.StatusOK, allow: true, headers: h, body: map[string]any{"status": "ALLOW", "control": "fail-open"}}
 	}
 	switch {

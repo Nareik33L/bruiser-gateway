@@ -27,10 +27,11 @@ func startLab(t *testing.T, originSecret string) (edgeURL, originURL, gwURL, hma
 	originSrv := httptest.NewServer(origin.Handler())
 	t.Cleanup(originSrv.Close)
 	p, err := edge.New(edge.Config{
-		OriginURL:   originSrv.URL,
-		BruiserURL:  gw.URL,
-		EdgeSecret:  cfg.EdgeSecret,
-		MaxInFlight: 8,
+		OriginURL:    originSrv.URL,
+		BruiserURL:   gw.URL,
+		EdgeSecret:   cfg.EdgeSecret,
+		OriginSecret: originSecret,
+		MaxInFlight:  8,
 	})
 	if err != nil {
 		t.Fatal(err)

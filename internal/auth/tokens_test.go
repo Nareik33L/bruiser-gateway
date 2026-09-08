@@ -89,3 +89,46 @@ func TestRoundTripSessionAndExecution(t *testing.T) {
 		t.Fatalf("want distinct jti for two logins: %+v %+v", b1, b2)
 	}
 }
+
+func TestAssertionIssuerAudienceMerchant(t *testing.T) {
+	tok, err := IssueDevAssertion("secret", "alice", time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseAssertion(tok, "secret", AssertionOpts{Issuer: "other"}); err == nil {
+		t.Fatal("wrong issuer")
+	}
+	if _, err := ParseAssertion(tok, "secret", AssertionOpts{Issuer: "dev", Audience: "nope"}); err == nil {
+		t.Fatal("wrong audience")
+	}
+	if _, err := ParseAssertion(tok, "secret", AssertionOpts{Issuer: "dev", Audience: "bruiser"}); err != nil {
+		t.Fatal(err)
+	}
+	expired, err := IssueDevAssertion("secret", "alice", -time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseAssertionHS256(expired, "secret", "bruiser"); err == nil {
+		t.Fatal("expired")
+	}
+}
+
+func TestExecutionSkewLeeway(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := Signer{KID: "k", MerchantID: "m", Private: priv, Public: pub}
+	tok, err := s.SignExecution(lease.Execution{
+		ID: "exe", MerchantID: "m", CustomerID: "c",
+		DomainKey: "d", Resource: "event:x", Action: "hold",
+		Principal: lease.Principal{Type: "agent", ID: "a"},
+		Fence:     1, ExpiresAt: time.Now().UTC().Add(2 * time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseExecution(tok, pub); err != nil {
+		t.Fatal(err)
+	}
+}

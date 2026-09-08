@@ -23,15 +23,12 @@ export default {
     }
     const dest = new URL(url.pathname + url.search, env.ORIGIN_URL);
     const headers = new Headers(request.headers);
-    for (const name of [
-      "X-Bruiser-Execution",
-      "X-Bruiser-Fence",
-      "X-Bruiser-Customer",
-      "X-Bruiser-Origin-Secret",
-    ]) {
+    for (const name of ["X-Bruiser-Execution", "X-Bruiser-Fence", "X-Bruiser-Customer"]) {
       const v = auth.headers.get(name);
       if (v) headers.set(name, v);
     }
+    // Origin lockdown secret lives on this worker — never taken from authorize.
+    if (env.ORIGIN_SECRET) headers.set("X-Bruiser-Origin-Secret", env.ORIGIN_SECRET);
     return fetch(dest, { method: request.method, headers, body: request.body });
   },
 };

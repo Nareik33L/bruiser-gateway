@@ -31,6 +31,23 @@ type SafetyOpts struct {
 // cannot combine it with a missing origin lockdown.
 func (p Profile) SafetyIssues(opts SafetyOpts) []Issue {
 	var out []Issue
+	if opts.Production {
+		ext := strings.ToLower(strings.TrimSpace(p.Identity.Extractor))
+		switch ext {
+		case "oidc", "jwks", "auto", "cookie-jwt", "cookie", "bearer-jwt", "bearer", "jwt":
+			if p.Identity.JWKSURL == "" {
+				out = append(out, Issue{"FAIL", "identity.jwks_url", "production requires jwks_url (HS256 is development-only)"})
+			}
+			if p.Identity.Issuer == "" {
+				out = append(out, Issue{"FAIL", "identity.issuer", "production requires identity.issuer"})
+			}
+			if p.Identity.Audience == "" {
+				out = append(out, Issue{"FAIL", "identity.audience", "production requires identity.audience"})
+			}
+		case "header":
+			out = append(out, Issue{"FAIL", "identity.extractor", "production refuses unsigned header identity; use oidc/jwks or a trusted edge-signed extractor"})
+		}
+	}
 	if !p.UnmatchedAllow() {
 		return out
 	}

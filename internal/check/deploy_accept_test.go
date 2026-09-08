@@ -112,7 +112,7 @@ func startDeploy(t *testing.T, kind deployKind) deployLab {
 		origin := simtix.New(simtix.Config{HMACSecret: cfg.DevHMACSecret, OriginSecret: cfg.OriginSecret, Seats: 200})
 		originSrv := httptest.NewServer(origin.Handler())
 		t.Cleanup(originSrv.Close)
-		p, err := edge.New(edge.Config{OriginURL: originSrv.URL, BruiserURL: gw.URL, EdgeSecret: cfg.EdgeSecret, MaxInFlight: 8})
+		p, err := edge.New(edge.Config{OriginURL: originSrv.URL, BruiserURL: gw.URL, EdgeSecret: cfg.EdgeSecret, OriginSecret: cfg.OriginSecret, MaxInFlight: 8})
 		if err != nil {
 			t.Fatal(err)
 		}
