@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/Nareik33L/bruiser-gateway/internal/check"
@@ -27,6 +28,12 @@ func cmdAuthorityCheck() error {
 	front := *edgeURL
 	if *frontURL != "" {
 		front = *frontURL
+	}
+	if strings.TrimSpace(*originURL) == "" {
+		return fmt.Errorf("authority-check requires --origin (do not go live without proving origin lockdown)")
+	}
+	if strings.TrimSpace(*controlURL) == "" {
+		*controlURL = env("BRUISER_CHECK_CONTROL_URL", "http://127.0.0.1:8080")
 	}
 	rep, err := check.Run(check.Config{
 		EdgeURL:    front,

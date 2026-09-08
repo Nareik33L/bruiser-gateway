@@ -9,6 +9,10 @@
 
 merchant_id: example
 name: Example merchant
+# unmatched: allow keeps discovery/static fail-open. Every scarce
+# hold/purchase path MUST be listed below. Origin lockdown
+# (BRUISER_ORIGIN_SECRET) is required; config validate FAILs without it.
+# Confirm with: bruiser authority-check --front … --origin … --control …
 unmatched: allow
 
 identity:

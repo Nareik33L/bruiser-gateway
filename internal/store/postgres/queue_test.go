@@ -195,12 +195,21 @@ func TestBoundedQueuePromoteOnExpire(t *testing.T) {
 	if err != nil || q.Status != lease.StatusQueued {
 		t.Fatalf("queue: %+v %v", q, err)
 	}
-	time.Sleep(120 * time.Millisecond)
-	if _, err := s.ExpireDue(ctx, 50); err != nil {
-		t.Fatal(err)
+	deadline := time.Now().Add(2 * time.Second)
+	var promoted lease.Execution
+	for {
+		if _, err := s.ExpireDue(ctx, 50); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.Get(ctx, m, q.Queue.WaiterID)
+		if err == nil && got.State == lease.StateActive {
+			promoted = got
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("promoted after expire: %+v %v", got, err)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	promoted, err := s.Get(ctx, m, q.Queue.WaiterID)
-	if err != nil || promoted.State != lease.StateActive {
-		t.Fatalf("promoted after expire: %+v %v", promoted, err)
-	}
+	_ = promoted
 }

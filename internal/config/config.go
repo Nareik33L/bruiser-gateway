@@ -68,7 +68,7 @@ func Load() Config {
 		AuditRetention:    envDuration("BRUISER_AUDIT_RETENTION", 13*30*24*time.Hour),
 		CheckEdgeURL:      env("BRUISER_CHECK_EDGE_URL", "http://127.0.0.1:8091"),
 		CheckOriginURL:    env("BRUISER_CHECK_ORIGIN_URL", "http://127.0.0.1:8090"),
-		AdminSecret:       env("BRUISER_ADMIN_SECRET", ""),
+		AdminSecret:       lookupEnv("BRUISER_ADMIN_SECRET"),
 		Telemetry:         env("BRUISER_TELEMETRY", "") == "1" || strings.EqualFold(env("BRUISER_TELEMETRY", ""), "true"),
 		IntrospectURL:     env("BRUISER_INTROSPECT_URL", ""),
 		Burst:             envInt("BRUISER_BURST", 10),
@@ -78,10 +78,17 @@ func Load() Config {
 		EnforcePercent:    envInt("BRUISER_ENFORCE_PERCENT", -1),
 		Environment:       env("BRUISER_ENV", env("BRUISER_ENVIRONMENT", "")),
 	}
-	if c.AdminSecret == "" {
-		c.AdminSecret = c.EdgeSecret
-	}
 	return c
+}
+
+// Production is true when the operator set BRUISER_ENV to a live environment.
+func (c Config) Production() bool {
+	switch strings.ToLower(strings.TrimSpace(c.Environment)) {
+	case "production", "prod", "live":
+		return true
+	default:
+		return false
+	}
 }
 
 func (c Config) Validate() error {
@@ -111,7 +118,61 @@ func (c Config) Validate() error {
 	if c.EnforcePercent > 100 {
 		return fmt.Errorf("BRUISER_ENFORCE_PERCENT must be 0–100")
 	}
+	if err := c.ValidateSecrets(); err != nil {
+		return err
+	}
 	return nil
+}
+
+// ValidateSecrets is the production gate for admin/edge/origin credentials.
+func (c Config) ValidateSecrets() error {
+	return c.validateSecrets()
+}
+
+func (c Config) validateSecrets() error {
+	if strings.TrimSpace(c.AdminSecret) == "" {
+		return fmt.Errorf("BRUISER_ADMIN_SECRET is required and must not be empty")
+	}
+	if strings.TrimSpace(c.EdgeSecret) == "" {
+		return fmt.Errorf("BRUISER_EDGE_SECRET is required and must not be empty")
+	}
+	if c.AdminSecret == c.EdgeSecret {
+		return fmt.Errorf("BRUISER_ADMIN_SECRET must be distinct from BRUISER_EDGE_SECRET")
+	}
+	if c.OriginSecret != "" && c.AdminSecret == c.OriginSecret {
+		return fmt.Errorf("BRUISER_ADMIN_SECRET must be distinct from BRUISER_ORIGIN_SECRET")
+	}
+	if c.OriginSecret != "" && c.EdgeSecret == c.OriginSecret {
+		return fmt.Errorf("BRUISER_EDGE_SECRET must be distinct from BRUISER_ORIGIN_SECRET")
+	}
+	if c.Production() {
+		for _, pair := range []struct{ name, val string }{
+			{"BRUISER_ADMIN_SECRET", c.AdminSecret},
+			{"BRUISER_EDGE_SECRET", c.EdgeSecret},
+			{"BRUISER_ORIGIN_SECRET", c.OriginSecret},
+			{"BRUISER_DEV_HMAC_SECRET", c.DevHMACSecret},
+		} {
+			if isLabSecret(pair.val) {
+				return fmt.Errorf("%s is a lab/placeholder value; production requires a dedicated secret", pair.name)
+			}
+		}
+		if strings.TrimSpace(c.OriginSecret) == "" {
+			return fmt.Errorf("BRUISER_ORIGIN_SECRET is required in production (origin lockdown)")
+		}
+	}
+	return nil
+}
+
+func isLabSecret(s string) bool {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return true
+	}
+	switch s {
+	case "change-me", "edge-secret-dev", "origin-lock-dev", "admin-secret-dev", "dev-secret-change-me":
+		return true
+	}
+	return strings.HasPrefix(s, "change-me")
 }
 
 func env(key, def string) string {
@@ -119,6 +180,10 @@ func env(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func lookupEnv(key string) string {
+	return os.Getenv(key)
 }
 
 func envDuration(key string, def time.Duration) time.Duration {

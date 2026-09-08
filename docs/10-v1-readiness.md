@@ -62,10 +62,7 @@ This revision: `make test-race`, `make sdk-test`, `make v1-accept`, and
 
 | Item | Why it is not a V1 blocker |
 |------|----------------------------|
-| `unmatched: allow` | Discovery / non-allocation traffic fail-open by design. Every hold/purchase path must be in the profile **and** origin lockdown must be on. Authority Check FAILs if an unlisted path allocates. |
-| Authority Check without `--origin` | Overall `WARN` (blocking). Do not go live without an origin URL. |
-| Authority Check without `--control` | Non-blocking WARN; Edge/Proxy probes still prove the front. |
-| `BRUISER_ADMIN_SECRET` empty | Falls back to the edge secret (`config.Load`). Set a distinct admin secret in production. |
+| `unmatched: allow` | Discovery fail-open by design. `config validate` FAILs if origin lockdown is off. Authority Check probes common forgotten paths on the front **and** the origin. |
 | Admin cookie is not `Secure` | Lab HTTP. Terminate TLS at the ingress and do not expose `/admin` publicly without a network policy. |
 | Prometheus counters are process-global | Per-replica. Admin `/v1/admin/status` EAF is per process. Do not sum `bruiser_observed_eaf` across replicas as a single truth. |
 | Busy cache is in-process | Correctness is the store. A replica restart rebuilds the cache. |
@@ -110,9 +107,10 @@ Engineering blockers for a **supported** deployment (Proxy or Edge in
 front of every allocation route, origin lockdown on, distinct secrets,
 Postgres reachable):
 
-- None identified for a supported deployment (Proxy or Edge on every
-  allocation route, origin lockdown on, distinct secrets, Postgres up).
-  `make test-race` and `make eaf-nightly` passed on this revision.
+- None identified. Go-live requires
+  `bruiser authority-check --front … --origin … --control …` PASS,
+  a dedicated `BRUISER_ADMIN_SECRET`, and origin lockdown with every
+  hold/purchase path listed. `make test-race` passed on this revision.
 
 Still **human-owned** (not software gaps):
 

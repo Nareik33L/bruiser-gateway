@@ -62,6 +62,7 @@ func TestDemoAssertion(t *testing.T) {
 	rep, err := check.Run(check.Config{
 		EdgeURL:    proxy.URL,
 		OriginURL:  originSrv.URL,
+		ControlURL: gw.URL,
 		HMACSecret: cfg.DevHMACSecret,
 	})
 	if err != nil {
@@ -70,5 +71,4 @@ func TestDemoAssertion(t *testing.T) {
 	if !rep.Passed() {
 		t.Fatalf("authority check\n%s", rep.String())
 	}
-	_ = gw
 }

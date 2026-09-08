@@ -109,16 +109,13 @@ func (s *Server) evaluate(merchantID, customerID, ptype, resource, action string
 }
 
 func (s *Server) adminSecret() string {
-	if s.cfg.AdminSecret != "" {
-		return s.cfg.AdminSecret
-	}
-	return s.cfg.EdgeSecret
+	return s.cfg.AdminSecret
 }
 
 func (s *Server) adminOK(r *http.Request) bool {
 	secret := s.adminSecret()
 	if secret == "" {
-		return true
+		return false
 	}
 	got := r.Header.Get("X-Bruiser-Admin-Secret")
 	if got == "" {

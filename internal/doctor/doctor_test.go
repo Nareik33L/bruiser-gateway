@@ -10,6 +10,9 @@ import (
 
 func TestDoctorExampleProfile(t *testing.T) {
 	cfg := config.Load()
+	cfg.AdminSecret = "admin-secret-dev"
+	cfg.EdgeSecret = "edge-secret-dev"
+	cfg.OriginSecret = "origin-lock-dev"
 	p, err := merchant.LoadFile("../../configs/example.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -29,7 +32,7 @@ func TestDoctorExampleProfile(t *testing.T) {
 		}
 	}
 	joined := strings.Join(names, ",")
-	for _, need := range []string{"configuration", "identity extraction", "protected routes", "signing keys", "persistence", "queue configuration", "authority enforcement", "metrics", "audit configuration"} {
+	for _, need := range []string{"configuration", "identity extraction", "protected routes", "unmatched safety", "signing keys", "persistence", "queue configuration", "authority enforcement", "metrics", "audit configuration"} {
 		if !strings.Contains(joined, need) {
 			t.Fatalf("missing check %s in %s", need, joined)
 		}
@@ -38,6 +41,8 @@ func TestDoctorExampleProfile(t *testing.T) {
 
 func TestDoctorMissingRoutesFail(t *testing.T) {
 	cfg := config.Load()
+	cfg.AdminSecret = "admin-secret-dev"
+	cfg.EdgeSecret = "edge-secret-dev"
 	p := merchant.Empty("x")
 	rep := Run(Input{Config: cfg, Profile: p})
 	if rep.Overall != Fail {

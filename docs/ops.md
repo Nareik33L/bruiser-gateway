@@ -113,7 +113,8 @@ writes `AUDIT_PURGED`.
 1. Place Bruiser in front of every scarce-inventory route (Embedded, Edge, or Proxy).
 2. Lock the origin so a parallel path cannot allocate without Bruiser.
 3. `bruiser authority-check --front <edge> --origin <origin>`
-4. Expect PASS. A FAIL is not production-ready. The last report is also on
+4. Expect PASS. `--origin` and `--control` are required. A FAIL or a
+   missing origin is not production-ready. The last report is also on
    `GET /v1/authority-check` (admin secret) and in audit as `AUTHORITY_CHECK`.
 
 ## Key rotation
@@ -202,7 +203,7 @@ Reproduce: `go test ./internal/ops ./internal/api/public -run 'TestBucket|TestPr
 | Concurrent acquire race | Store unique-active constraint: exactly one `GRANTED` | Closed |
 | Deployment during active execution | Successor process reads the same row; fence unchanged until handoff/revoke | Closed |
 | Kill switch `enforcement=false` | Effective 0%: observe only. Store errors ALLOW (passthrough) | Open *by operator choice* |
-| `unmatched: allow` | Paths not in the profile forward without a lease. Origin lockdown must still reject allocation. | Open for **unlisted** routes — list every hold/purchase path |
+| `unmatched: allow` | Unlisted routes fail-open for discovery. Every hold/purchase path must be listed. Origin lockdown (`BRUISER_ORIGIN_SECRET`) is required; `config validate` FAILs the combination without it. | Open for **unlisted** routes only if origin lockdown is off — that combo is invalid |
 
 No supported deployment may leave a scarce-inventory route reachable
 without Bruiser **and** origin lockdown. `bruiser authority-check`

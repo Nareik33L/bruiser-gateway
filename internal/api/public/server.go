@@ -286,6 +286,14 @@ func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 		"enforce_percent": ctl.EffectivePercent(),
 		"signing_key":     "unknown",
 		"upstream":        "skipped",
+		"admin_secret":    "ok",
+	}
+	if err := s.cfg.ValidateSecrets(); err != nil {
+		body["status"] = "not_ready"
+		body["admin_secret"] = "invalid"
+		body["config"] = err.Error()
+		writeJSON(w, http.StatusServiceUnavailable, body)
+		return
 	}
 	if err := s.store.Ping(ctx); err != nil {
 		storeUnavailable.Inc()

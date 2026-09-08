@@ -47,7 +47,7 @@ simtix: build
 	$(SIMTIX)
 
 authority-check: build
-	$(BIN) authority-check --front http://127.0.0.1:8091 --origin http://127.0.0.1:8090
+	$(BIN) authority-check --front http://127.0.0.1:8091 --origin http://127.0.0.1:8090 --control http://127.0.0.1:8080
 
 doctor: build
 	$(BIN) doctor --profile configs/example.yaml --skip-store

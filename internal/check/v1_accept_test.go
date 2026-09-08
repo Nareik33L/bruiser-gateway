@@ -336,19 +336,24 @@ func TestV1AcceptanceAuthorityAndControlPlane(t *testing.T) {
 	if !rep.Passed() {
 		t.Fatalf("authority check must PASS for a locked Proxy deployment\n%s", rep.String())
 	}
-	var sawSpoof, sawUnlisted, sawAuthorize bool
+	need := map[string]bool{
+		"Spoofed identity headers rejected":               false,
+		"Unlisted allocation paths cannot grant":          false,
+		"Authorize requires edge secret":                  false,
+		"Direct allocation bypass blocked":                false,
+		"Spoofed origin secret rejected":                  false,
+		"Origin rejects missing Bruiser credentials":      false,
+		"Legitimate Bruiser-mediated allocation succeeds": false,
+	}
 	for _, p := range rep.Probes {
-		switch p.Name {
-		case "Spoofed identity headers rejected":
-			sawSpoof = p.Status == "PASS"
-		case "Unlisted allocation paths cannot grant":
-			sawUnlisted = p.Status == "PASS"
-		case "Authorize requires edge secret":
-			sawAuthorize = p.Status == "PASS"
+		if _, ok := need[p.Name]; ok && p.Status == "PASS" {
+			need[p.Name] = true
 		}
 	}
-	if !sawSpoof || !sawUnlisted || !sawAuthorize {
-		t.Fatalf("missing strengthened probes\n%s", rep.String())
+	for name, ok := range need {
+		if !ok {
+			t.Fatalf("missing PASS probe %q\n%s", name, rep.String())
+		}
 	}
 }
 

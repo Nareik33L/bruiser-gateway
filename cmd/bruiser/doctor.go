@@ -31,11 +31,15 @@ func cmdDoctor() error {
 	if p.MerchantID != "" && os.Getenv("BRUISER_MERCHANT_ID") == "" {
 		cfg.MerchantID = p.MerchantID
 	}
+	httpURL := *httpBase
+	if httpURL == "" && *front != "" {
+		httpURL = env("BRUISER_CHECK_CONTROL_URL", "http://127.0.0.1:8080")
+	}
 	rep := doctor.Run(doctor.Input{
 		Config:     cfg,
 		Profile:    p,
 		ProbeStore: !*skipStore,
-		HTTPBase:   *httpBase,
+		HTTPBase:   httpURL,
 		FrontURL:   *front,
 		OriginURL:  *origin,
 	})
@@ -67,7 +71,13 @@ func cmdConfig() error {
 		fmt.Printf("FAIL  profile: %s\n", err)
 		return err
 	}
-	for _, i := range p.ValidateIssues() {
+	issues := append(p.ValidateIssues(), p.SafetyIssues(merchant.SafetyOpts{
+		OriginSecret: cfg.OriginSecret,
+		OriginURL:    cfg.OriginURL,
+		Proxy:        cfg.ProxyAddr != "",
+		Production:   cfg.Production(),
+	})...)
+	for _, i := range issues {
 		fmt.Printf("%s  %s: %s\n", i.Level, i.Field, i.Message)
 		if i.Level == "FAIL" {
 			fails++

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Nareik33L/bruiser-gateway/internal/auth"
+	"github.com/Nareik33L/bruiser-gateway/internal/merchant"
 	"github.com/Nareik33L/bruiser-gateway/internal/simtix"
 )
 
@@ -190,79 +191,117 @@ func Run(cfg Config) (Report, error) {
 		return pass("stale execution not allocated (%d)", code)
 	}))
 
-	rep.Probes = append(rep.Probes, probe("Removed proxy headers do not allocate", func() Probe {
-		if origin == "" {
-			return blockingWarn("origin URL not set; cannot prove removed-header lockdown")
-		}
-		tok, err := auth.IssueBoxOfficeSession(cfg.HMACSecret, cfg.Membership, time.Hour)
-		if err != nil {
-			return fail("%s", err.Error())
-		}
-		hdr := cookieHeader(tok)
-		hdr["X-Bruiser-Execution"] = "not-a-token"
-		code, body := postJSON(client, origin+holdPath, hdr, map[string]int{"seats": 1})
-		if code >= 200 && code < 300 {
-			return fail("origin allocated without Bruiser proxy headers (%d) %s", code, body)
-		}
-		return pass("origin rejected allocation without proxy headers (%d)", code)
-	}))
+	if origin == "" {
+		rep.Probes = append(rep.Probes, failProbe("Origin lockdown proven", "FAIL — --origin is required. Do not go live without proving the locked origin."))
+	} else {
+		rep.Probes = append(rep.Probes, probe("Removed proxy headers do not allocate", func() Probe {
+			tok, err := auth.IssueBoxOfficeSession(cfg.HMACSecret, cfg.Membership, time.Hour)
+			if err != nil {
+				return fail("%s", err.Error())
+			}
+			hdr := cookieHeader(tok)
+			hdr["X-Bruiser-Execution"] = "not-a-token"
+			code, body := postJSON(client, origin+holdPath, hdr, map[string]int{"seats": 1})
+			if code >= 200 && code < 300 {
+				return fail("origin allocated without Bruiser proxy headers (%d) %s", code, body)
+			}
+			return pass("origin rejected allocation without proxy headers (%d)", code)
+		}))
 
-	rep.Probes = append(rep.Probes, probe("Spoofed origin secret rejected", func() Probe {
-		if origin == "" {
-			return blockingWarn("origin URL not set; cannot prove origin-secret spoofing")
-		}
-		code, body := postJSON(client, origin+holdPath, map[string]string{
-			"X-Bruiser-Origin-Secret": "wrong-origin-secret",
-		}, map[string]int{"seats": 1})
-		if code >= 200 && code < 300 {
-			return fail("origin accepted a spoofed origin secret (%d) %s", code, body)
-		}
-		return pass("spoofed origin secret rejected (%d)", code)
-	}))
+		rep.Probes = append(rep.Probes, probe("Spoofed origin secret rejected", func() Probe {
+			code, body := postJSON(client, origin+holdPath, map[string]string{
+				"X-Bruiser-Origin-Secret": "wrong-origin-secret",
+			}, map[string]int{"seats": 1})
+			if code >= 200 && code < 300 {
+				return fail("origin accepted a spoofed origin secret (%d) %s", code, body)
+			}
+			return pass("spoofed origin secret rejected (%d)", code)
+		}))
 
-	rep.Probes = append(rep.Probes, probe("Direct allocation bypass blocked", func() Probe {
-		if origin == "" {
-			return blockingWarn("origin URL not set; cannot prove direct-origin lockdown")
-		}
-		tok, err := auth.IssueBoxOfficeSession(cfg.HMACSecret, cfg.Membership, time.Hour)
-		if err != nil {
-			return fail("%s", err.Error())
-		}
-		code, body := postJSON(client, origin+holdPath, cookieHeader(tok), map[string]int{"seats": 1})
-		if code == http.StatusForbidden && strings.Contains(body, "origin lockdown") {
-			return pass("direct origin hold rejected without Edge secret")
-		}
-		if code >= 200 && code < 300 {
-			return fail("origin accepted a bypass hold (%d); lockdown is off or missing", code)
-		}
-		return fail("unexpected origin bypass response %d %s", code, body)
-	}))
+		rep.Probes = append(rep.Probes, probe("Direct allocation bypass blocked", func() Probe {
+			tok, err := auth.IssueBoxOfficeSession(cfg.HMACSecret, cfg.Membership, time.Hour)
+			if err != nil {
+				return fail("%s", err.Error())
+			}
+			code, body := postJSON(client, origin+holdPath, cookieHeader(tok), map[string]int{"seats": 1})
+			if code == http.StatusForbidden && strings.Contains(body, "origin lockdown") {
+				return pass("direct origin hold rejected without Edge secret")
+			}
+			if code >= 200 && code < 300 {
+				return fail("origin accepted a bypass hold (%d); lockdown is off or missing", code)
+			}
+			return fail("unexpected origin bypass response %d %s", code, body)
+		}))
 
-	rep.Probes = append(rep.Probes, probe("Authorize requires edge secret", func() Probe {
-		if control == "" {
-			return warn("control URL not set; skipped /v1/authorize edge-secret probe")
-		}
-		code, body := postJSON(client, control+"/v1/authorize", map[string]string{
-			"X-Original-Method": "POST",
-			"X-Original-URI":    holdPath,
-		}, map[string]int{"seats": 1})
-		if code >= 200 && code < 300 {
-			return fail("authorize succeeded without edge secret (%d) %s", code, body)
-		}
-		if code == http.StatusUnauthorized {
-			return pass("authorize without edge secret → 401")
-		}
-		return pass("authorize without edge secret rejected (%d)", code)
-	}))
+		rep.Probes = append(rep.Probes, probe("Origin rejects missing Bruiser credentials", func() Probe {
+			code, body := postJSON(client, origin+holdPath, nil, map[string]int{"seats": 1})
+			if code >= 200 && code < 300 {
+				return fail("origin allocated with no Bruiser credentials (%d) %s", code, body)
+			}
+			return pass("origin rejected bare allocation (%d)", code)
+		}))
+
+		rep.Probes = append(rep.Probes, probe("Origin rejects spoofed identity", func() Probe {
+			code, body := postJSON(client, origin+holdPath, map[string]string{
+				"X-Customer-Id":      cfg.Membership,
+				"X-Bruiser-Customer": cfg.Membership,
+			}, map[string]int{"seats": 1})
+			if code >= 200 && code < 300 {
+				return fail("origin allocated from spoofed identity (%d) %s", code, body)
+			}
+			return pass("origin rejected spoofed identity (%d)", code)
+		}))
+
+		rep.Probes = append(rep.Probes, probe("Origin rejects stale execution", func() Probe {
+			code, body := postJSON(client, origin+holdPath, map[string]string{
+				"X-Bruiser-Execution": "stale.not.a.valid.execution",
+			}, map[string]int{"seats": 1})
+			if code >= 200 && code < 300 {
+				return fail("origin allocated from stale execution (%d) %s", code, body)
+			}
+			return pass("origin rejected stale execution (%d)", code)
+		}))
+
+		rep.Probes = append(rep.Probes, probe("Origin rejects tampered session", func() Probe {
+			tok, err := auth.IssueBoxOfficeSession(cfg.HMACSecret, cfg.Membership, time.Hour)
+			if err != nil {
+				return fail("%s", err.Error())
+			}
+			if len(tok) < 8 {
+				return fail("token too short")
+			}
+			code, body := postJSON(client, origin+holdPath, cookieHeader(tok[:len(tok)-4]+"XXXX"), map[string]int{"seats": 1})
+			if code >= 200 && code < 300 {
+				return fail("origin allocated from tampered session (%d) %s", code, body)
+			}
+			return pass("origin rejected tampered session (%d)", code)
+		}))
+	}
+
+	if control == "" {
+		rep.Probes = append(rep.Probes, failProbe("Authorize requires edge secret", "FAIL — --control is required to prove /v1/authorize rejects a missing edge secret."))
+	} else {
+		rep.Probes = append(rep.Probes, probe("Authorize requires edge secret", func() Probe {
+			code, body := postJSON(client, control+"/v1/authorize", map[string]string{
+				"X-Original-Method": "POST",
+				"X-Original-URI":    holdPath,
+			}, map[string]int{"seats": 1})
+			if code >= 200 && code < 300 {
+				return fail("authorize succeeded without edge secret (%d) %s", code, body)
+			}
+			if code == http.StatusUnauthorized {
+				return pass("authorize without edge secret → 401")
+			}
+			return pass("authorize without edge secret rejected (%d)", code)
+		}))
+	}
 
 	alternates := []string{
 		"/api/events/" + cfg.EventID + "/hold",
 		"/api/events/" + cfg.EventID + "/holds/",
-		"/api/holds",
-		"/boxoffice/holds",
-		"/v1/holds",
 		strings.ToUpper(holdPath),
 	}
+	alternates = append(alternates, merchant.CommonAllocationPaths...)
 	rep.Probes = append(rep.Probes, probe("Unlisted allocation paths cannot grant", func() Probe {
 		tok, err := auth.IssueBoxOfficeSession(cfg.HMACSecret, cfg.Membership, time.Hour)
 		if err != nil {
@@ -276,6 +315,15 @@ func Run(cfg Config) (Report, error) {
 			seen++
 			if code >= 200 && code < 300 && !looksLikeSearch(body) {
 				allocated = append(allocated, fmt.Sprintf("%s → %d", p, code))
+			}
+		}
+		if origin != "" {
+			for _, p := range alternates {
+				code, body := postJSON(client, origin+p, hdr, map[string]int{"seats": 1})
+				seen++
+				if code >= 200 && code < 300 && !looksLikeSearch(body) {
+					allocated = append(allocated, fmt.Sprintf("origin %s → %d", p, code))
+				}
 			}
 		}
 		if len(allocated) > 0 {
@@ -313,6 +361,21 @@ func Run(cfg Config) (Report, error) {
 		return pass("spoofed host/path headers did not allocate (%d)", resp.StatusCode)
 	}))
 
+	rep.Probes = append(rep.Probes, probe("Legitimate Bruiser-mediated allocation succeeds", func() Probe {
+		if edge == "" {
+			return fail("front URL not set")
+		}
+		tok, err := auth.IssueBoxOfficeSession(cfg.HMACSecret, fmt.Sprintf("auth-ok-%d", time.Now().UnixNano()), time.Hour)
+		if err != nil {
+			return fail("%s", err.Error())
+		}
+		code, body := postJSON(client, edge+holdPath, cookieHeader(tok), map[string]int{"seats": 1})
+		if code >= 200 && code < 300 {
+			return pass("front allocated through Bruiser (%d)", code)
+		}
+		return fail("legitimate hold via Bruiser failed (%d) %s", code, body)
+	}))
+
 	finalize(&rep)
 	return rep, nil
 }
@@ -347,12 +410,10 @@ func fail(format string, args ...any) Probe {
 	return Probe{Status: "FAIL", Pass: false, Detail: fmt.Sprintf(format, args...)}
 }
 
-func warn(format string, args ...any) Probe {
-	return Probe{Status: "WARN", Pass: true, Detail: fmt.Sprintf(format, args...)}
-}
-
-func blockingWarn(format string, args ...any) Probe {
-	return Probe{Status: "WARN", Pass: true, Blocking: true, Detail: fmt.Sprintf(format, args...)}
+func failProbe(name, detail string) Probe {
+	p := Probe{Name: name, Status: "FAIL", Pass: false, Detail: detail}
+	normalizeProbe(&p)
+	return p
 }
 
 func finalize(rep *Report) {
