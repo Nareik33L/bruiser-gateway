@@ -238,6 +238,20 @@ runs; retention changes and purges are audited.
 **Why.** Founder decision Q9. Covers a full season plus dispute lag; merchants
 adjust to their own legal requirements.
 
+## ADR-021 — V1 execution tokens are JWT/EdDSA; PASETO remains the protocol default
+
+**Decision.** M1 ships JWT signed with Ed25519 (`alg: EdDSA`, JWKS OKP/Ed25519).
+PASETO v4.public remains the protocol's preferred format and can be added as a
+second representation without changing claims or fences.
+
+**Why.** JWT/EdDSA maps directly onto merchant JWKS verification (the Embedded
+deployment method) and has library support in Go, Node and Python on day one.
+The claims (`exe`, `dom`, `res`, `act`, `prn`, `fnc`, `exp` = lease expiry) are
+identical to the design.
+
+**Revisit when.** SDKs land; add PASETO as a parallel token type if agent
+frameworks prefer it.
+
 ## ADR-019 — Execution Amplification Factor is the primary operational KPI
 
 **Decision.** EAF = incoming allocation attempts ÷ authorised executions
