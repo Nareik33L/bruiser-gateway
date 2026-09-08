@@ -5,7 +5,7 @@ SIMTIX    := bin/simtix
 DATABASE_URL ?= postgres://bruiser:bruiser@127.0.0.1:5432/bruiser?sslmode=disable
 TEST_DATABASE_URL ?= postgres://bruiser:bruiser@127.0.0.1:5432/bruiser_test?sslmode=disable
 
-.PHONY: all build test test-race lint fmt vet serve migrate tidy ci torture simtix authority-check
+.PHONY: all build test test-race lint fmt vet serve migrate tidy ci torture simtix authority-check eaf-demo
 
 all: build
 
@@ -45,7 +45,10 @@ simtix: build
 	$(SIMTIX)
 
 authority-check: build
-	$(BIN) authority-check --edge http://127.0.0.1:8091 --origin http://127.0.0.1:8090
+	$(BIN) authority-check --front http://127.0.0.1:8091 --origin http://127.0.0.1:8090
+
+eaf-demo: build
+	$(BIN) eaf-demo --front http://127.0.0.1:8091 --n 2000
 
 migrate: build
 	BRUISER_DATABASE_URL="$(DATABASE_URL)" $(BIN) migrate

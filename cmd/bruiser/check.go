@@ -10,7 +10,8 @@ import (
 
 func cmdAuthorityCheck() error {
 	fs := flag.NewFlagSet("authority-check", flag.ContinueOnError)
-	edgeURL := fs.String("edge", env("SIMTIX_EDGE_URL", "http://127.0.0.1:8091"), "Edge URL (WAF analogue)")
+	edgeURL := fs.String("edge", env("SIMTIX_EDGE_URL", "http://127.0.0.1:8091"), "Edge or Proxy URL (enforcement front)")
+	frontURL := fs.String("front", "", "alias of -edge")
 	originURL := fs.String("origin", env("SIMTIX_ORIGIN_URL", "http://127.0.0.1:8090"), "box-office origin URL")
 	secret := fs.String("hmac-secret", env("BRUISER_DEV_HMAC_SECRET", "dev-secret-change-me"), "HMAC used to mint box-office cookies")
 	membership := fs.String("membership", "1001234", "7-digit membership number analogue")
@@ -18,8 +19,12 @@ func cmdAuthorityCheck() error {
 	if err := fs.Parse(os.Args[2:]); err != nil {
 		return err
 	}
+	front := *edgeURL
+	if *frontURL != "" {
+		front = *frontURL
+	}
 	rep, err := check.Run(check.Config{
-		EdgeURL:    *edgeURL,
+		EdgeURL:    front,
 		OriginURL:  *originURL,
 		HMACSecret: *secret,
 		Membership: *membership,

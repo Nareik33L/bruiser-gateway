@@ -78,8 +78,8 @@ func Run(cfg Config) (Report, error) {
 	rep := Report{
 		Covered: []string{
 			"GET /api/events (search, uncontrolled)",
-			"POST " + holdPath + " (hold, Edge)",
-			"POST /api/orders (purchase, Edge)",
+			"POST " + holdPath + " (hold, enforcement front)",
+			"POST /api/orders (purchase, enforcement front)",
 			"direct origin POST " + holdPath + " (bypass)",
 		},
 	}
@@ -88,7 +88,7 @@ func Run(cfg Config) (Report, error) {
 	rep.Probes = append(rep.Probes, probe("Browser allocation route protected", func() (bool, string) {
 		code, body := postJSON(client, edge+holdPath, nil, map[string]int{"seats": 1})
 		if code >= 200 && code < 300 {
-			return false, fmt.Sprintf("edge allowed unauthenticated hold (%d) %s", code, body)
+			return false, fmt.Sprintf("front allowed unauthenticated hold (%d) %s", code, body)
 		}
 		return true, fmt.Sprintf("unauthenticated browser hold rejected (%d)", code)
 	}))

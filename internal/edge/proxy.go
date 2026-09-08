@@ -10,8 +10,9 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
+
+	"github.com/Nareik33L/bruiser-gateway/internal/limit"
 )
 
 type Config struct {
@@ -19,16 +20,16 @@ type Config struct {
 	BruiserURL    string
 	EdgeSecret    string
 	MaxInFlight   int
+	RatePerSec    float64
 	AuthorizePath string
 }
 
 type Proxy struct {
-	cfg      Config
-	origin   *url.URL
-	bruiser  string
-	client   *http.Client
-	mu       sync.Mutex
-	inflight map[string]int
+	cfg     Config
+	origin  *url.URL
+	bruiser string
+	client  *http.Client
+	limit   *limit.PerExecution
 }
 
 func New(cfg Config) (*Proxy, error) {
@@ -43,11 +44,11 @@ func New(cfg Config) (*Proxy, error) {
 		return nil, err
 	}
 	return &Proxy{
-		cfg:      cfg,
-		origin:   ou,
-		bruiser:  strings.TrimRight(cfg.BruiserURL, "/"),
-		client:   &http.Client{Timeout: 10 * time.Second},
-		inflight: map[string]int{},
+		cfg:     cfg,
+		origin:  ou,
+		bruiser: strings.TrimRight(cfg.BruiserURL, "/"),
+		client:  &http.Client{Timeout: 10 * time.Second},
+		limit:   limit.New(cfg.MaxInFlight, cfg.RatePerSec),
 	}, nil
 }
 
@@ -108,12 +109,13 @@ func (p *Proxy) Handler() http.Handler {
 
 		exe := authResp.Header.Get("X-Bruiser-Execution")
 		if exe != "" {
-			if !p.take(exe) {
+			release, ok := p.limit.Take(exe, time.Now())
+			if !ok {
 				w.Header().Set("Retry-After", "1")
 				http.Error(w, `{"error":"execution throttled"}`, http.StatusTooManyRequests)
 				return
 			}
-			defer p.release(exe)
+			defer release()
 		}
 
 		r.Body = io.NopCloser(bytes.NewReader(body))
@@ -126,25 +128,6 @@ func (p *Proxy) Handler() http.Handler {
 		}
 		rp.ServeHTTP(w, r)
 	})
-}
-
-func (p *Proxy) take(exe string) bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.inflight[exe] >= p.cfg.MaxInFlight {
-		return false
-	}
-	p.inflight[exe]++
-	return true
-}
-
-func (p *Proxy) release(exe string) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.inflight[exe]--
-	if p.inflight[exe] <= 0 {
-		delete(p.inflight, exe)
-	}
 }
 
 func eventID(body []byte) string {

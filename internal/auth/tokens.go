@@ -86,6 +86,26 @@ func (s Signer) SignExecution(e lease.Execution) (string, error) {
 	return tok.SignedString(s.Private)
 }
 
+func ParseExecution(token string, pub ed25519.PublicKey) (ExecutionClaims, error) {
+	var claims ExecutionClaims
+	parsed, err := jwt.ParseWithClaims(token, &claims, func(t *jwt.Token) (any, error) {
+		if t.Method.Alg() != jwt.SigningMethodEdDSA.Alg() {
+			return nil, fmt.Errorf("%w: unexpected alg", ErrUnauthorized)
+		}
+		return pub, nil
+	})
+	if err != nil || !parsed.Valid {
+		return ExecutionClaims{}, ErrUnauthorized
+	}
+	if claims.ExpiresAt != nil && time.Now().UTC().After(claims.ExpiresAt.Time) {
+		return ExecutionClaims{}, ErrUnauthorized
+	}
+	if claims.ExecutionID == "" || claims.CustomerID == "" {
+		return ExecutionClaims{}, ErrUnauthorized
+	}
+	return claims, nil
+}
+
 func ParseSession(token string, pub ed25519.PublicKey) (SessionClaims, error) {
 	var claims SessionClaims
 	parsed, err := jwt.ParseWithClaims(token, &claims, func(t *jwt.Token) (any, error) {

@@ -41,6 +41,12 @@ func ArsenalProfile(t testing.TB) merchant.Profile {
 
 func Gateway(t testing.TB, profile merchant.Profile) (*httptest.Server, config.Config) {
 	t.Helper()
+	_, srv, cfg, _ := GatewayAPI(t, profile)
+	return srv, cfg
+}
+
+func GatewayAPI(t testing.TB, profile merchant.Profile) (*publicapi.Server, *httptest.Server, config.Config, auth.Signer) {
+	t.Helper()
 	url := os.Getenv("BRUISER_TEST_DATABASE_URL")
 	if url == "" {
 		t.Skip("BRUISER_TEST_DATABASE_URL not set")
@@ -60,6 +66,8 @@ func Gateway(t testing.TB, profile merchant.Profile) (*httptest.Server, config.C
 	cfg.LeaseTTL = 30 * time.Second
 	cfg.EdgeSecret = "edge-secret-dev"
 	cfg.OriginSecret = "origin-lock-dev"
+	cfg.MaxInFlight = 8
+	cfg.RatePerSec = 100
 	if profile.MerchantID == "" {
 		profile = merchant.Empty(cfg.MerchantID)
 	}
@@ -71,8 +79,8 @@ func Gateway(t testing.TB, profile merchant.Profile) (*httptest.Server, config.C
 		t.Fatal(err)
 	}
 	signer := auth.Signer{KID: key.KID, MerchantID: cfg.MerchantID, Private: key.Private, Public: key.Public}
-	h := publicapi.New(cfg, store, signer, slog.New(slog.NewTextHandler(io.Discard, nil)), profile)
-	srv := httptest.NewServer(h)
+	api := publicapi.New(cfg, store, signer, slog.New(slog.NewTextHandler(io.Discard, nil)), profile)
+	srv := httptest.NewServer(api)
 	t.Cleanup(srv.Close)
-	return srv, cfg
+	return api, srv, cfg, signer
 }

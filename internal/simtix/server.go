@@ -21,9 +21,11 @@ const CookieName = "boxoffice_session"
 const DefaultEvent = "ars-che"
 
 type Config struct {
-	HMACSecret   string
-	OriginSecret string // empty = origin lockdown off
-	Seats        int
+	HMACSecret       string
+	OriginSecret     string // empty = origin lockdown off
+	Seats            int
+	RequireExecution bool
+	VerifyExecution  func(token string) error
 }
 
 type Server struct {
@@ -145,6 +147,9 @@ func (s *Server) getEvent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createHold(w http.ResponseWriter, r *http.Request) {
+	if !s.executionOK(w, r) {
+		return
+	}
 	if !s.originOK(w, r, true) {
 		return
 	}
@@ -182,6 +187,9 @@ func (s *Server) createHold(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createOrder(w http.ResponseWriter, r *http.Request) {
+	if !s.executionOK(w, r) {
+		return
+	}
 	if !s.originOK(w, r, true) {
 		return
 	}
@@ -222,6 +230,32 @@ func (s *Server) reset(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "reset"})
 }
 
+func (s *Server) executionOK(w http.ResponseWriter, r *http.Request) bool {
+	if !s.cfg.RequireExecution {
+		return true
+	}
+	tok := r.Header.Get("X-Bruiser-Execution")
+	if tok == "" {
+		h := r.Header.Get("Authorization")
+		if len(h) > 7 && (h[:7] == "Bearer " || h[:7] == "bearer ") {
+			tok = h[7:]
+		}
+	}
+	if tok == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing execution token"})
+		return false
+	}
+	if s.cfg.VerifyExecution == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "execution verifier not configured"})
+		return false
+	}
+	if err := s.cfg.VerifyExecution(tok); err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid execution token"})
+		return false
+	}
+	return true
+}
+
 func (s *Server) originOK(w http.ResponseWriter, r *http.Request, allocation bool) bool {
 	if !allocation || s.cfg.OriginSecret == "" {
 		return true
@@ -230,7 +264,7 @@ func (s *Server) originOK(w http.ResponseWriter, r *http.Request, allocation boo
 	if subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.OriginSecret)) != 1 {
 		writeJSON(w, http.StatusForbidden, map[string]string{
 			"error":  "origin lockdown",
-			"detail": "allocation requires X-Bruiser-Origin-Secret from the Edge",
+			"detail": "allocation requires X-Bruiser-Origin-Secret from the enforcement front",
 		})
 		return false
 	}
