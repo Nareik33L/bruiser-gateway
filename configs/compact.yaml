@@ -1,0 +1,23 @@
+# Compact install config (v2.4). Same engine as configs/example.yaml.
+merchant: example
+identity:
+  source: jwt
+  claim: customer_id
+  header: X-Customer-Id
+resource:
+  scope: event
+concurrency:
+  max_active: 1
+lease:
+  ttl: 60s
+  heartbeat: 20s
+unmatched: allow
+routes:
+  - match: { method: POST, path: "/api/holds" }
+    resource_from: event_id
+    resource_prefix: "event:"
+    action: hold
+  - match: { method: POST, path: "/api/orders" }
+    resource_from: event_id
+    resource_prefix: "event:"
+    action: purchase

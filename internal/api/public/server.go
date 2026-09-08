@@ -188,6 +188,9 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 		eaf:     newEAFAcc(),
 		limit:   limit.New(cfg.MaxInFlight, cfg.RatePerSec),
 	}
+	if cfg.Burst > 0 {
+		s.limit.Burst = cfg.Burst
+	}
 	s.loadPolicy()
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)

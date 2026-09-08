@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -32,6 +33,9 @@ type Config struct {
 	CheckEdgeURL      string
 	CheckOriginURL    string
 	AdminSecret       string
+	Telemetry         bool
+	IntrospectURL     string
+	Burst             int
 }
 
 func Load() Config {
@@ -42,7 +46,7 @@ func Load() Config {
 		MerchantID:        env("BRUISER_MERCHANT_ID", "arsenal"),
 		MerchantName:      env("BRUISER_MERCHANT_NAME", "Arsenal FC"),
 		LeaseTTL:          envDuration("BRUISER_LEASE_TTL", 60*time.Second),
-		HeartbeatInterval: envDuration("BRUISER_HEARTBEAT_INTERVAL", 25*time.Second),
+		HeartbeatInterval: envDuration("BRUISER_HEARTBEAT_INTERVAL", 20*time.Second),
 		MaxLifetime:       envDuration("BRUISER_MAX_LIFETIME", 15*time.Minute),
 		MaxActive:         envInt("BRUISER_MAX_ACTIVE", 1),
 		SessionTTL:        envDuration("BRUISER_SESSION_TTL", time.Hour),
@@ -60,6 +64,9 @@ func Load() Config {
 		CheckEdgeURL:      env("BRUISER_CHECK_EDGE_URL", "http://127.0.0.1:8091"),
 		CheckOriginURL:    env("BRUISER_CHECK_ORIGIN_URL", "http://127.0.0.1:8090"),
 		AdminSecret:       env("BRUISER_ADMIN_SECRET", ""),
+		Telemetry:         env("BRUISER_TELEMETRY", "") == "1" || strings.EqualFold(env("BRUISER_TELEMETRY", ""), "true"),
+		IntrospectURL:     env("BRUISER_INTROSPECT_URL", ""),
+		Burst:             envInt("BRUISER_BURST", 10),
 	}
 	if c.AdminSecret == "" {
 		c.AdminSecret = c.EdgeSecret

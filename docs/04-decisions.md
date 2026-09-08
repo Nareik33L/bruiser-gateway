@@ -415,3 +415,21 @@ gate.
 **Revisit when.** A merchant's session is opaque with no header/JWT/introspection
 path at all — then Embedded or an edge transform is required.
 
+## ADR-028 — v2.4 product instructions are binding
+
+**Decision.** [00-product-instructions.md](00-product-instructions.md) is the
+product. Self-hosted, merchant-owned identity and data, telemetry off,
+configure-don’t-customise, Community/Core/Enterprise naming, football as the
+wedge not the product, discovery in parallel not as a build gate.
+
+**Why.** The north-star is whether a merchant can put Bruiser in front of an
+existing scarce-inventory system without handing customer data or
+infrastructure to the vendor.
+
+**Consequences.** Default heartbeat 20 s. Extractors include introspection and
+edge-signed headers. Helm and a Cloudflare Worker are first-class placements.
+No vendor telemetry unless `BRUISER_TELEMETRY=1`.
+
+**Revisit when.** Counsel signs BSL parameters, or a design partner proves a
+fourth placement is required.
+
