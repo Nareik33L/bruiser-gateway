@@ -157,3 +157,70 @@ when policy `waiting.mode` is `bounded`.
 | `POST /v1/admin/controls/revoke-all` | Emergency revoke (`EMERGENCY_REVOKE`) |
 
 Scarce-inventory routes default fail-closed on an unhealthy instance.
+
+## Progressive enforcement assignment
+
+`enforce_percent` controls **active enforcement only**. Observation,
+evaluation, and recording stay at 100% of traffic Bruiser sees.
+
+Assignment is at the **customer** grain, not per request or per agent:
+
+```
+bucket = FNV-64a( ramp_salt || 0x00 || customer_id ) % 100
+enforce  = (bucket < enforce_percent)
+```
+
+- `customer_id` is the merchant-authenticated identifier Bruiser
+  consumed (cookie JWT `sub`, bearer subject, edge-signed header, or
+  introspected subject). Bruiser does not invent one.
+- `ramp_salt` is optional (`PUT /v1/admin/controls`). Changing it
+  reshuffles the cohort; the new mapping is deterministic and auditable
+  via `CONTROL_CHANGED`.
+- Every agent, browser, device, and reconnect for that customer inherits
+  the same bucket while identity is unchanged.
+- Raising 10 → 25 adds customers with buckets 10–24. Lowering 25 → 10
+  drops those same customers. Nobody is randomly re-rolled per request.
+- Out-of-scope traffic (`scope.events` / `routes` / …) is still
+  observed and recorded with `WOULD_*`; it is not actively enforced.
+
+Reproduce: `go test ./internal/ops ./internal/api/public -run 'TestBucket|TestProgressive|TestV1AcceptanceRamp' -count=1`
+
+## Failure modes
+
+| Failure | Intended behaviour | Fail |
+|---------|--------------------|------|
+| Bruiser process restart | Postgres holds leases, fences, waiters. New process resumes the same execution (`ALREADY_HELD`) and can renew. | Closed on allocation until `/readyz` |
+| Pod replacement / extra replica | Shared store. Any replica can resume, renew, or reject. Busy-cache is in-process and rebuilds. | Closed if that replica cannot reach the store |
+| Rolling deployment | Overlapping replicas share the store. An in-flight execution survives. Heartbeat may rebind session. | Closed on a replica whose store ping fails |
+| Backing-store outage | Acquire / authorize / renew return 503 `store unavailable` | **Closed** (unless `fail_closed=false`) |
+| Upstream / origin outage | Bruiser still admits. Origin errors are origin errors. Lease remains until TTL/release. | n/a (not a Bruiser fail-open) |
+| Network partition (edge ↔ Bruiser) | Edge/Proxy cannot authorize. Do not forward scarce allocation. | Closed |
+| Failed renewal | Lease expires; sweeper materialises `EXPIRED` and may promote the next same-customer waiter | Closed for the expired holder |
+| Client disappearance | TTL + sweep. No implicit fail-open. | Closed |
+| Stale queue entry | Waiter TTL / `ExpireWaiters`; leave/release removes it | Closed |
+| Duplicate acquire | Same principal+session → `ALREADY_HELD` (same fence). Other principal → `BUSY`/`QUEUED` | Closed |
+| Concurrent acquire race | Store unique-active constraint: exactly one `GRANTED` | Closed |
+| Deployment during active execution | Successor process reads the same row; fence unchanged until handoff/revoke | Closed |
+| Kill switch `enforcement=false` | Effective 0%: observe only. Store errors ALLOW (passthrough) | Open *by operator choice* |
+| `unmatched: allow` | Paths not in the profile forward without a lease. Origin lockdown must still reject allocation. | Open for **unlisted** routes — list every hold/purchase path |
+
+No supported deployment may leave a scarce-inventory route reachable
+without Bruiser **and** origin lockdown. `bruiser authority-check`
+must be PASS.
+
+## Authority Check classification
+
+Each probe is `PASS`, `FAIL`, or `WARN`.
+
+- **FAIL** — a request allocated around Bruiser. Overall `FAIL`.
+- **WARN** (blocking) — a required surface was not provided (no origin
+  URL), so authority cannot be proven. Overall `WARN`.
+- **WARN** (non-blocking) — an optional probe was skipped (no
+  `--control` URL) or an alternate path was absent (404). Overall stays
+  `PASS` if every required probe passed.
+- **PASS** overall — Bruiser is authoritative for the covered
+  allocation operation under that deployment.
+
+```bash
+bruiser authority-check --front <edge-or-proxy> --origin <origin> --control <bruiser>
+```

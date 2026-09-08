@@ -36,10 +36,11 @@ func startProxyLab(t *testing.T, originSecret string) (proxyURL, originURL, gwUR
 }
 
 func TestAuthorityCheckProxyLockdownOnPass(t *testing.T) {
-	front, origin, _, hmac := startProxyLab(t, "origin-lock-dev")
+	front, origin, gw, hmac := startProxyLab(t, "origin-lock-dev")
 	rep, err := check.Run(check.Config{
 		EdgeURL:    front,
 		OriginURL:  origin,
+		ControlURL: gw,
 		HMACSecret: hmac,
 		Membership: "1001234",
 		EventID:    "ars-che",
@@ -77,7 +78,7 @@ func TestProxyUnawareBusy(t *testing.T) {
 }
 
 func TestEAFUnawareSwarm(t *testing.T) {
-	front, _, gw, hmac := startProxyLab(t, "origin-lock-dev")
+	front, origin, gw, hmac := startProxyLab(t, "origin-lock-dev")
 	const n = 200
 	var allow, busy atomic.Int64
 	var wg sync.WaitGroup
@@ -114,7 +115,23 @@ func TestEAFUnawareSwarm(t *testing.T) {
 	if allow.Load() != 1 || busy.Load() != n-1 {
 		t.Fatalf("allow=%d busy=%d want 1/%d", allow.Load(), busy.Load(), n-1)
 	}
-	resp, err := http.Get(gw + "/metrics")
+	resp, err := http.Get(origin + "/api/events/ars-che")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ev struct {
+		Held      int `json:"held"`
+		Available int `json:"available"`
+		Seats     int `json:"seats"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&ev); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if ev.Held != 1 || ev.Available != ev.Seats-1 {
+		t.Fatalf("origin held=%d available=%d seats=%d — swarm must not multiply origin holds", ev.Held, ev.Available, ev.Seats)
+	}
+	resp, err = http.Get(gw + "/metrics")
 	if err != nil {
 		t.Fatal(err)
 	}

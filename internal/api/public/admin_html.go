@@ -12,9 +12,9 @@ button{margin-top:1rem;background:#d4a017;border:0;font-weight:700;cursor:pointe
 p{color:#9db0c3;font-size:.9rem}
 </style></head>
 <body>
-<form method="get" action="/admin">
+<form method="post" action="/admin">
 <h1>Bruiser operator</h1>
-<p>Enter the admin secret (same as the edge secret in the lab).</p>
+<p>Enter the admin secret. Do not reuse the edge secret in production.</p>
 <label>Admin secret</label>
 <input name="secret" type="password" autocomplete="current-password" required>
 <button type="submit">Open dashboard</button>
@@ -137,9 +137,9 @@ a{color:var(--gold)}
   </section>
 </main>
 <script>
-const secret = new URLSearchParams(location.search).get('secret') || '';
+const secret = '';
 function headers(){const h={}; if(secret) h['X-Bruiser-Admin-Secret']=secret; return h;}
-function qs(u){if(!secret) return u; const j=u.includes('?')?'&':'?'; return u+j+'secret='+encodeURIComponent(secret);}
+function qs(u){return u;}
 function paint(d){
   const e=d.eaf||{};
   document.getElementById('eaf').textContent = (e.observed||0).toFixed(0)+'×';
@@ -200,8 +200,9 @@ function paint(d){
     const probes=(last.report&&last.report.probes)||[];
     probes.forEach(p=>{
       const li=document.createElement('li');
-      li.className=p.pass?'pass':'fail';
-      li.textContent=(p.pass?'PASS':'FAIL')+' — '+p.name;
+      const st=(p.status|| (p.pass?'PASS':'FAIL')).toUpperCase();
+      li.className=st==='FAIL'?'fail':(st==='WARN'?'sub':'pass');
+      li.textContent=st+' — '+p.name;
       ul.appendChild(li);
     });
   }

@@ -128,6 +128,9 @@ func (s *Server) listEvents(w http.ResponseWriter, _ *http.Request) {
 			"id":        ev.ID,
 			"name":      ev.Name,
 			"available": ev.Available(),
+			"held":      ev.Held,
+			"sold":      ev.Sold,
+			"seats":     ev.Seats,
 		}},
 	})
 }
@@ -146,6 +149,9 @@ func (s *Server) getEvent(w http.ResponseWriter, r *http.Request) {
 		"id":        ev.ID,
 		"name":      ev.Name,
 		"available": ev.Available(),
+		"held":      ev.Held,
+		"sold":      ev.Sold,
+		"seats":     ev.Seats,
 	})
 }
 

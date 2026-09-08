@@ -183,7 +183,11 @@ func (s *Server) admit(ctx context.Context, method, path, eventID string, r *htt
 
 	switch acq.Status {
 	case lease.StatusGranted, lease.StatusAlreadyHeld:
-		s.eaf.record(resource, cust.CustomerID, "allow")
+		outcome := "allow"
+		if acq.Status == lease.StatusAlreadyHeld {
+			outcome = "resume"
+		}
+		s.eaf.record(resource, cust.CustomerID, outcome)
 		tok, err := s.signer.SignExecution(*acq.Execution)
 		if err != nil {
 			return admitResult{status: http.StatusInternalServerError, body: map[string]string{"error": "sign"}}
@@ -275,14 +279,14 @@ func (s *Server) admitDryRun(ctx context.Context, h http.Header, customerID, pri
 		allow:   true,
 		headers: h,
 		body: map[string]any{
-			"status":           "ALLOW",
-			"would":            would,
-			"reason":           reason,
-			"action":           action,
-			"customer_id":      customerID,
-			"rule_name":        d.RuleName,
-			"enforced":         false,
-			"enforce_percent":  percent,
+			"status":          "ALLOW",
+			"would":           would,
+			"reason":          reason,
+			"action":          action,
+			"customer_id":     customerID,
+			"rule_name":       d.RuleName,
+			"enforced":        false,
+			"enforce_percent": percent,
 		},
 	}
 }

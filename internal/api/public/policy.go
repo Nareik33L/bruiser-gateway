@@ -122,15 +122,9 @@ func (s *Server) adminOK(r *http.Request) bool {
 	}
 	got := r.Header.Get("X-Bruiser-Admin-Secret")
 	if got == "" {
-		got = r.Header.Get("X-Bruiser-Edge-Secret")
-	}
-	if got == "" {
 		if c, err := r.Cookie("bruiser_admin"); err == nil {
 			got = c.Value
 		}
-	}
-	if got == "" {
-		got = r.URL.Query().Get("secret")
 	}
 	return subtle.ConstantTimeCompare([]byte(got), []byte(secret)) == 1
 }

@@ -6,7 +6,7 @@ DATABASE_URL ?= postgres://bruiser:bruiser@127.0.0.1:5432/bruiser?sslmode=disabl
 TEST_DATABASE_URL ?= postgres://bruiser:bruiser@127.0.0.1:5432/bruiser_test?sslmode=disable
 
 .PHONY: all build test test-race lint fmt vet serve migrate tidy ci torture simtix authority-check eaf-demo eaf-nightly sdk-test doctor \
-	demo-1x10000 demo-1000x10 demo-handoff demo-bypass demo-unaware demo-up
+	demo-1x10000 demo-1000x10 demo-handoff demo-bypass demo-unaware demo-up v1-accept
 
 all: build
 
@@ -61,6 +61,11 @@ eaf-demo: build
 eaf-nightly: build
 	BRUISER_TEST_DATABASE_URL="$(TEST_DATABASE_URL)" BRUISER_EAF_N=10000 \
 		$(GO) test ./internal/check -count=1 -timeout 10m -run TestEAFNightly
+
+v1-accept:
+	BRUISER_TEST_DATABASE_URL="$(TEST_DATABASE_URL)" $(GO) test ./internal/check ./internal/api/public ./internal/store/postgres ./internal/ops ./internal/simtix \
+		-count=1 -timeout 15m \
+		-run 'TestV1|TestAuthority|TestEAFUnaware|TestEmbedded|TestProgressive|TestDryRun|TestHTTP|TestConcurrent|TestFail|TestSecurity|TestPersist|TestEmergency|TestMetrics|TestOneHundred|TestAdminLogin|TestDuplicate|TestExpiry'
 
 sdk-test:
 	@command -v node >/dev/null && (cd sdk/node && node --test test.js) || echo "node not installed; skipped"

@@ -162,9 +162,17 @@ func (a *eafAcc) headline() (observed, downstream, attempts, forwarded float64) 
 		attempts += att
 		forwarded += a.forwarded[res]
 	}
+	seen := map[string]struct{}{}
 	if forwarded > 0 {
 		observed = attempts / forwarded
-		downstream = 1
+	}
+	for res := range a.customers {
+		for c := range a.customers[res] {
+			seen[c] = struct{}{}
+		}
+	}
+	if n := float64(len(seen)); n > 0 && forwarded > 0 {
+		downstream = forwarded / n
 	}
 	return observed, downstream, attempts, forwarded
 }
@@ -210,6 +218,7 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 	r.Get("/readyz", s.readyz)
 	r.Handle("/metrics", promhttp.Handler())
 	r.Get("/admin", s.adminPage)
+	r.Post("/admin", s.adminPage)
 	r.Get("/demo", s.adminPage)
 	r.Get("/.well-known/bruiser/jwks.json", s.jwks)
 	r.Get("/.well-known/bruiser/protocol", s.protocol)
@@ -270,13 +279,13 @@ func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	ctl := s.currentControls()
 	body := map[string]any{
-		"status":           "ready",
-		"store":            "ok",
-		"mode":             ctl.Mode,
-		"enforcement":      ctl.Enforcement,
-		"enforce_percent":  ctl.EffectivePercent(),
-		"signing_key":      "unknown",
-		"upstream":         "skipped",
+		"status":          "ready",
+		"store":           "ok",
+		"mode":            ctl.Mode,
+		"enforcement":     ctl.Enforcement,
+		"enforce_percent": ctl.EffectivePercent(),
+		"signing_key":     "unknown",
+		"upstream":        "skipped",
 	}
 	if err := s.store.Ping(ctx); err != nil {
 		storeUnavailable.Inc()
@@ -493,12 +502,16 @@ func (s *Server) acquire(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Bruiser-Ramp", strconv.Itoa(ctl.EffectivePercent()))
 	switch res.Status {
 	case lease.StatusGranted:
+		s.eaf.record(body.Resource, sess.CustomerID, "allow")
 		s.writeExecution(w, http.StatusCreated, res.Execution, true)
 	case lease.StatusAlreadyHeld:
+		s.eaf.record(body.Resource, sess.CustomerID, "resume")
 		s.writeExecution(w, http.StatusOK, res.Execution, true)
 	case lease.StatusQueued:
+		s.eaf.record(body.Resource, sess.CustomerID, "queued")
 		s.writeQueued(w, d.DomainKey, d.RuleName, res)
 	case lease.StatusBusy:
+		s.eaf.record(body.Resource, sess.CustomerID, "busy")
 		retry := time.Until(res.Busy.ExpiresAt)
 		if retry < 0 {
 			retry = time.Second

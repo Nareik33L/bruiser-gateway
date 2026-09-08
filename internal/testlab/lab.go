@@ -49,7 +49,26 @@ func GatewayAPI(t testing.TB, profile merchant.Profile) (*publicapi.Server, *htt
 	return GatewayWith(t, profile, nil)
 }
 
+type Lab struct {
+	API    *publicapi.Server
+	Server *httptest.Server
+	Cfg    config.Config
+	Signer auth.Signer
+	Store  *pgstore.Store
+}
+
+func Start(t testing.TB, profile merchant.Profile, mut func(*config.Config)) Lab {
+	t.Helper()
+	api, srv, cfg, signer, store := gatewayWithStore(t, profile, mut)
+	return Lab{API: api, Server: srv, Cfg: cfg, Signer: signer, Store: store}
+}
+
 func GatewayWith(t testing.TB, profile merchant.Profile, mut func(*config.Config)) (*publicapi.Server, *httptest.Server, config.Config, auth.Signer) {
+	api, srv, cfg, signer, _ := gatewayWithStore(t, profile, mut)
+	return api, srv, cfg, signer
+}
+
+func gatewayWithStore(t testing.TB, profile merchant.Profile, mut func(*config.Config)) (*publicapi.Server, *httptest.Server, config.Config, auth.Signer, *pgstore.Store) {
 	t.Helper()
 	url := os.Getenv("BRUISER_TEST_DATABASE_URL")
 	if url == "" {
@@ -69,7 +88,7 @@ func GatewayWith(t testing.TB, profile merchant.Profile, mut func(*config.Config
 	cfg.MerchantID = id.New("m")
 	cfg.LeaseTTL = 30 * time.Second
 	cfg.EdgeSecret = "edge-secret-dev"
-	cfg.AdminSecret = "edge-secret-dev"
+	cfg.AdminSecret = "admin-secret-dev"
 	cfg.OriginSecret = "origin-lock-dev"
 	cfg.MaxInFlight = 8
 	cfg.RatePerSec = 100
@@ -93,7 +112,7 @@ func GatewayWith(t testing.TB, profile merchant.Profile, mut func(*config.Config
 		api.Close()
 		srv.Close()
 	})
-	return api, srv, cfg, signer
+	return api, srv, cfg, signer, store
 }
 
 // GatewayPair starts two control-plane processes against one merchant so
