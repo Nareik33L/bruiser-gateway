@@ -183,7 +183,11 @@ func (s *Server) admit(ctx context.Context, method, path, eventID string, r *htt
 
 	switch acq.Status {
 	case lease.StatusGranted, lease.StatusAlreadyHeld:
-		s.eaf.record(resource, cust.CustomerID, "allow")
+		outcome := "allow"
+		if acq.Status == lease.StatusAlreadyHeld {
+			outcome = "resume"
+		}
+		s.eaf.record(resource, cust.CustomerID, outcome)
 		tok, err := s.signer.SignExecution(*acq.Execution)
 		if err != nil {
 			return admitResult{status: http.StatusInternalServerError, body: map[string]string{"error": "sign"}}
@@ -191,9 +195,7 @@ func (s *Server) admit(ctx context.Context, method, path, eventID string, r *htt
 		h.Set("X-Bruiser-Execution", tok)
 		h.Set("X-Bruiser-Fence", strconv.FormatInt(acq.Execution.Fence, 10))
 		h.Set("X-Bruiser-Customer", cust.CustomerID)
-		if s.cfg.OriginSecret != "" {
-			h.Set("X-Bruiser-Origin-Secret", s.cfg.OriginSecret)
-		}
+		s.stampOrigin(h)
 		return admitResult{
 			status:  http.StatusOK,
 			allow:   true,
@@ -270,19 +272,20 @@ func (s *Server) admitDryRun(ctx context.Context, h http.Header, customerID, pri
 	h.Set("X-Bruiser-Dry-Run-Reason", reason)
 	h.Set("X-Bruiser-Enforced", "0")
 	h.Set("X-Bruiser-Ramp", strconv.Itoa(percent))
+	s.stampOrigin(h)
 	return admitResult{
 		status:  http.StatusOK,
 		allow:   true,
 		headers: h,
 		body: map[string]any{
-			"status":           "ALLOW",
-			"would":            would,
-			"reason":           reason,
-			"action":           action,
-			"customer_id":      customerID,
-			"rule_name":        d.RuleName,
-			"enforced":         false,
-			"enforce_percent":  percent,
+			"status":          "ALLOW",
+			"would":           would,
+			"reason":          reason,
+			"action":          action,
+			"customer_id":     customerID,
+			"rule_name":       d.RuleName,
+			"enforced":        false,
+			"enforce_percent": percent,
 		},
 	}
 }
@@ -291,6 +294,7 @@ func (s *Server) admitStoreError(err error) admitResult {
 	if s.failOpen() {
 		h := make(http.Header)
 		h.Set("X-Bruiser-Control", "fail-open")
+		s.stampOrigin(h)
 		return admitResult{status: http.StatusOK, allow: true, headers: h, body: map[string]any{"status": "ALLOW", "control": "fail-open"}}
 	}
 	switch {
@@ -370,6 +374,12 @@ func resourceOrPath(route merchant.Route, params map[string]string, eventID stri
 		return res
 	}
 	return route.Match.Path
+}
+
+func (s *Server) stampOrigin(h http.Header) {
+	if s.cfg.OriginSecret != "" && h != nil {
+		h.Set("X-Bruiser-Origin-Secret", s.cfg.OriginSecret)
+	}
 }
 
 func eventIDFromBody(body []byte) string {

@@ -19,7 +19,8 @@ A production deployment still needs an external review before go-live
 
 1. **Merchant identity system → Bruiser.** Bruiser trusts a configured extractor
    (cookie JWT, bearer JWT, header, introspection, edge-signed HMAC, OIDC/JWKS).
-   A forged session is a forged customer.
+   A forged session is a forged customer. Unsigned identity headers are only
+   safe when a trusted, authenticated edge is the only party that can set them.
 2. **Bruiser → origin.** Origin must reject unfenced or secret-less allocation
    (Authority Check). Parallel paths are the primary bypass.
 3. **Agent / browser → Bruiser.** Unaware clients are still enforced. MCP/SDK
@@ -55,3 +56,9 @@ A production deployment still needs an external review before go-live
 OIDC/JWKS keys are cached for five minutes. A rotated IdP key is not seen
 until the cache expires or the process restarts. Merchants who rotate often
 should point Bruiser at a short-TTL CDN in front of JWKS or restart on rotation.
+
+`identity.extractor: header` trusts whatever string the request presents.
+That is an operator choice, not a Bruiser-minted identity. Prefer signed
+extractors (cookie JWT, bearer JWT, OIDC, edge-signed HMAC). Unsigned
+headers are not a V1 blocker when the club already authenticates at the
+edge the way the Arsenal-like lab does.

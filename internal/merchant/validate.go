@@ -72,6 +72,9 @@ func (p Profile) ValidateIssues() []Issue {
 		if r.Controlled() {
 			n++
 		}
+		if LooksLikeAllocation(r) && !r.Controlled() {
+			out = append(out, Issue{"FAIL", "routes", r.Match.Method + " " + r.Match.Path + " looks like allocation (action=" + r.Action + ") but has no resource/resource_from — unmatched traffic would pass it through"})
+		}
 	}
 	if n == 0 {
 		out = append(out, Issue{"FAIL", "routes", "no protected allocation routes (set resource or resource_from on hold/purchase paths)"})

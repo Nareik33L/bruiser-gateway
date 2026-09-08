@@ -9,11 +9,18 @@
 
 merchant_id: example
 name: Example merchant
+# unmatched: allow keeps discovery/static fail-open. Every scarce
+# hold/purchase path MUST be listed below. Origin lockdown
+# (BRUISER_ORIGIN_SECRET) is required; config validate FAILs without it.
+# Confirm with: bruiser authority-check --front … --origin … --control …
 unmatched: allow
 
 identity:
   # auto: cookie JWT, then bearer JWT, then X-Customer-Id (or identity.header).
   # Bruiser consumes that identifier; it does not mint customer identities.
+  # Unsigned headers (extractor: header, or auto's header fallback) must
+  # only be accepted from a trusted/authenticated edge. Prefer cookie-jwt
+  # / bearer-jwt / oidc / edge-signed in production.
   extractor: auto
   cookie: session
   header: X-Customer-Id

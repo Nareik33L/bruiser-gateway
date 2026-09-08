@@ -82,6 +82,7 @@ func Run(in Input) Report {
 	checkConfig(&r, in.Config)
 	checkIdentity(&r, in)
 	checkRoutes(&r, in.Profile)
+	checkUnmatched(&r, in)
 	checkUpstream(&r, in)
 	checkSigning(&r, in)
 	checkPersistence(&r, in)
@@ -155,6 +156,32 @@ func checkRoutes(r *Report, p merchant.Profile) {
 		return
 	}
 	r.add("protected routes", Pass, fmt.Sprintf("%d allocation route(s); unmatched=%s", n, p.Unmatched))
+}
+
+func checkUnmatched(r *Report, in Input) {
+	issues := in.Profile.SafetyIssues(merchant.SafetyOpts{
+		OriginSecret: in.Config.OriginSecret,
+		OriginURL:    firstNonEmpty(in.OriginURL, in.Config.OriginURL),
+		Proxy:        in.Config.ProxyAddr != "",
+		Production:   in.Config.Production(),
+	})
+	var fails, warns []string
+	for _, i := range issues {
+		if i.Level == Fail {
+			fails = append(fails, i.Message)
+		} else {
+			warns = append(warns, i.Message)
+		}
+	}
+	if len(fails) > 0 {
+		r.add("unmatched safety", Fail, strings.Join(fails, "; "))
+		return
+	}
+	if len(warns) > 0 {
+		r.add("unmatched safety", Warn, strings.Join(warns, "; "))
+		return
+	}
+	r.add("unmatched safety", Pass, "unmatched="+in.Profile.Unmatched)
 }
 
 func checkUpstream(r *Report, in Input) {
@@ -266,12 +293,17 @@ func checkAuthority(r *Report, in Input) {
 	front := firstNonEmpty(in.FrontURL, in.Config.CheckEdgeURL)
 	origin := firstNonEmpty(in.OriginURL, in.Config.CheckOriginURL)
 	if in.FrontURL == "" {
-		r.add("authority enforcement", Warn, "pass --front to run bruiser authority-check (go-live gate)")
+		r.add("authority enforcement", Warn, "pass --front and --origin to run bruiser authority-check (go-live gate)")
+		return
+	}
+	if origin == "" {
+		r.add("authority enforcement", Fail, "--origin is required with --front; do not go live without proving origin lockdown")
 		return
 	}
 	rep, err := check.Run(check.Config{
 		EdgeURL:    front,
 		OriginURL:  origin,
+		ControlURL: in.HTTPBase,
 		HMACSecret: in.Config.DevHMACSecret,
 	})
 	if err != nil {

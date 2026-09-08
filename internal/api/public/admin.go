@@ -2,6 +2,7 @@ package publicapi
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -17,6 +18,26 @@ import (
 )
 
 func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		_ = r.ParseForm()
+		secret := r.FormValue("secret")
+		want := s.adminSecret()
+		if want != "" && subtle.ConstantTimeCompare([]byte(secret), []byte(want)) == 1 {
+			http.SetCookie(w, &http.Cookie{
+				Name:     "bruiser_admin",
+				Value:    secret,
+				Path:     "/",
+				HttpOnly: true,
+				SameSite: http.SameSiteStrictMode,
+			})
+			http.Redirect(w, r, "/admin", http.StatusSeeOther)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, adminLoginHTML)
+		return
+	}
 	if !s.adminOK(r) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -299,17 +320,17 @@ func (s *Server) adminGetControls(w http.ResponseWriter, r *http.Request) {
 }
 
 type controlsPatch struct {
-	Mode            *string       `json:"mode"`
-	Enforcement     *bool         `json:"enforcement"`
-	EnforcePercent  *int          `json:"enforce_percent"`
-	RampSalt        *string       `json:"ramp_salt"`
+	Mode            *string        `json:"mode"`
+	Enforcement     *bool          `json:"enforcement"`
+	EnforcePercent  *int           `json:"enforce_percent"`
+	RampSalt        *string        `json:"ramp_salt"`
 	Scope           *ops.RampScope `json:"scope"`
-	QueueEnabled    *bool         `json:"queue_enabled"`
-	MaxWaiters      *int          `json:"max_waiters"`
-	LeaseTTLSeconds *int          `json:"lease_ttl_seconds"`
-	FailClosed      *bool         `json:"fail_closed"`
-	DisabledActions *[]string     `json:"disabled_actions"`
-	UpdatedBy       string        `json:"updated_by"`
+	QueueEnabled    *bool          `json:"queue_enabled"`
+	MaxWaiters      *int           `json:"max_waiters"`
+	LeaseTTLSeconds *int           `json:"lease_ttl_seconds"`
+	FailClosed      *bool          `json:"fail_closed"`
+	DisabledActions *[]string      `json:"disabled_actions"`
+	UpdatedBy       string         `json:"updated_by"`
 }
 
 func (s *Server) adminPutControls(w http.ResponseWriter, r *http.Request) {
@@ -395,6 +416,9 @@ func (s *Server) adminRevokeAll(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.storeError(w, err)
 		return
+	}
+	if cache, ok := s.leases.(*lease.BusyCache); ok {
+		cache.Reset()
 	}
 	revokeTotal.Add(float64(n))
 	writeJSON(w, http.StatusOK, map[string]any{"revoked": n})

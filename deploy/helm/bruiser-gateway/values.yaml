@@ -18,10 +18,10 @@ env:
   BRUISER_ENFORCE_PERCENT: "100"
 secrets:
   BRUISER_DATABASE_URL: postgres://bruiser:bruiser@postgres:5432/bruiser?sslmode=disable
-  BRUISER_DEV_HMAC_SECRET: change-me
-  BRUISER_EDGE_SECRET: change-me
-  BRUISER_ORIGIN_SECRET: change-me
-  BRUISER_ADMIN_SECRET: change-me
+  BRUISER_DEV_HMAC_SECRET: change-me-hmac
+  BRUISER_EDGE_SECRET: change-me-edge
+  BRUISER_ORIGIN_SECRET: change-me-origin
+  BRUISER_ADMIN_SECRET: change-me-admin
 originURL: ""
 resources: {}
 autoscaling:

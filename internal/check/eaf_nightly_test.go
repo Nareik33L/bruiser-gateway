@@ -1,6 +1,10 @@
 package check_test
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
 	"os"
 	"strconv"
 	"sync"
@@ -9,9 +13,6 @@ import (
 
 	"github.com/Nareik33L/bruiser-gateway/internal/auth"
 	"github.com/Nareik33L/bruiser-gateway/internal/simtix"
-	"net/http"
-	"bytes"
-	"io"
 )
 
 // TestEAFNightly is the 1×10,000 exit criterion. Regular CI keeps the 200-agent
@@ -25,7 +26,7 @@ func TestEAFNightly(t *testing.T) {
 	if err != nil || n < 2 {
 		t.Fatalf("BRUISER_EAF_N=%q", raw)
 	}
-	front, _, _, hmac := startProxyLab(t, "origin-lock-dev")
+	front, origin, _, hmac := startProxyLab(t, "origin-lock-dev")
 	var allow, busy, other atomic.Int64
 	var wg sync.WaitGroup
 	wg.Add(n)
@@ -60,5 +61,21 @@ func TestEAFNightly(t *testing.T) {
 	wg.Wait()
 	if allow.Load() != 1 || busy.Load() != int64(n-1) || other.Load() != 0 {
 		t.Fatalf("allow=%d busy=%d other=%d want 1/%d/0", allow.Load(), busy.Load(), other.Load(), n-1)
+	}
+	resp, err := http.Get(origin + "/api/events/ars-che")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ev struct {
+		Held      int `json:"held"`
+		Available int `json:"available"`
+		Seats     int `json:"seats"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&ev); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if ev.Held != 1 {
+		t.Fatalf("10k-agent nightly: origin held=%d want 1", ev.Held)
 	}
 }

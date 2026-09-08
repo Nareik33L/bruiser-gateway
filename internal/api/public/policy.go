@@ -109,28 +109,19 @@ func (s *Server) evaluate(merchantID, customerID, ptype, resource, action string
 }
 
 func (s *Server) adminSecret() string {
-	if s.cfg.AdminSecret != "" {
-		return s.cfg.AdminSecret
-	}
-	return s.cfg.EdgeSecret
+	return s.cfg.AdminSecret
 }
 
 func (s *Server) adminOK(r *http.Request) bool {
 	secret := s.adminSecret()
 	if secret == "" {
-		return true
+		return false
 	}
 	got := r.Header.Get("X-Bruiser-Admin-Secret")
-	if got == "" {
-		got = r.Header.Get("X-Bruiser-Edge-Secret")
-	}
 	if got == "" {
 		if c, err := r.Cookie("bruiser_admin"); err == nil {
 			got = c.Value
 		}
-	}
-	if got == "" {
-		got = r.URL.Query().Get("secret")
 	}
 	return subtle.ConstantTimeCompare([]byte(got), []byte(secret)) == 1
 }

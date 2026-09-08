@@ -47,7 +47,7 @@ func (s *Store) loadActiveForUpdate(ctx context.Context, tx pgx.Tx, merchantID, 
 }
 
 // holderMatches allows the original session or a new session bound to the same
-// principal, so a reconnect before expiry can heartbeat and release.
+// customer+principal, so a reconnect before expiry can heartbeat and release.
 func (s *Store) holderMatches(ctx context.Context, e lease.Execution, sessionID string) error {
 	if e.SessionID == sessionID {
 		return nil
@@ -58,6 +58,9 @@ func (s *Store) holderMatches(ctx context.Context, e lease.Execution, sessionID 
 			return lease.ErrNotHolder
 		}
 		return err
+	}
+	if caller.MerchantID != e.MerchantID || caller.CustomerID != e.CustomerID {
+		return lease.ErrNotHolder
 	}
 	if caller.PrincipalType != e.Principal.Type || caller.PrincipalID != e.Principal.ID {
 		return lease.ErrNotHolder
