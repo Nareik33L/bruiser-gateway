@@ -66,7 +66,7 @@ errors, p50 ≈ 30ms / p99 ≈ 60ms, heap 14–34MB, goroutines ~340 then 34
 at stop. `TestSoakChurnSmoke` is the CI harness proof. The soak
 harness session-token slice is mutex-protected so reconnect cannot
 race acquire under `-race`. `make test-race` and `make v1-accept` are
-re-run on this revision.
+green on this revision.
 
 ## 3. WARN — limitations that do not block V1
 
