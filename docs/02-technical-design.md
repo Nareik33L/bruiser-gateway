@@ -19,7 +19,17 @@ designed for but not built in V1.
 4. **Every grant is fenced.** Downstream systems can reject stale holders even if
    their token has not expired.
 5. **One binary, one database.** No Redis, no message broker, no sidecars in V1.
+   Coordination technology is an implementation detail behind the `Store`
+   interface and is never part of the product's definition.
 6. **Tenant in every row, every query, every token.**
+7. **Bruiser is authoritative or it is not deployed.** Every path to the protected
+   allocation operation passes an enforcement point (§9). The authority check
+   proves it; integration is not complete until it passes.
+8. **Enforcement never depends on the client knowing Bruiser exists.** Edge and
+   proxy patterns acquire executions transparently from the merchant's own
+   session; protocol-aware clients get richer behaviour, not different rules.
+9. **Protocol-first.** OpenAPI, JSON Schema, token spec and conformance suite are
+   the definition; the Go binary is one implementation of them.
 
 ## 2. Stack
 
@@ -210,6 +220,37 @@ merchant is asserting both *who the customer is* and *that this principal is
 authorised to act for them* (the merchant ran the consent/OAuth flow). Dev mode
 accepts an HMAC shared secret. Session tokens are short-lived (default 1 h).
 
+`customer_id` is the club's existing supporter identity. Preferred: membership /
+supporter number. Acceptable initially: the club's account identifier. Bruiser
+never mints its own customer identifiers and never stores credentials.
+
+### 5.1a Merchant session → implicit session (transparent enforcement)
+
+For clients that do not speak the protocol (§9, patterns P2/P3), Bruiser derives
+the customer from the merchant's **existing session credential** on the
+allocation request itself. A merchant configures one *customer extractor*:
+
+```yaml
+identity:
+  extractor: jwt                         # jwt | cookie-jwt | introspect | header-signed
+  jwt:  { jwks_url: https://id.club.com/.well-known/jwks.json, aud: club-web, subject_claim: supporter_id,
+          anchors_claim: bruiser_anchors, cookie: club_session }
+  # introspect: { url: https://id.club.com/introspect, auth: <secret ref> }   # for opaque sessions
+  # header-signed: { header: X-Club-Customer, hmac_secret: <secret ref> }      # edge already authenticated the user
+```
+
+The extractor yields `customer_id` + anchors; the principal is
+`session:<hash of merchant session id>` (type `agent` by default, `browser` if the
+extractor is told the merchant marks human-present sessions — e.g. a claim set by
+the web login flow). Bruiser then creates or reuses an *implicit* Bruiser session
+with the same TTL as the merchant session. Everything downstream is identical to
+the explicit path.
+
+Principal typing for unaware clients is deliberately coarse: Bruiser does not
+attempt to detect agents. Two unaware agents sharing one merchant login are one
+principal and coalesce onto one execution; per-execution in-flight limits (§9.4)
+bound what that execution can do concurrently.
+
 ### 5.2 Execution token
 
 PASETO v4.public, signed with the merchant's current Ed25519 key (`kid` in footer):
@@ -231,7 +272,7 @@ PASETO v4.public, signed with the merchant's current Ed25519 key (`kid` in foote
 `exp` always equals the lease's current `expires_at`, so a token can never outlive
 its lease. Renewal issues a new token (new `exp`, new `jti`, same `fnc`).
 
-### 5.3 Merchant-side verification (Mode A)
+### 5.3 Merchant-side verification (pattern P1, in-app middleware)
 
 ```
 verify(token):
@@ -268,6 +309,7 @@ header honoured on mutating requests; `request_id` echoed in responses and audit
 | `GET /v1/executions/{id}/watch` | SSE / long-poll until state changes | stream | |
 | `GET /v1/domains/current?resource&action` | what is active in my domain right now | 200 | |
 | `POST /v1/introspect` `{token}` | merchant-side liveness check (merchant credential) | 200 `{active, execution}` | |
+| `POST /v1/authorize` | edge admission check (pattern P2; merchant credential): given the original request's method, path, resource, action and credentials, decide allow/deny and acquire transparently if needed | 200 allow + headers to inject (`X-Bruiser-Execution`, `X-Bruiser-Fence`) | 401, 403 DENIED, 409 BUSY (edge maps to 429/503 with `Retry-After`), 503 UNAVAILABLE |
 | `GET /.well-known/bruiser/jwks.json` | public keys | 200 | |
 | `GET /.well-known/bruiser/protocol` | protocol version & capabilities | 200 | |
 
@@ -282,9 +324,12 @@ BUSY body:
 
 `can_preempt: true` is how a browser learns it may "take control".
 
-**Proxy endpoints (Mode B):** `POST /v1/proxy/{adapter}/{op}` for `op ∈ search |
-hold | release | purchase | cancel`. `search` is uncontrolled; the rest require a
-matching ACTIVE execution for the caller and forward with fence attached.
+**Proxy endpoints (pattern P3):** `POST /v1/proxy/{adapter}/{op}` for `op ∈ search |
+hold | release | purchase | cancel`, plus a transparent HTTP reverse-proxy listener
+that applies *route rules* to the merchant's own URL space. `search` is
+uncontrolled; the rest require a matching ACTIVE execution for the caller —
+acquired explicitly beforehand, or transparently on first use — and are forwarded
+with fence attached.
 
 ### 6.1 Admin API
 
@@ -346,25 +391,126 @@ type Adapter interface {
 must be stateless with respect to Bruiser and idempotent on retry. V1 ships
 `adapter/simtix` (HTTP) and `adapter/memory` (tests).
 
-## 9. SimTix — simulated ticketing system
+## 9. Enforcement patterns and authority
+
+Bruiser is only meaningful if it is authoritative at the **admission point** — the
+operation that consumes or reserves scarce inventory. The lease core is identical
+across patterns; what differs is where the check happens and how bypass is closed.
+
+### 9.1 P1 — In-app middleware
+
+The merchant's checkout verifies the execution token (§5.3) via an SDK. Bruiser is
+out of the data path. Bypass closure: every allocation route in the application is
+behind the middleware; there is no unauthenticated allocation API. Fits clubs that
+control their checkout code.
+
+### 9.2 P2 — Edge / API-gateway integration
+
+The merchant's existing edge calls `POST /v1/authorize` before forwarding
+allocation requests. Bruiser ships reference configurations for:
+
+- NGINX / OpenResty `auth_request`
+- Envoy `ext_authz` (HTTP)
+- Kong and Tyk plugins (thin, calling `/v1/authorize`)
+- Cloudflare Worker / Fastly Compute snippet
+- AWS API Gateway Lambda authorizer
+
+`/v1/authorize` receives method, path, headers (credentials), and the merchant's
+*route rules* map them to `(resource, action)`:
+
+```yaml
+routes:
+  - match: { method: POST, path: "/api/events/{event}/holds" }
+    resource: "event:{event}"
+    action: hold
+  - match: { method: POST, path: "/api/orders" }
+    resource_from: { body_json: "$.event_id", prefix: "event:" }
+    action: purchase
+  - match: { path: "/api/events/**", method: GET }
+    action: search                       # uncontrolled
+```
+
+On allow, Bruiser returns headers for the edge to inject (`X-Bruiser-Execution`,
+`X-Bruiser-Fence`, `X-Bruiser-Customer`). The origin must reject allocation
+requests lacking a valid edge signature or arriving from anywhere other than the
+edge (mTLS, private network, or a per-deployment shared secret the edge adds). If
+the client already holds an explicit execution token it is verified; otherwise the
+customer is extracted (§5.1a) and an execution acquired transparently.
+
+### 9.3 P3 — Bruiser reverse proxy
+
+Bruiser terminates allocation traffic for configured routes and forwards to the
+origin (or via an adapter), attaching fence and identity. The same route rules
+apply. Bypass closure: origin allocation endpoints are reachable only from the
+Bruiser proxy (network policy / allowlist / mTLS). Fits merchants who can change
+neither the application nor an edge, and the simulator/demo. This pattern places
+Bruiser in the data path, so its HA and fail-closed behaviour matter most here;
+the Helm chart's defaults assume it.
+
+### 9.4 Per-execution limits
+
+An execution is a serialisation point; downstream should treat one execution as one
+shopper (one basket, one hold set). To prevent a customer collapsing many clients
+onto one execution and hammering the origin, patterns P2/P3 enforce, per execution,
+a **max in-flight requests** (default 2) and a **rate limit** (default 5 rps),
+node-locally in V1. P1 SDKs expose the same limits as an optional local guard.
+Exceeding returns 429 with `Retry-After` and an `EXECUTION_THROTTLED` audit event
+when sustained.
+
+### 9.5 The authority check
+
+`bruiser authority-check --target <merchant config>` is a CLI (and admin-UI action)
+that, against a staging or production environment:
+
+1. enumerates the allocation routes from route rules / SDK registration;
+2. attempts each route **without** any Bruiser execution, with an expired token,
+   with a tampered token, with a stale fence, and from outside the enforcement path
+   where network access permits;
+3. probes for common bypasses: alternative hostnames, HTTP vs HTTPS origin, legacy
+   API versions, mobile API paths, GraphQL mutations, direct origin IP;
+4. reports PASS/FAIL per route with evidence, and writes an `AUTHORITY_CHECK`
+   audit event.
+
+The check is part of the integration guide, part of the demo (a bypass attempt
+that fails), and a gate in the design-partner onboarding checklist. It cannot prove
+the absence of paths it does not know about, so the integration questionnaire
+([06-integration-discovery.md](06-integration-discovery.md)) asks the merchant to
+enumerate them, and the report lists what was covered.
+
+### 9.6 Choosing a pattern
+
+| Merchant situation | Pattern |
+|--------------------|---------|
+| Owns checkout code, can add a dependency | P1 (preferred: Bruiser out of the data path) |
+| Checkout is a platform, but club controls the edge/CDN/API gateway in front of it | P2 |
+| Platform exposes a supported pre-allocation hook or webhook | P2 via hook, or adapter-specific variant |
+| No control over app or edge, but can route DNS/network for allocation endpoints | P3 |
+| No viable way to make Bruiser authoritative | Not a V1 customer; record requirements and defer |
+
+## 10. SimTix — simulated ticketing system
 
 Separate binary. Events with N seats, price bands, time-limited holds (default
 120 s), purchase, cancel; per-account limit (e.g. 4 seats) enforced *non-atomically*
 by default to mirror common real-world behaviour (toggle to atomic for honest
-comparison); optional Mode A token verification via the Go SDK; request log with
-timing; Prometheus metrics; a reset endpoint. Deliberately simple and deliberately
+comparison); a club-style login issuing a session cookie/JWT (so transparent
+enforcement can be demonstrated); optional P1 token verification via the Go SDK;
+an `--enforcement` flag selecting P1, P2 (SimTix behind a bundled NGINX
+`auth_request` config) or P3 (behind the Bruiser proxy), and `--origin-lockdown`
+to reject traffic not carrying the edge secret; request log with timing;
+Prometheus metrics; a reset endpoint. Deliberately simple and deliberately
 representative of the failure modes Bruiser addresses (hold churn, duplicate
-allocation under concurrency, downstream load).
+allocation under concurrency, downstream load, bypass).
 
-## 10. Swarm — agent load generator
+## 11. Swarm — agent load generator
 
 Configurable customers × agents × events; agent behaviour profiles (`greedy`,
-`polite`, `retry-storm`, `handoff-aware`); targets Bruiser or SimTix directly
-(`--bypass`); emits per-request outcomes to the dashboard and a results JSON with
-the headline numbers (downstream requests, grants, busy, duplicate allocations,
-seats per customer histogram, p50/p99).
+`polite`, `retry-storm`, `handoff-aware`, `unaware` — speaks only the merchant's
+API with a merchant session, never the Bruiser protocol); targets Bruiser or SimTix
+directly (`--bypass`); emits per-request outcomes to the dashboard and a results
+JSON with the headline numbers (downstream requests, grants, busy, duplicate
+allocations, bypass successes, seats per customer histogram, p50/p99).
 
-## 11. Torture harness and invariant checker
+## 12. Torture harness and invariant checker
 
 `cmd/torture` runs N in-process or containerised gateways against one Postgres and
 drives randomised operations from M customers × K principals while injecting
@@ -391,7 +537,7 @@ verifies:
 
 A violation fails CI and dumps the minimal history for reproduction.
 
-## 12. Observability
+## 13. Observability
 
 Metrics (Prometheus): `bruiser_acquire_total{outcome,rule}`,
 `bruiser_active_executions{merchant}`, `bruiser_busy_cache_hit_ratio`,
@@ -402,7 +548,17 @@ Metrics (Prometheus): `bruiser_acquire_total{outcome,rule}`,
 Traces: one span per request with `merchant`, `domain`, `execution`, `fence`
 attributes. Logs: JSON, `request_id` correlated to audit events.
 
-## 13. Security controls
+**Usage figures (fair-use transparency, not metering):** the admin UI and
+`/admin/v1/stats` expose peak concurrent executions (rolling 30 days), executions
+per month and distinct resources protected. These are informational; the gateway
+never throttles or licenses on them.
+
+**Audit retention:** `audit.retention` per merchant, default `13 months`. A daily
+job deletes (or, if `audit.archive` is configured, exports then deletes) events past
+retention and records an `AUDIT_PURGED` event with counts. Retention changes are
+themselves audited.
+
+## 14. Security controls
 
 - Ed25519 keys generated by `bruiser keys rotate`; at least two keys live during
   rotation; JWKS cached by merchants with `max-age`.
@@ -421,20 +577,41 @@ attributes. Logs: JSON, `request_id` correlated to audit events.
 - Threat model (STRIDE) maintained in `docs/security/threat-model.md`; external
   review before first production deployment.
 
-## 14. Deployment
+## 15. Deployment
 
-**Compose (dev/demo):** `caddy` LB → `gateway ×3` → `postgres`; plus `simtix`,
-`swarm`, `dashboard`. One command, seeded merchant, seeded policy, dev IdP secret.
+**Compose (dev/demo):** `caddy` LB → `gateway ×3` → `postgres`; plus `simtix`
+(with its NGINX edge for P2), `swarm`, `dashboard`. One command, seeded merchant,
+seeded policy, seeded route rules, dev IdP secret.
 
 **Helm (prod):** `Deployment` with HPA, `PodDisruptionBudget`, readiness on store,
 external Postgres via secret, `ServiceMonitor`, `NetworkPolicy`, optional
 `Ingress`; separate admin `Service`. Migrations as a `Job` hook. Zero-downtime
-upgrade path documented and tested.
+upgrade path documented and tested. Self-hosting by the merchant is the primary
+data-residency control; the chart never phones home.
 
-## 15. Repository layout
+**Hosted sandbox (`sandbox.bruiser-gateway.com`):** the same Helm chart on a small
+managed Kubernetes cluster, with a `sandbox` build flag enabling self-service
+throwaway merchants (signup with email, auto-expiring after 14 days, hard rate and
+size limits, nightly reset of demo merchants), the live demo dashboard, and hosted
+API docs. This is the one Bruiser deployment that is genuinely multi-tenant, so it
+doubles as the tenant-isolation proving ground. It is a sales/discovery asset, not
+a production offering, and says so.
+
+## 16. Repository and licence layout
+
+Licensing (founder decision, pending legal review): protocol, schemas,
+specifications and SDKs under **Apache-2.0**; gateway core under **BSL 1.1**.
+The repository is laid out so the two can be published separately at M8 — the
+Apache-2.0 assets to a public `bruiser-protocol` repository, the gateway to
+`bruiser-gateway` — without moving code:
 
 ```
-cmd/bruiser/            gateway: serve | migrate | policy validate | keys rotate | admin-key create
+LICENSE                 BSL 1.1 (gateway core; parameters set with counsel)
+protocol/               Apache-2.0 (own LICENSE): OpenAPI, JSON Schemas, token spec, audit vocabulary,
+                        conformance suite, protocol docs
+sdk/go/ sdk/node/ sdk/python/   Apache-2.0 (own LICENSE): verification middleware + clients
+deploy/edge/            Apache-2.0: NGINX / Envoy / Kong / Cloudflare / API Gateway reference configs
+cmd/bruiser/            gateway: serve | migrate | policy validate | keys rotate | admin-key create | authority-check
 cmd/simtix/             simulated ticketing system
 cmd/swarm/              agent swarm generator
 cmd/torture/            distributed correctness harness + checker
@@ -445,14 +622,22 @@ internal/auth/          assertions, sessions, tokens, JWKS, admin keys, RBAC
 internal/api/public/    v1 handlers        internal/api/admin/
 internal/audit/         emitter, exporters
 internal/adapter/       interface, simtix, memory
-internal/proxy/
+internal/enforce/       route rules, /v1/authorize, transparent acquire, per-execution limits
+internal/proxy/         P3 reverse proxy
+internal/authority/     authority-check probes and report
 web/admin/              templates, htmx, SSE
-sdk/go/ sdk/node/ sdk/python/   verification middleware + client
 deploy/compose/ deploy/helm/
-docs/  docs/protocol/  docs/security/
+docs/  docs/security/
 ```
 
-## 16. Open technical items (tracked, not blocking)
+BSL 1.1 parameters proposed for legal review: *Additional Use Grant* — production
+use permitted for any purpose except offering the software, or a service whose
+value derives primarily from it, to third parties as a hosted or managed Bruiser
+service; *Change Date* — four years from each release; *Change Licence* —
+Apache-2.0. Commercial licences (Core/Enterprise) sit alongside BSL for customers
+who need different terms.
+
+## 17. Open technical items (tracked, not blocking)
 
 - Postgres `LISTEN/NOTIFY` vs. periodic polling for watch fan-out under heavy
   connection counts — start with NOTIFY, measure.
@@ -460,3 +645,8 @@ docs/  docs/protocol/  docs/security/
 - Introspection endpoint caching semantics (must never return `active: true` for
   a revoked execution — so no caching of positive answers beyond a few hundred ms).
 - Anchor hashing/normalisation rules (belongs in the protocol spec).
+- Whether per-execution in-flight limits (§9.4) need to be store-coordinated for
+  P3 deployments with many proxy replicas, or whether node-local is sufficient in
+  practice.
+- Customer extractor for opaque merchant sessions: introspection latency on the
+  allocation path; cache TTL vs. logout propagation.

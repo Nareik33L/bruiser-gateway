@@ -19,28 +19,51 @@ concern it first appears to be.
 
 **Consequences.** Grant throughput per domain is bounded by row-lock latency
 (fine: one domain = one customer's agents). The `Store` interface allows another
-backend later.
+backend later. Coordination technology is an implementation detail: it never
+appears in positioning, and the product is not "a lock" (founder principle).
 
 **Revisit when.** Torture/load testing shows grant-path latency or connection
 pressure that the busy cache and pooling cannot absorb, or an enterprise requires
 active-active multi-region grants.
 
-## ADR-002 — Token verification (Mode A) is the primary integration; proxy is secondary
+## ADR-002 — Bruiser must be authoritative at the admission point; three enforcement patterns
 
-**Decision.** Bruiser issues signed execution tokens the merchant verifies. Proxying
-allocation calls through Bruiser is supported but not the default recommendation.
+**Decision.** Integration is defined as making Bruiser authoritative over the
+protected allocation operation and closing every bypass path. Three enforcement
+patterns are supported as equals, chosen per merchant: **P1** in-app middleware
+verifying the execution token; **P2** edge/API-gateway calling `/v1/authorize`;
+**P3** Bruiser reverse proxy. Every deployment runs the authority check before
+go-live. Where no pattern can make Bruiser authoritative, the merchant is not a V1
+customer.
 
-**Why.** Keeps Bruiser out of the purchase data path (no SPOF, no latency added to
-checkout), makes integration a middleware rather than a re-plumbing, and degrades
-safely: an outage stops new grants but not authorised purchases. Ticketing vendors
-are far more likely to accept "verify a token" than "route checkout through a
-third-party box".
+**Why.** Founder decisions Q2 and Q13: target clubs have mixed setups; Bruiser must
+be platform-agnostic and must not depend on a ticketing-platform partnership; and
+policy cannot be guaranteed if direct paths exist. P1 is still recommended where
+available because it keeps Bruiser out of the purchase data path and degrades most
+gracefully, but it is a preference within the requirement, not the requirement.
 
-**Consequences.** Revocation is visible to the merchant on the next token check;
-introspection on the purchase step closes the window. Needs SDKs in the merchant's
-language.
+**Consequences.** Route rules, `/v1/authorize`, transparent acquire and reference
+edge configurations become V1 scope (M3). SDKs in the merchant's language remain
+necessary for P1. The authority check becomes a product feature and a sales gate.
 
-**Revisit when.** Design partners overwhelmingly cannot modify their checkout.
+**Revisit when.** A supported platform integration point emerges that warrants a
+dedicated adapter-specific pattern.
+
+## ADR-002a — Enforcement never depends on the client knowing Bruiser
+
+**Decision.** In P2/P3 Bruiser extracts the customer from the merchant's existing
+session credential and acquires the execution transparently on first allocation
+request. Bruiser-aware clients get explicit acquire/renew/watch/handoff; unaware
+clients are still controlled. SDKs and MCP tooling are adoption aids only.
+
+**Why.** Founder decision Q8/Q13: the merchant gateway must enforce regardless of
+which agent or client makes the request. A control layer that only controls
+cooperative agents controls nothing.
+
+**Consequences.** A configurable customer extractor (JWT / cookie-JWT /
+introspection / edge-signed header); coarse principal typing for unaware clients;
+per-execution in-flight and rate limits to bound clients that collapse onto one
+execution.
 
 ## ADR-003 — Fencing tokens on every grant
 
@@ -150,3 +173,56 @@ store pause, clock skew, handoff races).
 one binary; no front-end toolchain to maintain in an OSS project at this stage.
 
 **Revisit when.** Core/Enterprise UI requirements outgrow it.
+
+## ADR-014 — Licensing: Apache-2.0 for protocol and SDKs; BSL 1.1 for the gateway core
+
+**Decision.** Protocol, schemas, specifications, SDKs and reference edge configs
+are Apache-2.0. The gateway core is BSL 1.1 with an Additional Use Grant permitting
+production use and forbidding competing hosted Bruiser services, Change Date four
+years per release, Change Licence Apache-2.0. Subject to legal review. Repository
+private until the OSS/Core boundary is formalised. The gateway tier is described as
+*source-available*, not open source.
+
+**Why.** Founder decision Q3: maximise adoption of the protocol while protecting
+the commercial product from being hosted as a competing service.
+
+**Consequences.** Repository laid out for a clean split into `bruiser-protocol`
+(public, Apache-2.0) and `bruiser-gateway` (BSL) at M8. No licence files published
+before legal sign-off.
+
+## ADR-015 — Identity anchors to the club's existing supporter identity
+
+**Decision.** `customer_id` is the club's membership/supporter number where
+available, otherwise the club's account identifier. Bruiser never creates
+identifiers, stores credentials or runs a login.
+
+**Why.** Founder decision Q1. Keeps Bruiser out of the identity business and ties
+the guarantee to the identity the club already trusts and can support.
+
+## ADR-016 — A hosted public sandbox is in scope; production is self-hosted
+
+**Decision.** `sandbox.bruiser-gateway.com` runs the same binary and Helm chart with
+self-service throwaway merchants, the live demo and hosted docs. It is a sales and
+developer-discovery asset. Production deployments are self-hosted by the merchant,
+which is also the primary data-residency control.
+
+**Why.** Founder decision Q5 and Q9. Developers need to try the API before a
+club will deploy it; the sandbox is also the only multi-tenant Bruiser and so
+proves tenant isolation.
+
+## ADR-017 — Simple pricing: fair-use envelope, no metering; usage figures reported, never enforced
+
+**Decision.** Core is £20k/yr within a documented fair-use envelope; Enterprise
+from £100k/yr. The gateway reports peak concurrent executions, executions per month
+and resources protected in the admin UI. It never throttles or licenses on them.
+
+**Why.** Founder decision Q12. Simplicity sells; metering infrastructure is not a
+V1 problem.
+
+## ADR-018 — Audit retention default 13 months, configurable per merchant
+
+**Decision.** `audit.retention` defaults to 13 months; a daily purge/archive job
+runs; retention changes and purges are audited.
+
+**Why.** Founder decision Q9. Covers a full season plus dispute lag; merchants
+adjust to their own legal requirements.
