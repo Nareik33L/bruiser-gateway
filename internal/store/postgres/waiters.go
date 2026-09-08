@@ -182,7 +182,7 @@ type queryRower interface {
 
 func waiterPosition(ctx context.Context, q queryRower, merchantID, domainKey string, createdAt time.Time) (int, error) {
 	var n int
-	err := tx.QueryRow(ctx, `
+	err := q.QueryRow(ctx, `
 		select count(*) from waiters
 		where merchant_id = $1 and domain_key = $2
 		  and expires_at > now() and created_at <= $3`,
