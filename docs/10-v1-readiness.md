@@ -56,8 +56,10 @@ broken and are closed in this slice:
 - EAF headline hard-coded downstream = 1; resume counted as forwarded.
 - Lab admin secret aliased the edge secret; `?secret=` leaked on `/admin`.
 
-This revision: `make test-race`, `make sdk-test`, `make v1-accept`, and
-`make eaf-nightly` (1×10,000, origin `held=1`) are green.
+This revision: `make test-race`, `make sdk-test`, and `make v1-accept`
+(including `TestV1DeploymentAcceptance` on Embedded, Edge, and Proxy)
+are green. `make eaf-nightly` (1×10,000, origin `held=1`) was green on
+the previous revision of this branch.
 
 ## 3. WARN — limitations that do not block V1
 
