@@ -355,11 +355,11 @@ func proveHandoff(t *testing.T, d deployLab) {
 	if d.kind != kindEmbedded {
 		return
 	}
-	if code := d.holdOrigin(t, got.Token); code != http.StatusForbidden {
-		t.Fatalf("stale fence want 403 got %d", code)
-	}
 	if code := d.holdOrigin(t, hand.Token); code != http.StatusCreated {
 		t.Fatalf("successor origin hold %d", code)
+	}
+	if code := d.holdOrigin(t, got.Token); code != http.StatusForbidden {
+		t.Fatalf("stale fence want 403 got %d", code)
 	}
 }
 
