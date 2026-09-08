@@ -21,6 +21,7 @@ import (
 	"github.com/Nareik33L/bruiser-gateway/internal/config"
 	"github.com/Nareik33L/bruiser-gateway/internal/id"
 	"github.com/Nareik33L/bruiser-gateway/internal/lease"
+	"github.com/Nareik33L/bruiser-gateway/internal/limit"
 	"github.com/Nareik33L/bruiser-gateway/internal/merchant"
 	pgstore "github.com/Nareik33L/bruiser-gateway/internal/store/postgres"
 )
@@ -96,6 +97,15 @@ func (a *eafAcc) record(resource, customer, outcome string) {
 	}
 }
 
+func (a *eafAcc) snapshot(resource string) (attempts, forwarded, customers float64) {
+	if a == nil {
+		return 0, 0, 0
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.attempts[resource], a.forwarded[resource], float64(len(a.customers[resource]))
+}
+
 type Server struct {
 	cfg     config.Config
 	store   *pgstore.Store
@@ -104,9 +114,11 @@ type Server struct {
 	log     *slog.Logger
 	profile merchant.Profile
 	eaf     *eafAcc
+	mux     http.Handler
+	limit   *limit.PerExecution
 }
 
-func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.Logger, profile merchant.Profile) http.Handler {
+func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.Logger, profile merchant.Profile) *Server {
 	s := &Server{
 		cfg:     cfg,
 		store:   store,
@@ -115,6 +127,7 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 		log:     log,
 		profile: profile,
 		eaf:     newEAFAcc(),
+		limit:   limit.New(cfg.MaxInFlight, cfg.RatePerSec),
 	}
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -128,6 +141,7 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 	r.Route("/v1", func(r chi.Router) {
 		r.Post("/sessions", s.createSession)
 		r.Post("/authorize", s.authorize)
+		r.Post("/introspect", s.introspect)
 		r.Group(func(r chi.Router) {
 			r.Use(s.sessionAuth)
 			r.Post("/executions/acquire", s.acquire)
@@ -137,7 +151,16 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 			r.Get("/executions/{id}/watch", s.watch)
 		})
 	})
-	return r
+	s.mux = r
+	return s
+}
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mux.ServeHTTP(w, r)
+}
+
+func (s *Server) EAF(resource string) (attempts, forwarded, customers float64) {
+	return s.eaf.snapshot(resource)
 }
 
 func (s *Server) healthz(w http.ResponseWriter, _ *http.Request) {
@@ -163,7 +186,7 @@ func (s *Server) protocol(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"protocol":     "bruiser",
 		"version":      "0.1-draft",
-		"capabilities": []string{"IDENTITY", "ACQUIRE", "RENEW", "RELEASE", "WATCH", "AUTHORIZE"},
+		"capabilities": []string{"IDENTITY", "ACQUIRE", "RENEW", "RELEASE", "WATCH", "AUTHORIZE", "INTROSPECT"},
 	})
 }
 

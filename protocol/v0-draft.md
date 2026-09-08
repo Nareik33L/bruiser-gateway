@@ -19,7 +19,7 @@ The Go gateway is one implementation of this protocol.
 | REVOKE | `POST /v1/executions/{id}/revoke` | M5 |
 | HANDOFF | `POST /v1/executions/{id}/handoff` | M5 |
 | AUTHORIZE | `POST /v1/authorize` | yes (Edge) |
-| INTROSPECT | `POST /v1/introspect` | M3 |
+| INTROSPECT | `POST /v1/introspect` | yes |
 
 ## Identity
 

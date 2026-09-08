@@ -101,6 +101,12 @@ paths:
         "403": { description: unrouted or DENIED }
         "409": { description: BUSY }
         "503": { description: store unavailable }
+  /v1/introspect:
+    post:
+      summary: Verify an execution token (Embedded)
+      responses:
+        "200": { description: claims + active }
+        "401": { description: invalid token }
   /.well-known/bruiser/jwks.json:
     get:
       summary: Execution-token public keys

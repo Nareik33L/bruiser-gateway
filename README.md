@@ -57,6 +57,7 @@ Dev assertions default to membership `1001234` (Alice in the Arsenal-like lab):
 | [docs/05-decisions-from-founder-review.md](docs/05-decisions-from-founder-review.md) | Founder decisions |
 | [docs/06-integration-discovery.md](docs/06-integration-discovery.md) | Stage A discovery questionnaire |
 | [docs/07-club-profile-arsenal.md](docs/07-club-profile-arsenal.md) | Unverified Arsenal-like standing analogue |
+| [docs/08-make-authoritative.md](docs/08-make-authoritative.md) | Edge / Proxy / Embedded placement + Authority Check |
 | [protocol/v0-draft.md](protocol/v0-draft.md) | Bruiser Protocol v0 draft |
 
 ## Licensing (intended, pending legal review)
@@ -66,12 +67,9 @@ No licence files are committed until the OSS/Core boundary is formally decided.
 
 ## Status
 
-M0–M2 are in this tree. M3 Edge is standing up against an **unverified
-Arsenal-like** club profile (`docs/07-club-profile-arsenal.md`,
-`configs/arsenal.yaml`) until Stage A discovery confirms or replaces it:
-`POST /v1/authorize`, transparent acquire from `boxoffice_session`, SimTix
-origin + Edge analogue, `bruiser authority-check`. Embedded SDKs, Proxy, and
-the 1×10,000 EAF demo remain. Stage A commercial discovery runs in parallel.
+M0–M2 are in this tree. M3 against the **unverified Arsenal-like** profile
+covers Edge, Proxy, Go Embedded SDK, Authority Check, and EAF. Node/Python
+SDKs remain. Stage A commercial discovery runs in parallel.
 
 ## Arsenal-like lab (best guess until discovery)
 
@@ -82,9 +80,10 @@ platform origin Bruiser sits in front of (Edge), not club-owned checkout
 
 ```bash
 export BRUISER_DATABASE_URL=postgres://bruiser:bruiser@127.0.0.1:5432/bruiser?sslmode=disable
-make serve          # :8080  — gateway, merchant arsenal
-make simtix         # :8090 origin (lockdown), :8091 Edge analogue
-make authority-check
+make serve            # :8080 control plane; BRUISER_PROXY_ADDR=:8081 for Proxy
+make simtix           # :8090 origin (lockdown) + :8091 Edge analogue
+make authority-check  # Overall Result PASS
+make eaf-demo         # unaware swarm; observed EAF ~N×, downstream 1×
 ```
 
 Two logins of membership `1001234` against `POST /api/events/ars-che/holds`

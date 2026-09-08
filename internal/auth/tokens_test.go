@@ -46,6 +46,13 @@ func TestRoundTripSessionAndExecution(t *testing.T) {
 	if etok == "" {
 		t.Fatal("empty execution token")
 	}
+	parsed, err := ParseExecution(etok, pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.ExecutionID != "exe_1" || parsed.Fence != 7 {
+		t.Fatalf("%+v", parsed)
+	}
 
 	assertion, err := IssueDevAssertion("secret", "alice", time.Hour, map[string]string{"membership_no": "1"})
 	if err != nil {

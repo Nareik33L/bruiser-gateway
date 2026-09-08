@@ -23,6 +23,10 @@ type Config struct {
 	EdgeSecret    string
 	OriginSecret  string
 	ProfilePath   string
+	ProxyAddr     string
+	OriginURL     string
+	MaxInFlight   int
+	RatePerSec    float64
 }
 
 func Load() Config {
@@ -42,6 +46,10 @@ func Load() Config {
 		EdgeSecret:    env("BRUISER_EDGE_SECRET", "edge-secret-dev"),
 		OriginSecret:  env("BRUISER_ORIGIN_SECRET", "origin-lock-dev"),
 		ProfilePath:   env("BRUISER_PROFILE", "configs/arsenal.yaml"),
+		ProxyAddr:     env("BRUISER_PROXY_ADDR", ""),
+		OriginURL:     env("BRUISER_ORIGIN_URL", ""),
+		MaxInFlight:   envInt("BRUISER_MAX_IN_FLIGHT", 2),
+		RatePerSec:    envFloat("BRUISER_RATE_PER_SEC", 5),
 	}
 }
 
@@ -78,6 +86,16 @@ func envDuration(key string, def time.Duration) time.Duration {
 func envInt(key string, def int) int {
 	if v := os.Getenv(key); v != "" {
 		n, err := strconv.Atoi(v)
+		if err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+func envFloat(key string, def float64) float64 {
+	if v := os.Getenv(key); v != "" {
+		n, err := strconv.ParseFloat(v, 64)
 		if err == nil {
 			return n
 		}

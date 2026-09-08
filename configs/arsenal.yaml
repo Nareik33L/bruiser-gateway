@@ -10,6 +10,10 @@ identity:
   hmac_secret_env: BRUISER_DEV_HMAC_SECRET
 
 routes:
+  - match: { method: GET, path: "/healthz" }
+    action: health
+  - match: { method: POST, path: "/login" }
+    action: identity
   - match: { method: GET, path: "/api/events" }
     action: search
   - match: { method: GET, path: "/api/events/{event}" }

@@ -34,6 +34,8 @@ func main() {
 		err = cmdAssertion(cfg)
 	case "authority-check":
 		err = cmdAuthorityCheck()
+	case "eaf-demo":
+		err = cmdEAFDemo()
 	default:
 		usage()
 		os.Exit(2)
@@ -45,7 +47,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: bruiser <serve|migrate|assertion|authority-check>\n")
+	fmt.Fprintf(os.Stderr, "usage: bruiser <serve|migrate|assertion|authority-check|eaf-demo>\n")
 }
 
 func cmdMigrate(cfg config.Config, log *slog.Logger) error {
@@ -91,6 +93,10 @@ func cmdServe(cfg config.Config, log *slog.Logger) error {
 	sweeperStop := make(chan struct{})
 	go sweep(store, cfg.SweepInterval, log, sweeperStop)
 
+	if cfg.ProxyAddr != "" && cfg.OriginURL == "" {
+		return fmt.Errorf("BRUISER_ORIGIN_URL is required when BRUISER_PROXY_ADDR is set")
+	}
+
 	handler := publicapi.New(cfg, store, signer, log, loadProfile(cfg, log))
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -107,6 +113,26 @@ func cmdServe(cfg config.Config, log *slog.Logger) error {
 		errCh <- srv.ListenAndServe()
 	}()
 
+	var proxySrv *http.Server
+	if cfg.ProxyAddr != "" {
+		ph, err := handler.ProxyHandler(cfg.OriginURL)
+		if err != nil {
+			return err
+		}
+		proxySrv = &http.Server{
+			Addr:              cfg.ProxyAddr,
+			Handler:           ph,
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       30 * time.Second,
+			WriteTimeout:      35 * time.Second,
+			IdleTimeout:       60 * time.Second,
+		}
+		go func() {
+			log.Info("proxy listening", "addr", cfg.ProxyAddr, "origin", cfg.OriginURL)
+			errCh <- proxySrv.ListenAndServe()
+		}()
+	}
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	select {
@@ -121,6 +147,9 @@ func cmdServe(cfg config.Config, log *slog.Logger) error {
 	close(sweeperStop)
 	shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	if proxySrv != nil {
+		_ = proxySrv.Shutdown(shutCtx)
+	}
 	return srv.Shutdown(shutCtx)
 }
 

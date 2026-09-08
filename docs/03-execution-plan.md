@@ -195,13 +195,14 @@ Exit criteria
 - A Node and a Python sample app verify tokens using the SDKs, in CI.
 
 **Landed against the Arsenal-like analogue (this tree).** `POST /v1/authorize`
-with cookie-JWT extraction; `configs/arsenal.yaml` route rules; SimTix origin
-with optional origin lockdown; Go Edge analogue (`internal/edge`) plus NGINX
-`auth_request` reference; `bruiser authority-check` in the product-feature
-PASS/FAIL format; unaware two-login BUSY vs same-cookie ALREADY_HELD; EAF
-counters/gauges on the authorize path. Still open: Embedded SDKs, Proxy
-method, per-execution rate limit (in-flight is in the Edge analogue), 1×10,000
-EAF demo, Node/Python SDKs, `AUTHORITY_CHECK` audit persistence.
+and `POST /v1/introspect`; `configs/arsenal.yaml` route rules; SimTix origin
+with optional origin lockdown and optional Embedded token verify; Go Edge
+analogue plus NGINX `auth_request` and Envoy `ext_authz` references; **Proxy**
+on `BRUISER_PROXY_ADDR`; `bruiser authority-check` (Edge and Proxy); unaware
+BUSY vs ALREADY_HELD; EAF counters plus `bruiser eaf-demo`; `sdk/go` Protect
+with fence tracking. Still open: Node/Python SDKs, 1×10,000 as a nightly (CI
+proves 200× on Proxy; CLI defaults to 2,000), `AUTHORITY_CHECK` audit
+persistence.
 
 ---
 

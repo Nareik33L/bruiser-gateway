@@ -1,6 +1,8 @@
 package publicapi
 
 import (
+	"bytes"
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"io"
@@ -20,6 +22,14 @@ type authorizeReq struct {
 	Method  string `json:"method"`
 	Path    string `json:"path"`
 	EventID string `json:"event_id"`
+}
+
+type admitResult struct {
+	status  int
+	allow   bool
+	headers http.Header
+	body    any
+	exeID   string
 }
 
 func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
@@ -46,44 +56,57 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 			eventID = body.EventID
 		}
 	}
-	if u, err := url.Parse(path); err == nil {
+	if u, err := url.Parse(path); err == nil && path != "" {
 		path = u.Path
 	}
 	if method == "" {
 		method = r.Method
 	}
+	res := s.admit(r.Context(), method, path, eventID, cookieValue(r, s.profile.Identity.Cookie), bearer(r), requestID(r))
+	writeAdmit(w, res)
+}
 
+func writeAdmit(w http.ResponseWriter, res admitResult) {
+	for k, vs := range res.headers {
+		for _, v := range vs {
+			w.Header().Add(k, v)
+		}
+	}
+	if res.body == nil {
+		w.WriteHeader(res.status)
+		return
+	}
+	writeJSON(w, res.status, res.body)
+}
+
+func (s *Server) admit(ctx context.Context, method, path, eventID, cookie, bearerTok, reqID string) admitResult {
+	h := make(http.Header)
 	route, params, ok := s.profile.MatchRoute(method, path)
 	if !ok {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "unrouted", "path": path})
-		return
+		return admitResult{status: http.StatusForbidden, body: map[string]string{"error": "unrouted", "path": path}}
 	}
 	if !route.Controlled() {
-		w.Header().Set("X-Bruiser-Control", "none")
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ALLOW", "action": route.Action})
-		return
+		h.Set("X-Bruiser-Control", "none")
+		return admitResult{status: http.StatusOK, allow: true, headers: h, body: map[string]string{"status": "ALLOW", "action": route.Action}}
 	}
 
-	raw := cookieValue(r, s.profile.Identity.Cookie)
+	raw := cookie
 	if raw == "" {
-		raw = bearer(r)
+		raw = bearerTok
 	}
 	if raw == "" {
 		s.eaf.record(resourceOrPath(route, params, eventID), "", "unauthorized")
-		writeErr(w, http.StatusUnauthorized, "missing box office session")
-		return
+		return admitResult{status: http.StatusUnauthorized, body: map[string]string{"error": "missing box office session"}}
 	}
 	assertion, err := auth.ParseAssertionHS256(raw, s.cfg.DevHMACSecret, "bruiser")
 	if err != nil {
 		s.eaf.record(resourceOrPath(route, params, eventID), "", "unauthorized")
-		writeErr(w, http.StatusUnauthorized, "invalid box office session")
-		return
+		return admitResult{status: http.StatusUnauthorized, body: map[string]string{"error": "invalid box office session"}}
 	}
 
 	resource := route.ResourceFor(params, eventID)
 	if resource == "" {
-		writeErr(w, http.StatusBadRequest, "could not derive resource")
-		return
+		return admitResult{status: http.StatusBadRequest, body: map[string]string{"error": "could not derive resource"}}
 	}
 
 	principalID := assertion.JTI
@@ -93,7 +116,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	principalID = "unaware:" + principalID
 	sessID := id.Session()
 	exp := time.Now().UTC().Add(s.cfg.SessionTTL)
-	if err := s.store.InsertSession(r.Context(), pgstore.SessionRow{
+	if err := s.store.InsertSession(ctx, pgstore.SessionRow{
 		ID:            sessID,
 		MerchantID:    s.cfg.MerchantID,
 		CustomerID:    assertion.CustomerID,
@@ -102,8 +125,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 		PrincipalID:   principalID,
 		ExpiresAt:     exp,
 	}); err != nil {
-		s.storeError(w, err)
-		return
+		return s.admitStoreError(err)
 	}
 
 	rule := s.profile.Policy.RuleName
@@ -115,7 +137,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 		maxActive = s.profile.Policy.MaxActive
 	}
 	domain := lease.DomainKey(s.cfg.MerchantID, rule, assertion.CustomerID, resource)
-	res, err := s.leases.Acquire(r.Context(), lease.AcquireRequest{
+	acq, err := s.leases.Acquire(ctx, lease.AcquireRequest{
 		MerchantID:  s.cfg.MerchantID,
 		DomainKey:   domain,
 		CustomerID:  assertion.CustomerID,
@@ -127,52 +149,108 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 		MaxActive:   maxActive,
 		TTL:         s.cfg.LeaseTTL,
 		MaxLifetime: s.cfg.MaxLifetime,
-		RequestID:   requestID(r),
+		RequestID:   reqID,
 	})
 	if err != nil {
-		s.storeError(w, err)
-		return
+		return s.admitStoreError(err)
 	}
-	acquireTotal.WithLabelValues("transparent_"+res.Status, rule).Inc()
+	acquireTotal.WithLabelValues("transparent_"+acq.Status, rule).Inc()
 
-	switch res.Status {
+	switch acq.Status {
 	case lease.StatusGranted, lease.StatusAlreadyHeld:
 		s.eaf.record(resource, assertion.CustomerID, "allow")
-		tok, err := s.signer.SignExecution(*res.Execution)
+		tok, err := s.signer.SignExecution(*acq.Execution)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "sign")
-			return
+			return admitResult{status: http.StatusInternalServerError, body: map[string]string{"error": "sign"}}
 		}
-		w.Header().Set("X-Bruiser-Execution", tok)
-		w.Header().Set("X-Bruiser-Fence", strconv.FormatInt(res.Execution.Fence, 10))
-		w.Header().Set("X-Bruiser-Customer", assertion.CustomerID)
+		h.Set("X-Bruiser-Execution", tok)
+		h.Set("X-Bruiser-Fence", strconv.FormatInt(acq.Execution.Fence, 10))
+		h.Set("X-Bruiser-Customer", assertion.CustomerID)
 		if s.cfg.OriginSecret != "" {
-			w.Header().Set("X-Bruiser-Origin-Secret", s.cfg.OriginSecret)
+			h.Set("X-Bruiser-Origin-Secret", s.cfg.OriginSecret)
 		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status":       "ALLOW",
-			"execution_id": res.Execution.ID,
-			"fence":        res.Execution.Fence,
-			"customer_id":  assertion.CustomerID,
-		})
+		return admitResult{
+			status:  http.StatusOK,
+			allow:   true,
+			headers: h,
+			exeID:   acq.Execution.ID,
+			body: map[string]any{
+				"status":       "ALLOW",
+				"execution_id": acq.Execution.ID,
+				"fence":        acq.Execution.Fence,
+				"customer_id":  assertion.CustomerID,
+			},
+		}
 	case lease.StatusBusy:
 		s.eaf.record(resource, assertion.CustomerID, "busy")
-		retry := time.Until(res.Busy.ExpiresAt).Milliseconds()
+		retry := time.Until(acq.Busy.ExpiresAt).Milliseconds()
 		if retry < 0 {
 			retry = 1000
 		}
-		w.Header().Set("Retry-After", "2")
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"status":              "BUSY",
-			"active_execution_id": res.Busy.ActiveExecutionID,
-			"holder":              map[string]string{"type": res.Busy.Holder.Type, "id": res.Busy.Holder.ID},
-			"expires_at":          res.Busy.ExpiresAt.UTC().Format(time.RFC3339Nano),
-			"retry_after_ms":      retry,
-		})
+		h.Set("Retry-After", "2")
+		return admitResult{
+			status:  http.StatusConflict,
+			headers: h,
+			body: map[string]any{
+				"status":              "BUSY",
+				"active_execution_id": acq.Busy.ActiveExecutionID,
+				"holder":              map[string]string{"type": acq.Busy.Holder.Type, "id": acq.Busy.Holder.ID},
+				"expires_at":          acq.Busy.ExpiresAt.UTC().Format(time.RFC3339Nano),
+				"retry_after_ms":      retry,
+			},
+		}
 	default:
 		s.eaf.record(resource, assertion.CustomerID, "denied")
-		writeErr(w, http.StatusForbidden, res.Reason)
+		return admitResult{status: http.StatusForbidden, body: map[string]string{"error": acq.Reason}}
 	}
+}
+
+func (s *Server) admitStoreError(err error) admitResult {
+	switch {
+	case err == nil:
+		return admitResult{status: http.StatusInternalServerError, body: map[string]string{"error": "internal error"}}
+	default:
+		// Mirror storeError without a ResponseWriter.
+		buf := &statusRecorder{code: http.StatusInternalServerError, body: &bytes.Buffer{}}
+		s.storeError(buf, err)
+		var payload any
+		_ = json.Unmarshal(buf.body.Bytes(), &payload)
+		h := make(http.Header)
+		if ra := buf.Header().Get("Retry-After"); ra != "" {
+			h.Set("Retry-After", ra)
+		}
+		if payload == nil {
+			payload = map[string]string{"error": "internal error"}
+		}
+		return admitResult{status: buf.code, headers: h, body: payload}
+	}
+}
+
+type statusRecorder struct {
+	code  int
+	hdr   http.Header
+	body  *bytes.Buffer
+	wrote bool
+}
+
+func (s *statusRecorder) Header() http.Header {
+	if s.hdr == nil {
+		s.hdr = make(http.Header)
+	}
+	return s.hdr
+}
+func (s *statusRecorder) Write(b []byte) (int, error) {
+	if !s.wrote {
+		s.WriteHeader(http.StatusOK)
+	}
+	return s.body.Write(b)
+}
+func (s *statusRecorder) WriteHeader(status int) {
+	if s.wrote {
+		return
+	}
+	s.wrote = true
+	s.code = status
 }
 
 func cookieValue(r *http.Request, name string) string {
@@ -191,4 +269,15 @@ func resourceOrPath(route merchant.Route, params map[string]string, eventID stri
 		return res
 	}
 	return route.Match.Path
+}
+
+func eventIDFromBody(body []byte) string {
+	var m map[string]any
+	if json.Unmarshal(body, &m) != nil {
+		return ""
+	}
+	if v, ok := m["event_id"].(string); ok {
+		return v
+	}
+	return ""
 }
