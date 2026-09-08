@@ -301,3 +301,34 @@ remains useful for clubs that look like a simpler version of the same model.
 **Revisit when.** First Stage A questionnaire comes back; replace or fork the
 profile rather than silently drifting.
 
+## ADR-023 — Heartbeat renewal and reconnect recovery
+
+**Decision.** An ACTIVE execution is kept alive by a lightweight heartbeat every
+20–30 seconds (default 25 s). Each heartbeat is `POST /v1/executions/{id}/renew`
+(alias `POST /v1/executions/{id}/heartbeat`) and sets
+`expires_at = least(now()+ttl, max_lifetime_at)`. Default lease TTL is 60 seconds.
+If heartbeats stop, the lease expires and is released automatically.
+
+The same principal re-acquiring before expiry is a resume, not a new grant:
+ALREADY_HELD extends the TTL, increments `renew_count`, rebinds `session_id`, and
+audits `EXECUTION_RENEWED` with reason `resume`. A reconnect after expiry may
+acquire a new execution under merchant policy.
+
+On Edge and Proxy, a Bruiser-unaware client does not speak the protocol: the same
+cookie presenting again is the heartbeat.
+
+**Why.** Acquire / renew / release / expire / revoke / handoff named the
+lifecycle but did not say *how* renewal happens. Without an explicit heartbeat,
+a closed tab either holds the domain until max lifetime or a refresh looks like a
+second competing principal. Recovery is an acceptance criterion: brief disconnects
+must not lock the customer out, and abandoned tabs must not hold the domain.
+
+**Consequences.** Holder checks accept the original session *or* a new session
+bound to the same principal. Clients receive `heartbeat_after_ms` on ACTIVE
+execution responses. `BRUISER_HEARTBEAT_INTERVAL` (default 25 s) is independent of
+`BRUISER_LEASE_TTL` (default 60 s).
+
+**Revisit when.** A design partner needs a different default TTL (for example a
+longer basket hold) or wants heartbeats tied to inventory-hold keepalives rather
+than the execution lease.
+

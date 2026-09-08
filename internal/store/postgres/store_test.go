@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"sync"
 	"testing"
@@ -103,6 +104,132 @@ func TestAcquireExclusiveAndIdempotent(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("granted audits = %d want 1", n)
+	}
+}
+
+func TestResumeBeforeExpirySameExecution(t *testing.T) {
+	s := connect(t)
+	ctx := context.Background()
+	m := id.New("m")
+	if err := s.EnsureMerchant(ctx, m, "test", "secret"); err != nil {
+		t.Fatal(err)
+	}
+	req := acquireReq(m, "alice", "agent-1", "event:ars-che")
+	req.TTL = 2 * time.Second
+	r1, err := s.Acquire(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r1.Status != lease.StatusGranted {
+		t.Fatalf("status=%s", r1.Status)
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	resume := req
+	resume.SessionID = id.Session()
+	resume.RequestID = id.Request()
+	r2, err := s.Acquire(ctx, resume)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r2.Status != lease.StatusAlreadyHeld {
+		t.Fatalf("status=%s want ALREADY_HELD", r2.Status)
+	}
+	if r2.Execution.ID != r1.Execution.ID {
+		t.Fatalf("resume returned %s want %s", r2.Execution.ID, r1.Execution.ID)
+	}
+	if !r2.Execution.ExpiresAt.After(r1.Execution.ExpiresAt) {
+		t.Fatalf("resume did not extend ttl: first=%s resume=%s", r1.Execution.ExpiresAt, r2.Execution.ExpiresAt)
+	}
+	if r2.Execution.RenewCount != r1.Execution.RenewCount+1 {
+		t.Fatalf("renew_count=%d want %d", r2.Execution.RenewCount, r1.Execution.RenewCount+1)
+	}
+	if r2.Execution.SessionID != resume.SessionID {
+		t.Fatalf("session not rebound: %s want %s", r2.Execution.SessionID, resume.SessionID)
+	}
+	n, err := s.CountAudit(ctx, m, "EXECUTION_RENEWED")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n < 1 {
+		t.Fatalf("expected EXECUTION_RENEWED audit, got %d", n)
+	}
+}
+
+func TestAcquireAfterExpiryGrantsNew(t *testing.T) {
+	s := connect(t)
+	ctx := context.Background()
+	m := id.New("m")
+	if err := s.EnsureMerchant(ctx, m, "test", "secret"); err != nil {
+		t.Fatal(err)
+	}
+	req := acquireReq(m, "alice", "agent-1", "event:ars-che")
+	req.TTL = 80 * time.Millisecond
+	r1, err := s.Acquire(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(150 * time.Millisecond)
+	r2, err := s.Acquire(ctx, acquireReq(m, "alice", "agent-1", "event:ars-che"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r2.Status != lease.StatusGranted {
+		t.Fatalf("status=%s want GRANTED after expiry", r2.Status)
+	}
+	if r2.Execution.ID == r1.Execution.ID {
+		t.Fatalf("expected a new execution after expiry, got %s", r2.Execution.ID)
+	}
+}
+
+func TestRenewFromNewSessionSamePrincipal(t *testing.T) {
+	s := connect(t)
+	ctx := context.Background()
+	m := id.New("m")
+	if err := s.EnsureMerchant(ctx, m, "test", "secret"); err != nil {
+		t.Fatal(err)
+	}
+	req := acquireReq(m, "alice", "agent-1", "event:ars-che")
+	if err := s.InsertSession(ctx, pgstore.SessionRow{
+		ID: req.SessionID, MerchantID: m, CustomerID: "alice",
+		PrincipalType: "agent", PrincipalID: "agent-1",
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r1, err := s.Acquire(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newSess := id.Session()
+	if err := s.InsertSession(ctx, pgstore.SessionRow{
+		ID: newSess, MerchantID: m, CustomerID: "alice",
+		PrincipalType: "agent", PrincipalID: "agent-1",
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e, err := s.Renew(ctx, m, r1.Execution.ID, newSess, id.Request(), 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.SessionID != newSess {
+		t.Fatalf("heartbeat did not rebind session: %s want %s", e.SessionID, newSess)
+	}
+	if e.RenewCount < 1 {
+		t.Fatalf("renew_count=%d", e.RenewCount)
+	}
+
+	other := id.Session()
+	if err := s.InsertSession(ctx, pgstore.SessionRow{
+		ID: other, MerchantID: m, CustomerID: "alice",
+		PrincipalType: "agent", PrincipalID: "agent-2",
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Renew(ctx, m, r1.Execution.ID, other, id.Request(), 5*time.Second); !errors.Is(err, lease.ErrNotHolder) {
+		t.Fatalf("foreign principal renew err=%v want ErrNotHolder", err)
 	}
 }
 

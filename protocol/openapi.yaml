@@ -30,12 +30,23 @@ paths:
       security: [{ bearerAuth: [] }]
       responses:
         "201": { description: GRANTED }
-        "200": { description: ALREADY_HELD }
+        "200": { description: ALREADY_HELD (same principal; TTL extended) }
         "409": { description: BUSY }
         "503": { description: store unavailable }
   /v1/executions/{id}/renew:
     post:
-      summary: Renew an execution lease
+      summary: Renew an execution lease (heartbeat)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: renewed }
+        "410": { description: gone }
+  /v1/executions/{id}/heartbeat:
+    post:
+      summary: Heartbeat alias of renew
       parameters:
         - in: path
           name: id

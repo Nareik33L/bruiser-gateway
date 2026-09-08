@@ -12,7 +12,8 @@ The Go gateway is one implementation of this protocol.
 |-----------|------|----|
 | IDENTITY | `POST /v1/sessions` | yes |
 | ACQUIRE | `POST /v1/executions/acquire` | yes |
-| RENEW | `POST /v1/executions/{id}/renew` | yes |
+| RENEW | `POST /v1/executions/{id}/renew` | yes (heartbeat) |
+| HEARTBEAT | `POST /v1/executions/{id}/heartbeat` | yes (alias of RENEW) |
 | RELEASE | `POST /v1/executions/{id}/release` | yes |
 | WATCH | `GET /v1/executions/{id}/watch` | yes (long-poll) |
 | GET | `GET /v1/executions/{id}` | yes |
@@ -39,6 +40,21 @@ Claims: `iss=bruiser/{merchant}`, `sub` customer, `exe`, `dom`, `res`, `act`,
 
 A token must never outlive its lease. Renewal issues a new token with a new `exp`
 and `jti` and the same `fnc`.
+
+## Heartbeat and recovery
+
+While an execution is ACTIVE, the client sends a heartbeat every 20–30 seconds
+(default 25 s). Each heartbeat is RENEW (or the `/heartbeat` alias) and extends
+`expires_at` to `min(now() + ttl, max_lifetime_at)`. Grant, renew, and authorize
+ALLOW responses include `heartbeat_after_ms`. If heartbeats stop, the lease
+expires after the TTL (default 60 s) and is released automatically.
+
+Reconnect before expiry resumes the **same** execution (ALREADY_HELD extends TTL
+and rebinds the session to the caller). After expiry, a new execution may be
+acquired according to merchant policy.
+
+On Edge AUTHORIZE, the same merchant cookie presenting again is the heartbeat;
+unaware clients do not call RENEW.
 
 ## Concurrency semantics
 

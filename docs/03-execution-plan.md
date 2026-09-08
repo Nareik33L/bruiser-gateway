@@ -73,7 +73,11 @@ Scope
 - `internal/lease`: state machine, `Store` interface, Postgres implementation of
   acquire/renew/release with domain row locking, store-clock expiry, fence
   increment.
-- Idempotent re-acquire by the same principal; BUSY response shape.
+- Idempotent re-acquire by the same principal (ALREADY_HELD); BUSY response shape.
+- Heartbeat renewal: `POST .../renew` and `POST .../heartbeat` extend TTL;
+  `heartbeat_after_ms` on ACTIVE responses (default interval 25 s, lease TTL 60 s).
+- Recovery: reconnect before expiry resumes the same execution (TTL extended,
+  session rebound); after expiry a new execution may be acquired.
 - Expiry as derived state plus a sweeper that materialises `EXPIRED` and emits audit.
 - Sessions with dev-mode HMAC customer assertions; principal binding.
 - Execution tokens (PASETO v4.public), JWKS endpoint, key generation CLI.
@@ -89,6 +93,8 @@ Exit criteria
   moment, verified by a test that inspects the DB at random points while load runs.
 - Lease expires without any renew; renew past `max_lifetime` is refused; a released
   domain is re-acquirable immediately.
+- Recovery: disconnect and reconnect before expiry returns the same execution id
+  with a later `expires_at`; after expiry a new GRANT is allowed.
 - Every state transition present in `audit_events`, checked by test.
 
 ---

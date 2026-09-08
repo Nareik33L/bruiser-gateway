@@ -33,6 +33,13 @@ still genuinely open is listed at the end.
 | Binding commercial messaging rule | Brief §19; ADR-020 |
 | Stage A starts immediately, before significant engineering | Brief §20; execution plan commercial track; `06-integration-discovery.md` |
 
+## v2.3 — heartbeat renewal and recovery
+
+| Addition | Where it landed |
+|----------|-----------------|
+| Heartbeat renewal every 20–30 s (default 25 s); missed heartbeat expires at TTL (default 60 s) | Brief §5; design §4.3; ADR-023; protocol RENEW/HEARTBEAT; `BRUISER_HEARTBEAT_INTERVAL` |
+| Recovery: reconnect before expiry resumes the same execution; after expiry a new execution may be acquired | Brief §5, §24; design §6; M1 exit criteria; store resume path |
+
 ## Still open (do not block engineering)
 
 | Item | Owner | Needed by |

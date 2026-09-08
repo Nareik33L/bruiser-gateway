@@ -146,6 +146,7 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 			r.Use(s.sessionAuth)
 			r.Post("/executions/acquire", s.acquire)
 			r.Post("/executions/{id}/renew", s.renew)
+			r.Post("/executions/{id}/heartbeat", s.renew)
 			r.Post("/executions/{id}/release", s.release)
 			r.Get("/executions/{id}", s.get)
 			r.Get("/executions/{id}/watch", s.watch)
@@ -186,7 +187,7 @@ func (s *Server) protocol(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"protocol":     "bruiser",
 		"version":      "0.1-draft",
-		"capabilities": []string{"IDENTITY", "ACQUIRE", "RENEW", "RELEASE", "WATCH", "AUTHORIZE", "INTROSPECT"},
+		"capabilities": []string{"IDENTITY", "ACQUIRE", "RENEW", "HEARTBEAT", "RELEASE", "WATCH", "AUTHORIZE", "INTROSPECT"},
 	})
 }
 
@@ -453,6 +454,9 @@ func (s *Server) writeExecution(w http.ResponseWriter, status int, e *lease.Exec
 		"max_lifetime_at": e.MaxLifetimeAt.UTC().Format(time.RFC3339Nano),
 		"renew_count":     e.RenewCount,
 		"rule_name":       e.RuleName,
+	}
+	if e.State == lease.StateActive {
+		body["heartbeat_after_ms"] = s.cfg.HeartbeatInterval.Milliseconds()
 	}
 	if e.EndReason != "" {
 		body["end_reason"] = e.EndReason

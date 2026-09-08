@@ -46,6 +46,25 @@ func (s *Store) loadActiveForUpdate(ctx context.Context, tx pgx.Tx, merchantID, 
 	return e, nil
 }
 
+// holderMatches allows the original session or a new session bound to the same
+// principal, so a reconnect before expiry can heartbeat and release.
+func (s *Store) holderMatches(ctx context.Context, e lease.Execution, sessionID string) error {
+	if e.SessionID == sessionID {
+		return nil
+	}
+	caller, err := s.Session(ctx, sessionID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return lease.ErrNotHolder
+		}
+		return err
+	}
+	if caller.PrincipalType != e.Principal.Type || caller.PrincipalID != e.Principal.ID {
+		return lease.ErrNotHolder
+	}
+	return nil
+}
+
 func (s *Store) lookupDomainKey(ctx context.Context, merchantID, executionID string) (string, error) {
 	var domainKey string
 	err := s.pool.QueryRow(ctx, `
@@ -79,18 +98,19 @@ func (s *Store) Renew(ctx context.Context, merchantID, executionID, sessionID, r
 	if err != nil {
 		return lease.Execution{}, wrapStore(err)
 	}
-	if e.SessionID != sessionID {
-		return lease.Execution{}, lease.ErrNotHolder
+	if err := s.holderMatches(ctx, e, sessionID); err != nil {
+		return lease.Execution{}, err
 	}
 
 	if err := tx.QueryRow(ctx, `
 		update executions
 		set expires_at = least(now() + $2::interval, max_lifetime_at),
-		    renew_count = renew_count + 1
+		    renew_count = renew_count + 1,
+		    session_id = $3
 		where execution_id = $1
-		returning expires_at, renew_count`,
-		e.ID, interval(ttl),
-	).Scan(&e.ExpiresAt, &e.RenewCount); err != nil {
+		returning expires_at, renew_count, session_id`,
+		e.ID, interval(ttl), sessionID,
+	).Scan(&e.ExpiresAt, &e.RenewCount, &e.SessionID); err != nil {
 		return lease.Execution{}, wrapStore(err)
 	}
 
@@ -98,7 +118,7 @@ func (s *Store) Renew(ctx context.Context, merchantID, executionID, sessionID, r
 		typ: "EXECUTION_RENEWED", customerID: e.CustomerID,
 		principalType: e.Principal.Type, principalID: e.Principal.ID,
 		domainKey: e.DomainKey, executionID: e.ID, ruleName: e.RuleName,
-		requestID: requestID, fence: &e.Fence,
+		reason: "heartbeat", requestID: requestID, fence: &e.Fence,
 	}); err != nil {
 		return lease.Execution{}, wrapStore(err)
 	}
@@ -137,8 +157,10 @@ func (s *Store) end(ctx context.Context, merchantID, executionID, sessionID, req
 	if err != nil {
 		return lease.Execution{}, wrapStore(err)
 	}
-	if mustHolder && e.SessionID != sessionID {
-		return lease.Execution{}, lease.ErrNotHolder
+	if mustHolder {
+		if err := s.holderMatches(ctx, e, sessionID); err != nil {
+			return lease.Execution{}, err
+		}
 	}
 
 	var endedAt time.Time

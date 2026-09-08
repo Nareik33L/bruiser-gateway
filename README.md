@@ -50,7 +50,7 @@ Dev assertions default to membership `1001234` (Alice in the Arsenal-like lab):
 
 | Document | Purpose |
 |----------|---------|
-| [docs/01-product-brief.md](docs/01-product-brief.md) | Product brief (v2.2) |
+| [docs/01-product-brief.md](docs/01-product-brief.md) | Product brief (v2.3) |
 | [docs/02-technical-design.md](docs/02-technical-design.md) | V1 design |
 | [docs/03-execution-plan.md](docs/03-execution-plan.md) | Milestones M0–M8 |
 | [docs/04-decisions.md](docs/04-decisions.md) | Architecture decision log |
@@ -88,6 +88,8 @@ make eaf-demo         # unaware swarm; observed EAF ~N×, downstream 1×
 
 Two logins of membership `1001234` against `POST /api/events/ars-che/holds`
 via the Edge: first hold is created, second session receives `409 BUSY`.
-The same cookie is `ALREADY_HELD`. Direct origin holds without
+The same cookie is `ALREADY_HELD` and heartbeats the lease. A reconnect before
+expiry resumes the same execution; after expiry a new execution may be acquired.
+Direct origin holds without
 `X-Bruiser-Origin-Secret` are `403`. With origin lockdown off, Authority
 Check reports Overall Result FAIL and names the open path.

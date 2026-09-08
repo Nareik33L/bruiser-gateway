@@ -177,6 +177,75 @@ func TestAcquireBusyRenewRelease(t *testing.T) {
 	resp.Body.Close()
 }
 
+func TestHeartbeatAndReconnect(t *testing.T) {
+	srv, cfg := startServer(t)
+	tok1 := session(t, srv, cfg, "alice", "agent-1")
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/executions/acquire", bytes.NewBufferString(`{"resource":"event:ars-che","action":"purchase"}`))
+	req.Header.Set("Authorization", "Bearer "+tok1)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var granted struct {
+		ID               string `json:"execution_id"`
+		HeartbeatAfterMs int64  `json:"heartbeat_after_ms"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&granted); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("acquire %d", resp.StatusCode)
+	}
+	if granted.HeartbeatAfterMs != cfg.HeartbeatInterval.Milliseconds() {
+		t.Fatalf("heartbeat_after_ms=%d want %d", granted.HeartbeatAfterMs, cfg.HeartbeatInterval.Milliseconds())
+	}
+
+	req, _ = http.NewRequest(http.MethodPost, srv.URL+"/v1/executions/"+granted.ID+"/heartbeat", nil)
+	req.Header.Set("Authorization", "Bearer "+tok1)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var beat struct {
+		RenewCount int `json:"renew_count"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&beat); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("heartbeat %d", resp.StatusCode)
+	}
+	if beat.RenewCount < 1 {
+		t.Fatalf("heartbeat renew_count=%d", beat.RenewCount)
+	}
+
+	tokResume := session(t, srv, cfg, "alice", "agent-1")
+	req, _ = http.NewRequest(http.MethodPost, srv.URL+"/v1/executions/acquire", bytes.NewBufferString(`{"resource":"event:ars-che","action":"purchase"}`))
+	req.Header.Set("Authorization", "Bearer "+tokResume)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resumed struct {
+		ID string `json:"execution_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&resumed); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("reconnect acquire want 200 got %d", resp.StatusCode)
+	}
+	if resumed.ID != granted.ID {
+		t.Fatalf("reconnect want same execution %s got %s", granted.ID, resumed.ID)
+	}
+}
+
 func TestHTTPConcurrentAcquire(t *testing.T) {
 	srv, cfg := startServer(t)
 	const n = 80

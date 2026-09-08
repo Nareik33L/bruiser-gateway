@@ -175,10 +175,12 @@ func (s *Server) admit(ctx context.Context, method, path, eventID, cookie, beare
 			headers: h,
 			exeID:   acq.Execution.ID,
 			body: map[string]any{
-				"status":       "ALLOW",
-				"execution_id": acq.Execution.ID,
-				"fence":        acq.Execution.Fence,
-				"customer_id":  assertion.CustomerID,
+				"status":             "ALLOW",
+				"execution_id":       acq.Execution.ID,
+				"fence":              acq.Execution.Fence,
+				"customer_id":        assertion.CustomerID,
+				"expires_at":         acq.Execution.ExpiresAt.UTC().Format(time.RFC3339Nano),
+				"heartbeat_after_ms": s.cfg.HeartbeatInterval.Milliseconds(),
 			},
 		}
 	case lease.StatusBusy:
