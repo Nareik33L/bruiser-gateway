@@ -65,6 +65,7 @@ func GatewayAPI(t testing.TB, profile merchant.Profile) (*publicapi.Server, *htt
 	cfg.MerchantID = id.New("m")
 	cfg.LeaseTTL = 30 * time.Second
 	cfg.EdgeSecret = "edge-secret-dev"
+	cfg.AdminSecret = "edge-secret-dev"
 	cfg.OriginSecret = "origin-lock-dev"
 	cfg.MaxInFlight = 8
 	cfg.RatePerSec = 100
@@ -81,6 +82,32 @@ func GatewayAPI(t testing.TB, profile merchant.Profile) (*publicapi.Server, *htt
 	signer := auth.Signer{KID: key.KID, MerchantID: cfg.MerchantID, Private: key.Private, Public: key.Public}
 	api := publicapi.New(cfg, store, signer, slog.New(slog.NewTextHandler(io.Discard, nil)), profile)
 	srv := httptest.NewServer(api)
-	t.Cleanup(srv.Close)
+	t.Cleanup(func() {
+		api.Close()
+		srv.Close()
+	})
 	return api, srv, cfg, signer
+}
+
+// GatewayPair starts two control-plane processes against one merchant so
+// LISTEN/NOTIFY and cache-reset behaviour can be tested across nodes.
+func GatewayPair(t testing.TB, profile merchant.Profile) (*publicapi.Server, *httptest.Server, *publicapi.Server, *httptest.Server, config.Config) {
+	t.Helper()
+	apiA, srvA, cfg, signer := GatewayAPI(t, profile)
+	url := cfg.DatabaseURL
+	ctx := context.Background()
+	storeB, err := pgstore.Connect(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(storeB.Close)
+	apiB := publicapi.New(cfg, storeB, signer, slog.New(slog.NewTextHandler(io.Discard, nil)), profile)
+	srvB := httptest.NewServer(apiB)
+	t.Cleanup(func() {
+		apiB.Close()
+		srvB.Close()
+	})
+	apiA.Start(ctx)
+	apiB.Start(ctx)
+	return apiA, srvA, apiB, srvB, cfg
 }

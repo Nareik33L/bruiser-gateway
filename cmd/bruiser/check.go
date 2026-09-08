@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/Nareik33L/bruiser-gateway/internal/check"
+	"github.com/Nareik33L/bruiser-gateway/internal/config"
+	pgstore "github.com/Nareik33L/bruiser-gateway/internal/store/postgres"
 )
 
 func cmdAuthorityCheck() error {
@@ -34,10 +38,34 @@ func cmdAuthorityCheck() error {
 		return err
 	}
 	fmt.Print(rep.String())
+	if err := persistAuthorityCheck(rep); err != nil {
+		fmt.Fprintf(os.Stderr, "authority-check audit not persisted: %v\n", err)
+	}
 	if !rep.Passed() {
 		return fmt.Errorf("authority check FAIL")
 	}
 	return nil
+}
+
+func persistAuthorityCheck(rep check.Report) error {
+	cfg := config.Load()
+	if cfg.DatabaseURL == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	store, err := pgstore.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	reason := rep.Overall
+	attrs := map[string]any{
+		"overall": rep.Overall,
+		"probes":  rep.Probes,
+		"covered": rep.Covered,
+	}
+	return store.WriteAudit(ctx, cfg.MerchantID, "AUTHORITY_CHECK", reason, "", attrs)
 }
 
 func env(key, def string) string {

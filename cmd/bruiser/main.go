@@ -38,6 +38,8 @@ func main() {
 		err = cmdAuthorityCheck()
 	case "eaf-demo":
 		err = cmdEAFDemo()
+	case "swarm":
+		err = cmdSwarm()
 	case "policy":
 		err = cmdPolicy()
 	default:
@@ -51,7 +53,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: bruiser <serve|migrate|assertion|authority-check|eaf-demo|policy validate>\n")
+	fmt.Fprintf(os.Stderr, "usage: bruiser <serve|migrate|assertion|authority-check|eaf-demo|swarm|policy validate>\n")
 }
 
 func cmdMigrate(cfg config.Config, log *slog.Logger) error {
@@ -95,13 +97,15 @@ func cmdServe(cfg config.Config, log *slog.Logger) error {
 	}
 
 	sweeperStop := make(chan struct{})
-	go sweep(store, cfg.SweepInterval, log, sweeperStop)
+	go sweep(store, cfg, log, sweeperStop)
 
 	if cfg.ProxyAddr != "" && cfg.OriginURL == "" {
 		return fmt.Errorf("BRUISER_ORIGIN_URL is required when BRUISER_PROXY_ADDR is set")
 	}
 
 	handler := publicapi.New(cfg, store, signer, log, loadProfile(cfg, log))
+	handler.Start(ctx)
+	defer handler.Close()
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           handler,
@@ -157,8 +161,8 @@ func cmdServe(cfg config.Config, log *slog.Logger) error {
 	return srv.Shutdown(shutCtx)
 }
 
-func sweep(store *pgstore.Store, every time.Duration, log *slog.Logger, stop <-chan struct{}) {
-	t := time.NewTicker(every)
+func sweep(store *pgstore.Store, cfg config.Config, log *slog.Logger, stop <-chan struct{}) {
+	t := time.NewTicker(cfg.SweepInterval)
 	defer t.Stop()
 	for {
 		select {
@@ -167,14 +171,20 @@ func sweep(store *pgstore.Store, every time.Duration, log *slog.Logger, stop <-c
 		case <-t.C:
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			n, err := store.ExpireDue(ctx, 200)
-			cancel()
 			if err != nil {
 				log.Warn("sweep failed", "err", err)
-				continue
-			}
-			if n > 0 {
+			} else if n > 0 {
 				log.Info("expired executions", "count", n)
 			}
+			if cfg.AuditRetention > 0 {
+				purged, perr := store.PurgeAudit(ctx, cfg.MerchantID, time.Now().UTC().Add(-cfg.AuditRetention))
+				if perr != nil {
+					log.Warn("audit purge failed", "err", perr)
+				} else if purged > 0 {
+					log.Info("purged audit events", "count", purged)
+				}
+			}
+			cancel()
 		}
 	}
 }

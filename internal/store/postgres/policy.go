@@ -54,6 +54,7 @@ func (s *Store) PutPolicy(ctx context.Context, merchantID, yamlText, requestID s
 	if err := tx.Commit(ctx); err != nil {
 		return PolicyRow{}, wrapStore(err)
 	}
+	_, _ = s.pool.Exec(ctx, `select pg_notify('bruiser_policy', $1)`, merchantID)
 	return PolicyRow{MerchantID: merchantID, Version: next, YAML: yamlText, Active: true}, nil
 }
 

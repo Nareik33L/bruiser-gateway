@@ -31,6 +31,9 @@ services:
       BRUISER_ORIGIN_SECRET: origin-lock-dev
       BRUISER_PROXY_ADDR: ":8081"
       BRUISER_ORIGIN_URL: http://simtix:8090
+      BRUISER_CHECK_EDGE_URL: http://simtix:8091
+      BRUISER_CHECK_ORIGIN_URL: http://simtix:8090
+      BRUISER_ADMIN_SECRET: edge-secret-dev
     ports:
       - "8080:8080"
       - "8081:8081"
@@ -57,6 +60,31 @@ services:
       - "8091:8091"
     depends_on:
       - gateway
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    profiles: ["demo"]
+    volumes:
+      - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - gateway
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    profiles: ["demo"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: bruiser
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
 
 volumes:
   bruiser-pg:

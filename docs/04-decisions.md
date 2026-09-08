@@ -377,3 +377,20 @@ reload is still M4 leftover; a PUT on one process updates that process immediate
 **Revisit when.** A design partner needs overlapping rules (V2) or must push
 policy to every gateway in under a second.
 
+## ADR-026 — Policy fan-out is LISTEN/NOTIFY plus a one-second poll
+
+**Decision.** `PUT /v1/policy` writes the version, then `NOTIFY bruiser_policy`
+with the merchant id. Every gateway process `LISTEN`s and also polls
+`ActivePolicy` once a second. On a newer version it recompiles and resets the
+busy cache. Existing executions keep granted terms.
+
+**Why.** A PUT on one process must not leave the other nodes enforcing a stale
+`max_active`. NOTIFY is the fast path; the poll covers a missed notification
+(classic LISTEN race after subscribe).
+
+**Consequences.** `Server.Start` owns the listener. Tests that need cross-node
+reload call `Start`. A spurious extra compile is harmless.
+
+**Revisit when.** Gateways must converge in well under a second at very large
+fleet size, or NOTIFY drop rate shows up in torture.
+

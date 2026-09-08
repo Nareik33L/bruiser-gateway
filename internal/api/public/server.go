@@ -116,6 +116,52 @@ func (a *eafAcc) snapshot(resource string) (attempts, forwarded, customers float
 	return a.attempts[resource], a.forwarded[resource], float64(len(a.customers[resource]))
 }
 
+func (a *eafAcc) snapshotAll() []map[string]any {
+	if a == nil {
+		return nil
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]map[string]any, 0, len(a.attempts))
+	for res, att := range a.attempts {
+		fwd := a.forwarded[res]
+		cust := float64(len(a.customers[res]))
+		obs, down := 0.0, 0.0
+		if fwd > 0 {
+			obs = att / fwd
+		}
+		if cust > 0 {
+			down = fwd / cust
+		}
+		out = append(out, map[string]any{
+			"resource":       res,
+			"attempts":       att,
+			"forwarded":      fwd,
+			"customers":      cust,
+			"observed_eaf":   obs,
+			"downstream_eaf": down,
+		})
+	}
+	return out
+}
+
+func (a *eafAcc) headline() (observed, downstream, attempts, forwarded float64) {
+	if a == nil {
+		return 0, 0, 0, 0
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for res, att := range a.attempts {
+		attempts += att
+		forwarded += a.forwarded[res]
+	}
+	if forwarded > 0 {
+		observed = attempts / forwarded
+		downstream = 1
+	}
+	return observed, downstream, attempts, forwarded
+}
+
 type Server struct {
 	cfg       config.Config
 	store     *pgstore.Store
@@ -127,7 +173,8 @@ type Server struct {
 	mux       http.Handler
 	limit     *limit.PerExecution
 	compiled  atomic.Pointer[policy.Compiled]
-	policyVer int
+	policyVer atomic.Int64
+	stopWatch context.CancelFunc
 }
 
 func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.Logger, profile merchant.Profile) *Server {
@@ -149,6 +196,8 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 	r.Get("/healthz", s.healthz)
 	r.Get("/readyz", s.readyz)
 	r.Handle("/metrics", promhttp.Handler())
+	r.Get("/admin", s.adminPage)
+	r.Get("/demo", s.adminPage)
 	r.Get("/.well-known/bruiser/jwks.json", s.jwks)
 	r.Get("/.well-known/bruiser/protocol", s.protocol)
 	r.Route("/v1", func(r chi.Router) {
@@ -158,6 +207,16 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 		r.Get("/policy", s.getPolicy)
 		r.Put("/policy", s.putPolicy)
 		r.Get("/policy/history", s.policyHistory)
+		r.Get("/admin/status", s.adminStatus)
+		r.Get("/admin/stream", s.adminStream)
+		r.Get("/admin/audit", s.adminAudit)
+		r.Get("/admin/export", s.adminExport)
+		r.Get("/admin/customer/{id}", s.adminCustomer)
+		r.Post("/admin/authority-check", s.adminRunCheck)
+		r.Get("/admin/authority-check", s.adminLastCheck)
+		r.Post("/admin/executions/{id}/revoke", s.adminRevoke)
+		r.Post("/authority-check", s.adminRunCheck)
+		r.Get("/authority-check", s.adminLastCheck)
 		r.Group(func(r chi.Router) {
 			r.Use(s.sessionAuth)
 			r.Post("/executions/acquire", s.acquire)
@@ -205,7 +264,7 @@ func (s *Server) protocol(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"protocol":     "bruiser",
 		"version":      "0.1-draft",
-		"capabilities": []string{"IDENTITY", "ACQUIRE", "RENEW", "HEARTBEAT", "RELEASE", "HANDOFF", "REVOKE", "WATCH", "AUTHORIZE", "INTROSPECT", "POLICY"},
+		"capabilities": []string{"IDENTITY", "ACQUIRE", "RENEW", "HEARTBEAT", "RELEASE", "HANDOFF", "REVOKE", "WATCH", "AUTHORIZE", "INTROSPECT", "POLICY", "ADMIN", "AUTHORITY_CHECK"},
 	})
 }
 
