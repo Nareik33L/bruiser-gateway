@@ -9,20 +9,25 @@ import (
 )
 
 type Profile struct {
-	MerchantID  string   `yaml:"merchant_id"`
-	Name        string   `yaml:"name"`
-	ProfileName string   `yaml:"profile"`
-	Assumptions string   `yaml:"assumptions"`
-	Identity    Identity `yaml:"identity"`
-	Routes      []Route  `yaml:"routes"`
-	Policy      Policy   `yaml:"policy"`
+	MerchantID  string `yaml:"merchant_id"`
+	Name        string `yaml:"name"`
+	ProfileName string `yaml:"profile"`
+	Assumptions string `yaml:"assumptions"`
+	// Unmatched is "allow" (default) or "deny". Allocation routes fail closed;
+	// everything else fails open so Bruiser can sit in front of a whole origin.
+	Unmatched string   `yaml:"unmatched"`
+	Identity  Identity `yaml:"identity"`
+	Routes    []Route  `yaml:"routes"`
+	Policy    Policy   `yaml:"policy"`
 }
 
 type Identity struct {
-	Extractor     string `yaml:"extractor"`
-	Cookie        string `yaml:"cookie"`
-	SubjectClaim  string `yaml:"subject_claim"`
-	HMACSecretEnv string `yaml:"hmac_secret_env"`
+	Extractor       string `yaml:"extractor"` // auto | cookie-jwt | bearer-jwt | header
+	Cookie          string `yaml:"cookie"`
+	Header          string `yaml:"header"`
+	PrincipalHeader string `yaml:"principal_header"`
+	SubjectClaim    string `yaml:"subject_claim"`
+	HMACSecretEnv   string `yaml:"hmac_secret_env"`
 }
 
 type Route struct {
@@ -63,7 +68,20 @@ func Parse(b []byte) (Profile, error) {
 	if p.Identity.SubjectClaim == "" {
 		p.Identity.SubjectClaim = "sub"
 	}
+	if p.Identity.Extractor == "" {
+		p.Identity.Extractor = "auto"
+	}
+	if p.Identity.Header == "" {
+		p.Identity.Header = "X-Customer-Id"
+	}
+	if p.Unmatched == "" {
+		p.Unmatched = "allow"
+	}
 	return p, nil
+}
+
+func (p Profile) UnmatchedAllow() bool {
+	return !strings.EqualFold(p.Unmatched, "deny")
 }
 
 // MatchRoute returns the first matching route and path params.

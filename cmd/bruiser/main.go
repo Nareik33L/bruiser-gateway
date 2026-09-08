@@ -42,6 +42,8 @@ func main() {
 		err = cmdSwarm()
 	case "policy":
 		err = cmdPolicy()
+	case "profile":
+		err = cmdProfile()
 	default:
 		usage()
 		os.Exit(2)
@@ -53,7 +55,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: bruiser <serve|migrate|assertion|authority-check|eaf-demo|swarm|policy validate>\n")
+	fmt.Fprintf(os.Stderr, "usage: bruiser <serve|migrate|assertion|authority-check|eaf-demo|swarm|policy validate|profile validate|profile init>\n")
 }
 
 func cmdMigrate(cfg config.Config, log *slog.Logger) error {

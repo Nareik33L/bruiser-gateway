@@ -79,6 +79,11 @@ func (p *Proxy) Handler() http.Handler {
 		if a := r.Header.Get("Authorization"); a != "" {
 			authReq.Header.Set("Authorization", a)
 		}
+		for _, name := range []string{"X-Customer-Id", "X-User-Id", "X-Principal-Id", "X-Bruiser-Customer"} {
+			if v := r.Header.Get(name); v != "" {
+				authReq.Header.Set(name, v)
+			}
+		}
 		if eid := eventID(body); eid != "" {
 			authReq.Header.Set("X-Bruiser-Event-Id", eid)
 		}

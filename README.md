@@ -38,6 +38,10 @@ curl -sS -X POST localhost:8080/v1/executions/acquire \
 
 A second agent for the same customer and resource receives `409 BUSY`.
 
+Drop-in: copy `configs/example.yaml`, list your hold/purchase routes, point
+Edge or Proxy at the origin you already have. Unmatched traffic passes
+through. See [docs/08-make-authoritative.md](docs/08-make-authoritative.md).
+
 Dev assertions default to membership `1001234` (Alice in the Arsenal-like lab):
 
 ```bash

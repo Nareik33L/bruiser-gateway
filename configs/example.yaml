@@ -1,0 +1,52 @@
+# Drop-in profile: list the scarce-inventory routes, point Edge or Proxy
+# at your existing origin, lock the origin. Everything else passes through.
+#
+#   bruiser profile validate configs/example.yaml
+#   BRUISER_PROFILE=configs/example.yaml BRUISER_PROXY_ADDR=:8081 \
+#     BRUISER_ORIGIN_URL=http://your-box-office:8090 bruiser serve
+
+merchant_id: example
+name: Example merchant
+unmatched: allow
+
+identity:
+  # auto: cookie JWT, then bearer JWT, then X-Customer-Id (or identity.header).
+  # Bruiser consumes that identifier; it does not mint customer identities.
+  extractor: auto
+  cookie: session
+  header: X-Customer-Id
+  principal_header: X-Principal-Id
+  subject_claim: sub
+  hmac_secret_env: BRUISER_DEV_HMAC_SECRET
+
+routes:
+  # Discovery / static / login: no lease.
+  - match: { method: GET, path: "/healthz" }
+    action: health
+  - match: { method: GET, path: "/api/catalog" }
+    action: search
+  # Allocation: fail closed. Rename these to your hold/purchase paths.
+  - match: { method: POST, path: "/api/holds" }
+    resource_from: event_id
+    resource_prefix: "sku:"
+    action: hold
+  - match: { method: POST, path: "/api/checkout" }
+    resource_from: event_id
+    resource_prefix: "sku:"
+    action: purchase
+
+policy:
+  version: 1
+  defaults:
+    lease_ttl: 60s
+    max_lifetime: 15m
+  domains:
+    - name: one-execution-per-customer
+      match: { action: [purchase, hold] }
+      scope: [customer, resource]
+      max_active: 1
+      precedence: [browser, agent]
+    - name: discovery
+      match: { action: [search] }
+      control: none
+  fallback: deny

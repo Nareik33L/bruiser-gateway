@@ -28,7 +28,7 @@ func (s *Server) ProxyHandler(originURL string) (http.Handler, error) {
 		_ = r.Body.Close()
 
 		eventID := eventIDFromBody(body)
-		res := s.admit(r.Context(), r.Method, r.URL.Path, eventID, cookieValue(r, s.profile.Identity.Cookie), bearer(r), requestID(r))
+		res := s.admit(r.Context(), r.Method, r.URL.Path, eventID, r, requestID(r))
 		if !res.allow {
 			writeAdmit(w, res)
 			return

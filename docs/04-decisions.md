@@ -394,3 +394,24 @@ reload call `Start`. A spurious extra compile is harmless.
 **Revisit when.** Gateways must converge in well under a second at very large
 fleet size, or NOTIFY drop rate shows up in torture.
 
+## ADR-027 — Bruiser plugs into an existing path; unmatched traffic fails open
+
+**Decision.** A merchant profile lists allocation routes and how to *read*
+the customer they already have (cookie JWT, bearer JWT, or a header). Routes
+not listed pass through (`unmatched: allow`). Allocation routes fail closed.
+Bruiser does not wait on a partner-specific admission-path project and does
+not require clients to speak the protocol.
+
+**Why.** Clubs already have a box office, a session, and an edge. The product
+is the control layer between those and scarce inventory. Forcing a new
+admission API, or 403ing every unlisted path, makes Proxy/Edge unusable as a
+drop-in.
+
+**Consequences.** `identity.extractor: auto|cookie-jwt|bearer-jwt|header`.
+`bruiser profile validate` / `profile init`. Edge forwards `X-Customer-Id` /
+`X-User-Id`. Discovery questionnaire remains a sales tool, not an engineering
+gate.
+
+**Revisit when.** A merchant's session is opaque with no header/JWT/introspection
+path at all — then Embedded or an edge transform is required.
+
