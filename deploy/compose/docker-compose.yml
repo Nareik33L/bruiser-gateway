@@ -34,6 +34,7 @@ services:
       BRUISER_CHECK_EDGE_URL: http://simtix:8091
       BRUISER_CHECK_ORIGIN_URL: http://simtix:8090
       BRUISER_ADMIN_SECRET: edge-secret-dev
+      BRUISER_MODE: enforce
     ports:
       - "8080:8080"
       - "8081:8081"

@@ -1,9 +1,11 @@
 # Drop-in profile: list the scarce-inventory routes, point Edge or Proxy
 # at your existing origin, lock the origin. Everything else passes through.
 #
-#   bruiser profile validate configs/example.yaml
+#   bruiser config validate configs/example.yaml
+#   bruiser doctor --profile configs/example.yaml
 #   BRUISER_PROFILE=configs/example.yaml BRUISER_PROXY_ADDR=:8081 \
 #     BRUISER_ORIGIN_URL=http://your-box-office:8090 bruiser serve
+#   BRUISER_MODE=dry-run  # same path; never blocks; then flip to enforce
 
 merchant_id: example
 name: Example merchant

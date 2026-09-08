@@ -14,6 +14,7 @@ env:
   BRUISER_TELEMETRY: "0"
   BRUISER_HEARTBEAT_INTERVAL: 20s
   BRUISER_LEASE_TTL: 60s
+  BRUISER_MODE: enforce
 secrets:
   BRUISER_DATABASE_URL: postgres://bruiser:bruiser@postgres:5432/bruiser?sslmode=disable
   BRUISER_DEV_HMAC_SECRET: change-me

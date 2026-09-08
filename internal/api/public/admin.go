@@ -13,6 +13,7 @@ import (
 	"github.com/Nareik33L/bruiser-gateway/internal/check"
 	"github.com/Nareik33L/bruiser-gateway/internal/id"
 	"github.com/Nareik33L/bruiser-gateway/internal/lease"
+	"github.com/Nareik33L/bruiser-gateway/internal/ops"
 )
 
 func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
@@ -92,6 +93,11 @@ func (s *Server) statusPayload(ctx context.Context) map[string]any {
 			"reason": ev.Reason,
 			"report": ev.Attrs,
 		}
+	}
+	ctl := s.currentControls()
+	body["controls"] = ctl
+	if rep, err := s.store.DryRunReport(ctx, s.cfg.MerchantID, 24*time.Hour, 12); err == nil {
+		body["dry_run"] = rep
 	}
 	return body
 }
@@ -282,4 +288,115 @@ func (s *Server) PersistAuthorityCheck(ctx context.Context, rep check.Report, re
 		"covered": rep.Covered,
 	}
 	return s.store.WriteAudit(ctx, s.cfg.MerchantID, "AUTHORITY_CHECK", reason, requestID, attrs)
+}
+
+func (s *Server) adminGetControls(w http.ResponseWriter, r *http.Request) {
+	if !s.adminOK(r) {
+		writeErr(w, http.StatusUnauthorized, "bad admin secret")
+		return
+	}
+	writeJSON(w, http.StatusOK, s.currentControls())
+}
+
+type controlsPatch struct {
+	Mode            *string  `json:"mode"`
+	Enforcement     *bool    `json:"enforcement"`
+	QueueEnabled    *bool    `json:"queue_enabled"`
+	MaxWaiters      *int     `json:"max_waiters"`
+	LeaseTTLSeconds *int     `json:"lease_ttl_seconds"`
+	FailClosed      *bool    `json:"fail_closed"`
+	DisabledActions *[]string `json:"disabled_actions"`
+	UpdatedBy       string   `json:"updated_by"`
+}
+
+func (s *Server) adminPutControls(w http.ResponseWriter, r *http.Request) {
+	if !s.adminOK(r) {
+		writeErr(w, http.StatusUnauthorized, "bad admin secret")
+		return
+	}
+	var patch controlsPatch
+	if !decodeJSON(w, r, &patch) {
+		return
+	}
+	c := s.currentControls()
+	if patch.Mode != nil {
+		c.Mode = *patch.Mode
+	}
+	if patch.Enforcement != nil {
+		c.Enforcement = *patch.Enforcement
+	}
+	if patch.QueueEnabled != nil {
+		c.QueueEnabled = *patch.QueueEnabled
+	}
+	if patch.MaxWaiters != nil {
+		c.MaxWaiters = *patch.MaxWaiters
+	}
+	if patch.LeaseTTLSeconds != nil {
+		c.LeaseTTLSeconds = *patch.LeaseTTLSeconds
+	}
+	if patch.FailClosed != nil {
+		c.FailClosed = *patch.FailClosed
+	}
+	if patch.DisabledActions != nil {
+		c.DisabledActions = *patch.DisabledActions
+	}
+	if patch.UpdatedBy != "" {
+		c.UpdatedBy = patch.UpdatedBy
+	} else {
+		c.UpdatedBy = "admin"
+	}
+	c = ops.Normalize(c)
+	saved, err := s.store.PutControls(r.Context(), s.cfg.MerchantID, c)
+	if err != nil {
+		s.storeError(w, err)
+		return
+	}
+	s.controls.Store(&saved)
+	writeJSON(w, http.StatusOK, saved)
+}
+
+func (s *Server) adminDrain(w http.ResponseWriter, r *http.Request) {
+	if !s.adminOK(r) {
+		writeErr(w, http.StatusUnauthorized, "bad admin secret")
+		return
+	}
+	n, err := s.store.DrainWaiters(r.Context(), s.cfg.MerchantID, requestID(r))
+	if err != nil {
+		s.storeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"drained": n})
+}
+
+func (s *Server) adminRevokeAll(w http.ResponseWriter, r *http.Request) {
+	if !s.adminOK(r) {
+		writeErr(w, http.StatusUnauthorized, "bad admin secret")
+		return
+	}
+	n, err := s.store.RevokeActive(r.Context(), s.cfg.MerchantID, requestID(r), "emergency")
+	if err != nil {
+		s.storeError(w, err)
+		return
+	}
+	revokeTotal.Add(float64(n))
+	writeJSON(w, http.StatusOK, map[string]any{"revoked": n})
+}
+
+func (s *Server) adminDryRun(w http.ResponseWriter, r *http.Request) {
+	if !s.adminOK(r) {
+		writeErr(w, http.StatusUnauthorized, "bad admin secret")
+		return
+	}
+	window := 24 * time.Hour
+	if v := r.URL.Query().Get("window"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			window = d
+		}
+	}
+	rep, err := s.store.DryRunReport(r.Context(), s.cfg.MerchantID, window, 40)
+	if err != nil {
+		s.storeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rep)
 }

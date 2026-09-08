@@ -44,6 +44,10 @@ func main() {
 		err = cmdPolicy()
 	case "profile":
 		err = cmdProfile()
+	case "doctor":
+		err = cmdDoctor()
+	case "config":
+		err = cmdConfig()
 	default:
 		usage()
 		os.Exit(2)
@@ -55,7 +59,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: bruiser <serve|migrate|assertion|authority-check|eaf-demo|swarm|policy validate|profile validate|profile init>\n")
+	fmt.Fprintf(os.Stderr, "usage: bruiser <serve|migrate|assertion|authority-check|eaf-demo|swarm|doctor|config validate|policy validate|profile validate|profile init>\n")
 }
 
 func cmdMigrate(cfg config.Config, log *slog.Logger) error {
@@ -101,14 +105,15 @@ func cmdServe(cfg config.Config, log *slog.Logger) error {
 	sweeperStop := make(chan struct{})
 	go sweep(store, cfg, log, sweeperStop)
 
-	if cfg.ProxyAddr != "" && cfg.OriginURL == "" {
-		return fmt.Errorf("BRUISER_ORIGIN_URL is required when BRUISER_PROXY_ADDR is set")
+	profile := loadProfile(cfg, log)
+	if profile.Mode != "" && os.Getenv("BRUISER_MODE") == "" {
+		cfg.Mode = profile.Mode
 	}
 
 	if !cfg.Telemetry {
 		log.Info("telemetry disabled (merchant-controlled; no vendor phone-home)")
 	}
-	handler := publicapi.New(cfg, store, signer, log, loadProfile(cfg, log))
+	handler := publicapi.New(cfg, store, signer, log, profile)
 	handler.Start(ctx)
 	defer handler.Close()
 	srv := &http.Server{

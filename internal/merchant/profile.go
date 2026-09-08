@@ -16,6 +16,7 @@ type Profile struct {
 	// Unmatched is "allow" (default) or "deny". Allocation routes fail closed;
 	// everything else fails open so Bruiser can sit in front of a whole origin.
 	Unmatched string   `yaml:"unmatched"`
+	Mode      string   `yaml:"mode"` // enforce (default) or dry-run
 	Identity  Identity `yaml:"identity"`
 	Routes    []Route  `yaml:"routes"`
 	Policy    Policy   `yaml:"policy"`

@@ -5,7 +5,7 @@ SIMTIX    := bin/simtix
 DATABASE_URL ?= postgres://bruiser:bruiser@127.0.0.1:5432/bruiser?sslmode=disable
 TEST_DATABASE_URL ?= postgres://bruiser:bruiser@127.0.0.1:5432/bruiser_test?sslmode=disable
 
-.PHONY: all build test test-race lint fmt vet serve migrate tidy ci torture simtix authority-check eaf-demo eaf-nightly sdk-test \
+.PHONY: all build test test-race lint fmt vet serve migrate tidy ci torture simtix authority-check eaf-demo eaf-nightly sdk-test doctor \
 	demo-1x10000 demo-1000x10 demo-handoff demo-bypass demo-unaware demo-up
 
 all: build
@@ -48,6 +48,12 @@ simtix: build
 
 authority-check: build
 	$(BIN) authority-check --front http://127.0.0.1:8091 --origin http://127.0.0.1:8090
+
+doctor: build
+	$(BIN) doctor --profile configs/example.yaml --skip-store
+
+config-validate: build
+	$(BIN) config validate configs/example.yaml
 
 eaf-demo: build
 	$(BIN) eaf-demo --front http://127.0.0.1:8091 --n 2000

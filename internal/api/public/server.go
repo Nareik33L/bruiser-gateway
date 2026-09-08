@@ -25,6 +25,7 @@ import (
 	"github.com/Nareik33L/bruiser-gateway/internal/lease"
 	"github.com/Nareik33L/bruiser-gateway/internal/limit"
 	"github.com/Nareik33L/bruiser-gateway/internal/merchant"
+	"github.com/Nareik33L/bruiser-gateway/internal/ops"
 	"github.com/Nareik33L/bruiser-gateway/internal/policy"
 	pgstore "github.com/Nareik33L/bruiser-gateway/internal/store/postgres"
 )
@@ -180,6 +181,7 @@ type Server struct {
 	compiled  atomic.Pointer[policy.Compiled]
 	policyVer atomic.Int64
 	stopWatch context.CancelFunc
+	controls  atomic.Pointer[ops.Controls]
 }
 
 func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.Logger, profile merchant.Profile) *Server {
@@ -196,6 +198,7 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 	if cfg.Burst > 0 {
 		s.limit.Burst = cfg.Burst
 	}
+	s.initControls()
 	s.loadPolicy()
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -224,6 +227,11 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 		r.Post("/admin/authority-check", s.adminRunCheck)
 		r.Get("/admin/authority-check", s.adminLastCheck)
 		r.Post("/admin/executions/{id}/revoke", s.adminRevoke)
+		r.Get("/admin/controls", s.adminGetControls)
+		r.Put("/admin/controls", s.adminPutControls)
+		r.Post("/admin/controls/drain", s.adminDrain)
+		r.Post("/admin/controls/revoke-all", s.adminRevokeAll)
+		r.Get("/admin/dry-run", s.adminDryRun)
 		r.Post("/authority-check", s.adminRunCheck)
 		r.Get("/authority-check", s.adminLastCheck)
 		r.Group(func(r chi.Router) {
@@ -258,12 +266,45 @@ func (s *Server) healthz(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), s.cfg.ReadyTimeout)
 	defer cancel()
+	ctl := s.currentControls()
+	body := map[string]any{
+		"status":      "ready",
+		"store":       "ok",
+		"mode":        ctl.Mode,
+		"enforcement": ctl.Enforcement,
+		"signing_key": "unknown",
+		"upstream":    "skipped",
+	}
 	if err := s.store.Ping(ctx); err != nil {
 		storeUnavailable.Inc()
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready", "error": "store_unavailable"})
+		body["status"] = "not_ready"
+		body["store"] = "unavailable"
+		writeJSON(w, http.StatusServiceUnavailable, body)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+	if keys, err := s.store.ActiveSigningKeys(ctx, s.cfg.MerchantID); err != nil {
+		body["signing_key"] = "error"
+	} else if len(keys) == 0 {
+		body["signing_key"] = "missing"
+		body["status"] = "not_ready"
+		writeJSON(w, http.StatusServiceUnavailable, body)
+		return
+	} else {
+		body["signing_key"] = "ok"
+	}
+	if s.cfg.OriginURL != "" {
+		u := strings.TrimRight(s.cfg.OriginURL, "/") + "/healthz"
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			body["upstream"] = "error"
+		} else if resp, err := http.DefaultClient.Do(req); err != nil {
+			body["upstream"] = "unreachable"
+		} else {
+			resp.Body.Close()
+			body["upstream"] = "ok"
+		}
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (s *Server) jwks(w http.ResponseWriter, _ *http.Request) {
@@ -274,7 +315,7 @@ func (s *Server) protocol(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"protocol":     "bruiser",
 		"version":      "0.1-draft",
-		"capabilities": []string{"IDENTITY", "ACQUIRE", "RENEW", "HEARTBEAT", "RELEASE", "HANDOFF", "REVOKE", "WATCH", "QUEUE", "AUTHORIZE", "INTROSPECT", "POLICY", "ADMIN", "AUTHORITY_CHECK"},
+		"capabilities": []string{"IDENTITY", "ACQUIRE", "RENEW", "HEARTBEAT", "RELEASE", "HANDOFF", "REVOKE", "WATCH", "QUEUE", "AUTHORIZE", "INTROSPECT", "POLICY", "ADMIN", "AUTHORITY_CHECK", "DRY_RUN", "CONTROLS"},
 	})
 }
 
@@ -404,12 +445,21 @@ func (s *Server) acquire(w http.ResponseWriter, r *http.Request) {
 		body.Action = "purchase"
 	}
 	d := s.evaluate(sess.MerchantID, sess.CustomerID, sess.PrincipalType, body.Resource, body.Action, sess.Anchors)
+	d, ctl := s.applyControls(d, body.Action)
 	if d.Denied || d.ControlNone {
 		reason := d.Reason
 		if reason == "" {
 			reason = "denied"
 		}
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": "DENIED", "reason": reason, "rule_name": d.RuleName})
+		return
+	}
+	if ctl.PassThrough() {
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ALLOW", "control": "bypass", "rule_name": d.RuleName})
+		return
+	}
+	if ctl.DryRun() {
+		s.writeAcquireDryRun(w, r, sess, body, d)
 		return
 	}
 	reqID := requestID(r)
@@ -430,6 +480,10 @@ func (s *Server) acquire(w http.ResponseWriter, r *http.Request) {
 		RequestID:   reqID,
 	})
 	if err != nil {
+		if s.failOpen() {
+			writeJSON(w, http.StatusOK, map[string]any{"status": "ALLOW", "control": "fail-open", "rule_name": d.RuleName})
+			return
+		}
 		s.storeError(w, err)
 		return
 	}
@@ -460,6 +514,25 @@ func (s *Server) acquire(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeErr(w, http.StatusForbidden, res.Reason)
 	}
+}
+
+func (s *Server) writeAcquireDryRun(w http.ResponseWriter, r *http.Request, sess auth.SessionClaims, body acquireReq, d policy.Decision) {
+	ev, err := s.store.ShadowDecide(r.Context(), sess.MerchantID, d.DomainKey, sess.CustomerID, sess.PrincipalID, body.Resource, body.Action, d.RuleName, d.MaxActive, d.MaxWaiters, d.TTL, requestID(r))
+	would, reason := "WOULD_UNKNOWN", "store_unavailable"
+	if err == nil {
+		would, reason = "WOULD_"+ev.Would, ev.Reason
+	}
+	s.eaf.record(body.Resource, sess.CustomerID, "would_"+strings.ToLower(strings.TrimPrefix(would, "WOULD_")))
+	w.Header().Set("X-Bruiser-Control", "dry-run")
+	w.Header().Set("X-Bruiser-Dry-Run", would)
+	w.Header().Set("X-Bruiser-Dry-Run-Reason", reason)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":      "ALLOW",
+		"would":       would,
+		"reason":      reason,
+		"rule_name":   d.RuleName,
+		"customer_id": sess.CustomerID,
+	})
 }
 
 func (s *Server) renew(w http.ResponseWriter, r *http.Request) {
@@ -728,6 +801,40 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 		return false
 	}
 	return true
+}
+
+func (s *Server) initControls() {
+	c := ops.FromEnv(s.cfg.Mode, s.cfg.Enforcement, s.cfg.QueueEnabled)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if db, found, err := s.store.GetControls(ctx, s.cfg.MerchantID); err == nil && found {
+		c = db
+	}
+	s.controls.Store(&c)
+}
+
+func (s *Server) currentControls() ops.Controls {
+	if p := s.controls.Load(); p != nil {
+		return *p
+	}
+	return ops.FromEnv(s.cfg.Mode, s.cfg.Enforcement, s.cfg.QueueEnabled)
+}
+
+func (s *Server) applyControls(d policy.Decision, action string) (policy.Decision, ops.Controls) {
+	c := s.currentControls()
+	d.MaxWaiters = c.EffectiveWaiters(d.MaxWaiters)
+	if c.LeaseTTLSeconds > 0 {
+		d.TTL = time.Duration(c.LeaseTTLSeconds) * time.Second
+	}
+	if c.ActionDisabled(action) {
+		d.ControlNone = true
+	}
+	return d, c
+}
+
+func (s *Server) failOpen() bool {
+	c := s.currentControls()
+	return !c.FailClosed || c.PassThrough()
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

@@ -13,10 +13,10 @@ paths:
         "200": { description: process is up }
   /readyz:
     get:
-      summary: Readiness (store reachable)
+      summary: Readiness (store, signing key, mode)
       responses:
         "200": { description: ready }
-        "503": { description: store unavailable }
+        "503": { description: store or signing key not ready }
   /v1/sessions:
     post:
       summary: Exchange a customer assertion for a Bruiser session
@@ -182,6 +182,20 @@ paths:
       summary: Audit export as JSONL
       responses:
         "200": { description: ndjson }
+  /v1/admin/controls:
+    get:
+      summary: Emergency controls (mode, enforcement, queue)
+      responses:
+        "200": { description: current controls }
+    put:
+      summary: Patch emergency controls (audited CONTROL_CHANGED)
+      responses:
+        "200": { description: saved }
+  /v1/admin/dry-run:
+    get:
+      summary: What Bruiser would have stopped (24h WOULD_* + EAF)
+      responses:
+        "200": { description: dry-run report }
   /v1/introspect:
     post:
       summary: Verify an execution token (Embedded)

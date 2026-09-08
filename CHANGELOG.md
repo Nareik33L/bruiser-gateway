@@ -4,6 +4,18 @@
 
 ### Added
 
+- Transparent dry-run (`BRUISER_MODE=dry-run` or admin controls): same path
+  and policies, never blocks, records `WOULD_ALLOW` / `WOULD_QUEUE` /
+  `WOULD_REJECT` / `WOULD_EXPIRE`. Admin **What Bruiser would have stopped**
+  (`GET /v1/admin/dry-run`) including would-have EAF.
+- Emergency controls: enforcement/queue kill switch, waiter drain, revoke-all,
+  lease TTL override, fail-closed, route-level `disabled_actions`. Audited.
+- `bruiser doctor` — PASS / WARN / FAIL (config, identity, routes, upstream,
+  signing keys, persistence, queue, authority, limits, metrics, audit).
+- `bruiser config validate` (also `profile validate` prints actionable issues).
+- `/readyz` reports store, signing key, mode, enforcement, upstream.
+- Post-core roadmap: [docs/09-post-core-capabilities.md](docs/09-post-core-capabilities.md).
+
 - Optional bounded intra-customer queue (`waiting.mode: bounded`, `max_waiters`).
   Customer-concurrency only: one ACTIVE per customer/domain; extra agents of
   that customer QUEUED (HTTP 202), overflow BUSY. A second customer is never

@@ -124,6 +124,14 @@ subject to Bruiser.
 Bruiser-aware agents get a better experience (acquire, renew, watch, release,
 handoff). Bruiser-unaware clients receive the same rules.
 
+Transparent **dry-run** (`BRUISER_MODE=dry-run` or admin controls) uses this
+same path and the same policies, records `WOULD_*` decisions, and never
+blocks. It is how a club answers “what would Bruiser have done?” before
+enforcement. Supporting ops (`bruiser doctor`, `config validate`, emergency
+controls, `/readyz`) are scoped in
+[09-post-core-capabilities.md](09-post-core-capabilities.md) and must not
+delay the core product.
+
 ## 9. Separate discovery from allocation
 
 Do not block ordinary browsing. Search, quote, browse and availability stay
