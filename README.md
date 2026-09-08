@@ -59,6 +59,7 @@ Dev assertions default to membership `1001234` (Alice in the Arsenal-like lab):
 | [docs/07-club-profile-arsenal.md](docs/07-club-profile-arsenal.md) | Unverified Arsenal-like standing analogue |
 | [docs/08-make-authoritative.md](docs/08-make-authoritative.md) | Edge / Proxy / Embedded placement + Authority Check |
 | [protocol/v0-draft.md](protocol/v0-draft.md) | Bruiser Protocol v0 draft |
+| [protocol/policy.schema.json](protocol/policy.schema.json) | Policy document JSON Schema |
 
 ## Licensing (intended, pending legal review)
 
@@ -68,8 +69,9 @@ No licence files are committed until the OSS/Core boundary is formally decided.
 ## Status
 
 M0–M2 are in this tree. M3 against the **unverified Arsenal-like** profile
-covers Edge, Proxy, Go Embedded SDK, Authority Check, and EAF. Node/Python
-SDKs remain. Stage A commercial discovery runs in parallel.
+covers Edge, Proxy, Go Embedded SDK, Authority Check, and EAF. M4 is a YAML
+policy engine (`bruiser policy validate`, `PUT /v1/policy`). M5 handoff/revoke
+are in. Node/Python SDKs remain. Stage A commercial discovery runs in parallel.
 
 ## Arsenal-like lab (best guess until discovery)
 

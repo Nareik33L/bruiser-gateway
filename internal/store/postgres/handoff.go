@@ -67,7 +67,7 @@ func (s *Store) Handoff(ctx context.Context, req lease.HandoffRequest) (lease.Ha
 			if to.Type == "" || to.ID == "" {
 				return lease.HandoffResult{}, lease.ErrInvalidInput
 			}
-		} else if lease.CanPreempt(callerP, old.Principal) {
+		} else if lease.CanPreemptRanked(callerP, old.Principal, req.Precedence) {
 			mode = lease.ModePreempt
 			if to.Type == "" {
 				to = callerP

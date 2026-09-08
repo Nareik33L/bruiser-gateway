@@ -92,6 +92,7 @@ type AcquireRequest struct {
 	MaxActive   int
 	TTL         time.Duration
 	MaxLifetime time.Duration
+	Precedence  []string
 	RequestID   string
 }
 
@@ -116,6 +117,7 @@ type HandoffRequest struct {
 	To          Principal
 	Mode        string // "preempt", "cooperative", or empty (inferred)
 	TTL         time.Duration
+	Precedence  []string
 	RequestID   string
 }
 

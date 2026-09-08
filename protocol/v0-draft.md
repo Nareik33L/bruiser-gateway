@@ -21,6 +21,7 @@ The Go gateway is one implementation of this protocol.
 | HANDOFF | `POST /v1/executions/{id}/handoff` | yes |
 | AUTHORIZE | `POST /v1/authorize` | yes (Edge) |
 | INTROSPECT | `POST /v1/introspect` | yes |
+| POLICY | `GET/PUT /v1/policy` | yes |
 
 ## Identity
 
@@ -89,4 +90,15 @@ or JSON `{method,path,event_id}`), the merchant session cookie, and
 acquires transparently if the route is controlled, and returns `ALLOW` plus
 `X-Bruiser-Execution` / `X-Bruiser-Fence` / `X-Bruiser-Origin-Secret`, or
 `409 BUSY`. Uncontrolled routes (search) return `ALLOW` without a lease.
+
+## Policy
+
+`GET` / `PUT /v1/policy` (admin or edge secret) reads and activates a YAML
+document. Schema: `protocol/policy.schema.json`. First matching `domains[]`
+rule wins. `PUT` applies to new acquires only. `bruiser policy validate`
+compiles a file without activating it.
+
+Denied acquires return `403 {error: DENIED, reason, rule_name}`. BUSY includes
+`rule_name`. `reason=missing_anchor` when a required `anchor:*` scope dimension
+is absent and the rule does not fall through.
 

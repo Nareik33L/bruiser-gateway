@@ -4,19 +4,24 @@ package lease
 // Equal ranks cannot preempt; they need a cooperative handoff. Full policy
 // lists land in M4.
 
-func Precedence(principalType string) int {
-	switch principalType {
-	case "browser":
-		return 2
-	case "agent":
-		return 1
-	default:
-		return 0
+func Rank(principalType string, order []string) int {
+	if len(order) == 0 {
+		order = []string{"browser", "agent"}
 	}
+	for i, t := range order {
+		if t == principalType {
+			return len(order) - i
+		}
+	}
+	return 0
 }
 
 func CanPreempt(caller, holder Principal) bool {
-	return Precedence(caller.Type) > Precedence(holder.Type)
+	return CanPreemptRanked(caller, holder, nil)
+}
+
+func CanPreemptRanked(caller, holder Principal, order []string) bool {
+	return Rank(caller.Type, order) > Rank(holder.Type, order)
 }
 
 func SamePrincipal(a, b Principal) bool {

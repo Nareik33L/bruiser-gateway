@@ -18,4 +18,7 @@ func TestCanPreempt(t *testing.T) {
 	if CanPreempt(browser, browser) {
 		t.Fatal("equal browser rank must not preempt")
 	}
+	if !CanPreemptRanked(agent, browser, []string{"agent", "browser"}) {
+		t.Fatal("custom order: agent should preempt browser")
+	}
 }
