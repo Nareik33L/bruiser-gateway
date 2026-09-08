@@ -24,6 +24,9 @@ type SafetyOpts struct {
 	OriginURL    string
 	Proxy        bool
 	Production   bool
+	JWKSURL      string
+	Issuer       string
+	Audience     string
 }
 
 // SafetyIssues is the unmatched:allow / origin-lockdown boundary.
@@ -35,13 +38,13 @@ func (p Profile) SafetyIssues(opts SafetyOpts) []Issue {
 		ext := strings.ToLower(strings.TrimSpace(p.Identity.Extractor))
 		switch ext {
 		case "oidc", "jwks", "auto", "cookie-jwt", "cookie", "bearer-jwt", "bearer", "jwt":
-			if p.Identity.JWKSURL == "" {
+			if p.Identity.JWKSURL == "" && opts.JWKSURL == "" {
 				out = append(out, Issue{"FAIL", "identity.jwks_url", "production requires jwks_url (HS256 is development-only)"})
 			}
-			if p.Identity.Issuer == "" {
+			if p.Identity.Issuer == "" && opts.Issuer == "" {
 				out = append(out, Issue{"FAIL", "identity.issuer", "production requires identity.issuer"})
 			}
-			if p.Identity.Audience == "" {
+			if p.Identity.Audience == "" && opts.Audience == "" {
 				out = append(out, Issue{"FAIL", "identity.audience", "production requires identity.audience"})
 			}
 		case "header":

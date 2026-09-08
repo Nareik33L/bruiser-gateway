@@ -76,6 +76,9 @@ func cmdConfig() error {
 		OriginURL:    cfg.OriginURL,
 		Proxy:        cfg.ProxyAddr != "",
 		Production:   cfg.Production(),
+		JWKSURL:      cfg.JWKSURL,
+		Issuer:       cfg.Issuer,
+		Audience:     cfg.Audience,
 	})...)
 	for _, i := range issues {
 		fmt.Printf("%s  %s: %s\n", i.Level, i.Field, i.Message)

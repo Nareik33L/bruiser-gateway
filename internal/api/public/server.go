@@ -519,8 +519,15 @@ func (s *Server) sessionAuth(next http.Handler) http.Handler {
 		}
 		if claims.SessionID != "" {
 			if _, err := s.store.LiveSession(r.Context(), s.cfg.MerchantID, claims.SessionID); err != nil {
-				writeErr(w, http.StatusUnauthorized, "session revoked")
-				return
+				if errors.Is(err, lease.ErrUnavailable) {
+					if !s.failOpen() {
+						s.storeError(w, err)
+						return
+					}
+				} else {
+					writeErr(w, http.StatusUnauthorized, "session revoked")
+					return
+				}
 			}
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), sessionKey, claims)))

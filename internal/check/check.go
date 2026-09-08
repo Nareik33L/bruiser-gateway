@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ type Config struct {
 	OriginURL  string
 	ControlURL string
 	HMACSecret string
+	EdgeSecret string
 	Membership string
 	EventID    string
 	Timeout    time.Duration
@@ -77,6 +79,12 @@ func Run(cfg Config) (Report, error) {
 	}
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 8 * time.Second
+	}
+	if cfg.EdgeSecret == "" {
+		cfg.EdgeSecret = os.Getenv("BRUISER_EDGE_SECRET")
+	}
+	if cfg.EdgeSecret == "" {
+		cfg.EdgeSecret = "edge-secret-dev"
 	}
 	client := &http.Client{Timeout: cfg.Timeout}
 	edge := strings.TrimRight(cfg.EdgeURL, "/")
@@ -362,23 +370,42 @@ func Run(cfg Config) (Report, error) {
 	}))
 
 	rep.Probes = append(rep.Probes, probe("Resource variants share one domain", func() Probe {
+		if control == "" {
+			return fail("--control is required to prove canonical resource domains")
+		}
 		tok, err := auth.IssueBoxOfficeSession(cfg.HMACSecret, fmt.Sprintf("canon-%d", time.Now().UnixNano()), time.Hour)
 		if err != nil {
 			return fail("%s", err.Error())
 		}
-		hdr := cookieHeader(tok)
-		code1, body1 := postJSON(client, edge+"/api/events/ars-che/holds", hdr, map[string]int{"seats": 1})
-		if code1 < 200 || code1 >= 300 {
-			return fail("canonical hold failed (%d) %s", code1, body1)
+		hdr := map[string]string{
+			"Cookie":                simtix.CookieName + "=" + tok,
+			"X-Bruiser-Edge-Secret": cfg.EdgeSecret,
 		}
-		code2, body2 := postJSON(client, edge+"/api/events/ARS-CHE/holds", hdr, map[string]int{"seats": 1})
+		code1, body1 := postJSON(client, control+"/v1/authorize", hdr, map[string]string{
+			"method": "POST", "path": "/api/events/" + cfg.EventID + "/holds",
+		})
+		if code1 != http.StatusOK {
+			return fail("canonical authorize failed (%d) %s", code1, body1)
+		}
+		var a1 map[string]any
+		_ = json.Unmarshal([]byte(body1), &a1)
+		code2, body2 := postJSON(client, control+"/v1/authorize", hdr, map[string]string{
+			"method": "POST", "path": "/api/events/" + strings.ToUpper(cfg.EventID) + "/holds/",
+		})
 		if code2 == http.StatusConflict {
-			return fail("case variant created a second domain (%d) %s", code2, body2)
+			return fail("path variant created a second domain (%d) %s", code2, body2)
 		}
-		if code2 >= 200 && code2 < 300 {
-			return pass("EVENT/ars-che variants stayed on one execution")
+		if code2 != http.StatusOK {
+			return fail("variant authorize %d %s", code2, body2)
 		}
-		return fail("variant hold %d %s", code2, body2)
+		var a2 map[string]any
+		_ = json.Unmarshal([]byte(body2), &a2)
+		if id1, _ := a1["execution_id"].(string); id1 != "" {
+			if id2, _ := a2["execution_id"].(string); id2 != "" && id1 != id2 {
+				return fail("variants minted two executions %s vs %s", id1, id2)
+			}
+		}
+		return pass("case/slash variants stayed on one execution")
 	}))
 
 	rep.Probes = append(rep.Probes, probe("Forged execution rejected at origin", func() Probe {

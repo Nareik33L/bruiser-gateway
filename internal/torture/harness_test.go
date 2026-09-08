@@ -44,6 +44,9 @@ func TestThreeGatewaysOneGrant(t *testing.T) {
 	cfg.DatabaseURL = url
 	cfg.MerchantID = id.New("m")
 	cfg.LeaseTTL = 30 * time.Second
+	cfg.DevAssertions = true
+	cfg.RateSessions, cfg.RateAcquire, cfg.RateMerchant = 1e6, 1e6, 1e6
+	cfg.RateCustomer, cfg.RatePrincipal = 1e6, 1e6
 	if err := store.EnsureMerchant(ctx, cfg.MerchantID, "test", cfg.DevHMACSecret); err != nil {
 		t.Fatal(err)
 	}

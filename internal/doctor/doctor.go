@@ -164,6 +164,9 @@ func checkUnmatched(r *Report, in Input) {
 		OriginURL:    firstNonEmpty(in.OriginURL, in.Config.OriginURL),
 		Proxy:        in.Config.ProxyAddr != "",
 		Production:   in.Config.Production(),
+		JWKSURL:      in.Config.JWKSURL,
+		Issuer:       in.Config.Issuer,
+		Audience:     in.Config.Audience,
 	})
 	var fails, warns []string
 	for _, i := range issues {
