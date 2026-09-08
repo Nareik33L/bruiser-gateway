@@ -1,4 +1,4 @@
-# Bruiser Gateway — Product & Technical Brief (v2)
+# Bruiser Gateway — Product & Technical Brief (v2.2)
 
 Working name: **Bruiser Gateway** · Domain: bruiser-gateway.com
 
@@ -41,6 +41,18 @@ the following:
 | 16 | **Design-partner acquisition is an immediate commercial priority** and the integration-discovery questionnaire ([06-integration-discovery.md](06-integration-discovery.md)) is how those conversations validate requirements. | Q7 |
 | 17 | **Audit retention** configurable, default 13 months. **Pricing** stays simple: Core within a documented fair-use envelope, no per-request metering; the gateway reports plain usage figures for transparency. **Trademark clearance** before public launch or significant commercial investment. **External security review** is an M8 exit criterion. | Q9–Q12 |
 | 18 | **Positioning principle made explicit: Bruiser is not a distributed-lock product.** Coordination technology is an implementation detail. The product is the identity, execution-control, lease, policy, queueing, handoff, audit and merchant-integration layer around scarce-inventory transactions. | Founder principle |
+
+### v2.2 — founder additions
+
+| # | Change | Why it matters |
+|---|--------|----------------|
+| 19 | **Authority is the requirement; the deployment method is an implementation detail.** Bruiser is sold as the authoritative control layer for scarce-inventory execution, never as middleware, a proxy or an API gateway. The three deployment methods (Embedded, Edge, Proxy) are how a merchant *places* that layer, not different products. | Selling the pattern sells a box. Selling authority sells the outcome. |
+| 20 | **Internal names P1/P2/P3 retired.** Customer-facing and internal names are now **Embedded**, **Edge** and **Proxy**. | One vocabulary for engineering, sales and the merchant. |
+| 21 | **Bruiser Authority Check is a named product feature and a production go-live gate.** A club that cannot achieve PASS is not production-ready. The check is also a sales/demo artefact. | Makes authority observable, not asserted. |
+| 22 | **Execution Amplification Factor (EAF) is the primary operational KPI.** `EAF = incoming allocation attempts ÷ authorised executions forwarded`. The dashboard, demo and sales conversation all lead with it. | Turns the 10,000-agents story into a number a ticketing office can watch. |
+| 23 | **Transparent enforcement is a named product principle**, with two client classes: Bruiser-aware (explicit APIs, better UX) and Bruiser-unaware (merchant session, automatic acquire, same rules). | The merchant is protected regardless of the client. |
+| 24 | **Commercial messaging rule is binding.** Never: Redis lock, bot detection, DDoS, ticketing platform, middleware, a proxy or an API gateway. Always: the authoritative control layer for autonomous commerce that ensures one customer remains one customer, regardless of how many agents they deploy. | Prevents the product being sold as something a competent team builds in a week, or as a box. |
+| 25 | **Stage A commercial discovery starts immediately**, before significant engineering investment, and is a core product activity — not a post-MVP sales exercise. | Integration requirements that shape V1 come from clubs, not from the lab. |
 
 ---
 
@@ -251,39 +263,79 @@ next-in-line is promoted on release/expiry and must claim within a short window.
 Out of scope: fair queueing *across* customers. That is the merchant's waiting
 room. Bruiser sits behind it.
 
-## 9. Integration: Bruiser must be authoritative
+## 9. Authority, deployment methods and the Authority Check
 
-**The authority requirement.** Bruiser can only guarantee its policy if every path
-to the protected allocation operation (`hold`, `purchase`, and anything else that
-consumes or reserves scarce inventory) passes Bruiser's admission check. Direct
-paths must be removed, restricted or otherwise made unable to circumvent policy.
-Integration is therefore defined as *closing the unenforced paths*, and every
-deployment ships with an **authority check** that probes the allocation endpoints
-without a valid execution and confirms they refuse.
+**Authority is the requirement. The deployment method is an implementation detail.**
+
+Bruiser is sold as the authoritative control layer for scarce-inventory execution.
+It is not sold as middleware, a proxy or an API gateway. Those are how a merchant
+*places* the control layer in front of existing commerce/ticketing infrastructure;
+they are not different products and they do not appear in the pitch.
+
+Bruiser can only guarantee its policy if every path to the protected allocation
+operation (`hold`, `purchase`, and anything else that consumes or reserves scarce
+inventory) passes Bruiser's admission check. Direct paths must be removed,
+restricted or otherwise made unable to circumvent policy. Integration is therefore
+defined as *closing the unenforced paths*.
 
 Bruiser is platform-agnostic and does not depend on a partnership with any
 ticketing platform. First customers are clubs where a technically viable path
-exists to make Bruiser authoritative. Three enforcement patterns cover the mixed
-setups we expect; all share the same lease core and policy engine.
+exists to make Bruiser authoritative. Three **deployment methods** cover the mixed
+setups we expect; all share the same lease core, policy engine, tokens, audit and
+Authority Check.
 
-| Pattern | Where enforcement happens | When it fits |
-|---------|---------------------------|--------------|
-| **P1 — In-app middleware** | The merchant's checkout code verifies the Bruiser execution token (SDK, offline against JWKS, optional introspection at purchase). | Club controls its checkout code. Bruiser stays out of the data path; an outage stops new grants but not authorised purchases. |
-| **P2 — Edge / API-gateway** | The merchant's existing reverse proxy, API gateway or CDN worker (NGINX `auth_request`, Envoy `ext_authz`, Kong/Tyk plugin, Cloudflare Worker…) asks Bruiser `/v1/authorize` before forwarding allocation requests. | Club or platform fronts checkout with an edge it controls but cannot change the application. |
-| **P3 — Bruiser reverse proxy** | Bruiser itself terminates allocation traffic and forwards to the merchant/platform through a *merchant adapter*, attaching the fence. | Neither the app nor an edge can be changed; or for the simulator and demos. |
+| Deployment method | Where the admission check happens | When it fits |
+|-------------------|-----------------------------------|--------------|
+| **Embedded** — in-application middleware | The merchant's checkout code verifies the Bruiser execution token (SDK, offline against JWKS, optional introspection at purchase). | Club controls its checkout code. Bruiser stays out of the data path; an outage stops new grants but not authorised purchases. |
+| **Edge** — API gateway / WAF / Worker | The merchant's existing reverse proxy, API gateway, CDN worker or WAF (NGINX `auth_request`, Envoy `ext_authz`, Kong/Tyk plugin, Cloudflare Worker…) asks Bruiser `/v1/authorize` before forwarding allocation requests. | Club or platform fronts checkout with an edge it controls but cannot change the application. |
+| **Proxy** — reverse proxy | Bruiser itself terminates allocation traffic and forwards to the merchant/platform through a *merchant adapter*, attaching the fence. | Neither the app nor an edge can be changed; or for the simulator and demos. |
 
-In every pattern the origin must only accept allocation traffic that has passed
-the enforcement point (network policy, mTLS or shared secret between edge and
-origin, WAF rule requiring a Bruiser header). The authority check verifies this.
+In every method the origin must only accept allocation traffic that has passed the
+admission check (network policy, mTLS or shared secret between edge and origin,
+WAF rule requiring a Bruiser header). The Authority Check verifies this.
 
-**Transparent enforcement.** Enforcement cannot depend on agents choosing to use
-Bruiser. In P2 and P3 Bruiser identifies the customer from the merchant's existing
-session credential and, on the first allocation request, **acquires the execution
-on the customer's behalf**. A second agent presenting the same customer identity
+### 9.1 Bruiser Authority Check (product feature)
+
+Every deployment includes a built-in validation tool that **proves** the gateway
+is genuinely authoritative before production go-live. It is a CLI
+(`bruiser authority-check`), an admin-UI action and a demo artefact.
+
+```
+Bruiser Authority Check
+
+  PASS — Browser allocation route protected
+  PASS — Mobile API protected
+  PASS — Agent API protected
+  PASS — Expired token rejected
+  PASS — Tampered token rejected
+  PASS — Direct allocation bypass blocked
+
+  Overall Result: PASS
+```
+
+A club that cannot achieve PASS is not production-ready. The check is both a
+technical go-live gate and a sales/demo feature: running it live, flipping origin
+lockdown off (FAIL, named open path) and on (PASS) makes the authority claim
+visible in seconds.
+
+### 9.2 Transparent enforcement
+
+Bruiser must never rely on agents voluntarily integrating with Bruiser. Two
+classes of client exist; the merchant is protected regardless of which shows up.
+
+| | Bruiser-aware agents | Bruiser-unaware agents |
+|---|----------------------|------------------------|
+| Identity | Explicit session (`POST /v1/sessions`) | Merchant's existing authenticated session; Bruiser extracts the customer |
+| Execution | Explicit acquire / renew / release / handoff / watch | Execution acquired automatically on the first allocation request |
+| Rules | Same concurrency policy | Same concurrency policy |
+| UX | Richer: watch instead of retry, clean handoff, named principals | Controlled, not convenient |
+
+In Edge and Proxy, Bruiser identifies the customer from the merchant's existing
+session credential and, on the first allocation request, acquires the execution
+on the customer's behalf. A second agent presenting the same customer identity
 receives BUSY (or is preempted per precedence) exactly as a Bruiser-aware agent
-would. Bruiser-aware clients gain explicit acquire/renew/watch/handoff and better
-UX; unaware clients are still controlled. Agent-facing SDKs and the MCP tooling
-(§10) are adoption aids, not the enforcement mechanism.
+would. Agent-facing SDKs and the MCP tooling (§10) are adoption aids, not the
+enforcement mechanism.
 
 The adapter interface (`search / hold / release / purchase / cancel`) is designed so
 future adapters (ticketing platforms, ecommerce, hotels, restaurants, appointments)
@@ -300,7 +352,7 @@ merchant verification rules.
 |-----------|-----------|
 | IDENTITY (sessions, principals, anchors) | implemented |
 | ACQUIRE / RENEW / RELEASE / REVOKE / HANDOFF | implemented |
-| HOLD / ALLOCATE / PURCHASE / CANCEL | admission-checked at the enforcement point (P1–P3); pass-through via adapter in P3 |
+| HOLD / ALLOCATE / PURCHASE / CANCEL | admission-checked at the enforcement point (Embedded / Edge / Proxy); pass-through via adapter in Proxy |
 | DISCOVER / QUOTE | uncontrolled pass-through; protocol names reserved |
 | REFUND | reserved |
 
@@ -334,6 +386,8 @@ binary and is not a production offering.
 - Ed25519-signed execution tokens with key rotation via JWKS.
 - Customer assertions verified against merchant-configured JWKS; principals bound
   to sessions; sessions short-lived.
+- Bruiser-unaware clients identified from the merchant's existing session
+  (transparent enforcement); Bruiser-aware clients via explicit sessions.
 - Merchant admin API with hashed API keys or mTLS; RBAC (admin / operator /
   viewer / auditor).
 - Replay protection via short expiry, `jti`, idempotency keys and fences.
@@ -374,17 +428,44 @@ Scenarios:
 | Bypass attempt | agent goes straight to SimTix and succeeds | the same request is refused at the origin; the authority check reports no open paths |
 | Unaware agent | — | an agent that has never heard of Bruiser hits checkout with the club session cookie; Bruiser acquires transparently; the customer's second agent gets BUSY |
 
-The dashboard shows side by side: downstream requests, active executions, BUSY
-responses, seats-per-customer distribution, SimTix p99 latency. The point must
-land in seconds.
+The dashboard shows side by side: **Execution Amplification Factor**, downstream
+requests, active executions, BUSY responses, seats-per-customer distribution,
+SimTix p99 latency, and the live Authority Check result. The point must land in
+seconds: incoming 10,000×, authorised 1×.
 
-## 15. Admin interface
+## 15. Admin interface and the primary KPI
 
 Functional, not pretty. Merchant sees gateway status, active customers, active and
 waiting executions, denials, expirations and allocation activity. Per customer:
 current execution, holder principal, resource, timestamps, `[Revoke]` and
 `[Take control]`. Policy view and validation. Audit search: "why was this request
-allowed, denied or delayed?"
+allowed, denied or delayed?" Authority Check last-run result, with `[Run check]`.
+
+### 15.1 Execution Amplification Factor (EAF)
+
+The primary operational KPI, shown as the headline number on the dashboard.
+
+```
+EAF = incoming allocation attempts ÷ authorised executions forwarded
+```
+
+| Situation | Incoming attempts | Authorised executions | EAF |
+|-----------|-------------------|------------------------|-----|
+| 1 customer, 1 browser | 1 | 1 | 1× |
+| 1 customer, 5 agents | 5 | 1 | 5× |
+| 1 customer, 10,000 agents | 10,000 | 1 | 10,000× |
+| After Bruiser enforcement (same 10,000) | 10,000 | 1 | 10,000× absorbed; **downstream EAF = 1×** |
+
+Two complementary views are shown:
+
+- **Observed EAF** (incoming ÷ authorised) — how much autonomous demand Bruiser
+  absorbed. This is the number that makes the 10,000-agent story obvious.
+- **Downstream EAF** (authorised executions forwarded ÷ distinct customers who
+  attempted) — should sit at 1× when policy is `max_active: 1`. This is the
+  number that proves the guarantee.
+
+Reported per merchant, per resource/event, per customer, and over a selectable
+window (live, last on-sale, last 24 h). Never used for billing or throttling.
 
 ## 16. Auditability
 
@@ -408,8 +489,8 @@ requirements.
 
 | Tier | Price | Purpose | Contents |
 |------|-------|---------|----------|
-| **Community** (source-available) | £0 | adoption, credibility, protocol spread | gateway core under BSL 1.1 (production use permitted; offering Bruiser as a hosted service to third parties is not), protocol spec and SDKs under Apache-2.0, simulator, basic admin, Compose deployment, community support. Genuinely usable by a capable team. |
-| **Core** | £20k/yr within a fair-use envelope | production for clubs and mid-size operators | commercial licence, supported releases and upgrades, full policy engine, admin UI, audit export and retention tooling, analytics, Helm chart, SSO for admin, documented integrations, commercial support, security updates |
+| **Community** (source-available) | £0 | adoption, credibility, protocol spread | gateway core under BSL 1.1 (production use permitted; offering Bruiser as a hosted service to third parties is not), protocol spec and SDKs under Apache-2.0, simulator, Authority Check, EAF in basic admin, Compose deployment, community support. Genuinely usable by a capable team. |
+| **Core** | £20k/yr within a fair-use envelope | production for clubs and mid-size operators | commercial licence, supported releases and upgrades, full policy engine, admin UI with EAF as headline KPI, Authority Check, audit export and retention tooling, analytics, Helm chart, SSO for admin, documented Embedded / Edge / Proxy integration, commercial support, security updates |
 | **Enterprise** | from £100k/yr | mission-critical, high-volume | everything in Core plus advanced policy, bounded waiting, multi-region, enterprise auth, HA guidance, compliance pack, premium adapters, SLA, dedicated support, deployment assistance |
 
 **Licensing.** Protocol, schemas, specifications and SDKs: Apache-2.0, to maximise
@@ -442,21 +523,34 @@ standard, not for a lock.
 
 ## 19. Positioning and moat
 
-**Bruiser is not a distributed-lock product.** Whether V1 coordinates through
-PostgreSQL, or a later version through Redis or something else, is an
-implementation detail and must never appear in positioning. The product is the
-customer-identity, execution-control, lease, concurrency, policy, queueing,
-handoff, audit and merchant-integration layer that sits around scarce-inventory
-transactions. Bruiser is not a bot detector, not a DDoS product, not a ticketing
-platform and not a locking service; it is a control layer for autonomous commerce.
+**Commercial messaging rule (binding).**
+
+Never describe Bruiser as:
+
+- a Redis lock (or any locking service)
+- bot detection
+- DDoS protection
+- a ticketing platform
+- middleware, a proxy or an API gateway (those are deployment methods)
+
+Always describe Bruiser as:
+
+> **The authoritative control layer for autonomous commerce that ensures one
+> customer remains one customer, regardless of how many agents they deploy.**
+
+Redis, PostgreSQL row locks or any other distributed coordination technology are
+implementation details and must not appear in customer-facing positioning. The
+product is the customer-identity, execution-control, lease, concurrency, policy,
+queueing, handoff, audit and merchant-integration layer around scarce-inventory
+transactions.
 
 A competent team can build `customer_id + lock` in a week. Defensibility is built
-around: protocol adoption, agent-side SDKs/tooling, merchant adapters and
-enforcement patterns, the authority check and integration know-how, policy engine,
-handoff UX, audit/fairness evidence for disputes, operational expertise, security
-track record, benchmarks and — later — reputation network effects. The ambition is
-for Bruiser to be the recognised admission standard between agents and scarce
-inventory.
+around: protocol adoption, agent-side SDKs/tooling, deployment methods and
+integration know-how, the Authority Check, EAF as an operational language,
+policy engine, handoff UX, audit/fairness evidence for disputes, operational
+expertise, security track record, benchmarks and — later — reputation network
+effects. The ambition is for Bruiser to be the recognised admission standard
+between agents and scarce inventory.
 
 ## 20. Go-to-market
 
@@ -464,22 +558,27 @@ Vertical: football ticketing — scarce inventory, concentrated demand, supporte
 frustration, public fairness pressure, existing infrastructure, high-value
 transactions, extreme spikes.
 
-The pitch is not "we stop bots". It is:
+The pitch is not "we stop bots". It is not "we sit in front of checkout as a
+proxy". It is:
 
-> **One supporter remains one supporter, regardless of how many agents they deploy.**
+> **The authoritative control layer for autonomous commerce that ensures one
+> customer remains one customer, regardless of how many agents they deploy.**
 > You control the infrastructure. Bruiser provides the control layer.
 
-Two motions run in parallel: OSS → developer adoption → protocol familiarity →
+Two motions run in parallel: protocol/SDK adoption → developer familiarity →
 production; and outbound → design-partner clubs → Core → Enterprise → references.
-Do not wait for OSS traction before selling Core.
+Do not wait for protocol traction before selling Core.
 
-There are no confirmed design partners yet; acquiring them is an immediate
-commercial priority that runs alongside development. Each club conversation is
-also an integration-discovery exercise ([06-integration-discovery.md](06-integration-discovery.md)):
-where is the admission point, who controls it, and which enforcement pattern makes
-Bruiser authoritative there. Clubs with a viable path are qualified; clubs whose
-allocation path cannot be closed are deferred, not force-fitted. Bruiser does not
-wait on any ticketing-platform partnership to validate the product.
+**Stage A commercial discovery starts immediately**, before significant
+engineering investment, and is a core product activity — not a post-MVP sales
+exercise. There are no confirmed design partners yet. Outbound discovery with
+20–30 football clubs uses [06-integration-discovery.md](06-integration-discovery.md)
+to: identify the ticketing platform; determine the viable deployment method
+(Embedded / Edge / Proxy); confirm the identity source; confirm that authority
+can be achieved; qualify or disqualify the opportunity; and secure 2–3 design
+partners. Clubs with a viable path are qualified; clubs whose allocation path
+cannot be closed are deferred, not force-fitted. Bruiser does not wait on any
+ticketing-platform partnership to validate the product.
 
 ## 21. Where Bruiser sits
 
@@ -488,28 +587,38 @@ Internet
   ↓  CDN / WAF / DDoS (unchanged)
   ↓  Merchant waiting room (inter-customer fairness, unchanged)
   ↓  Merchant IdP (customer authentication, unchanged)
-  ↓  Bruiser Gateway — customer concurrency, execution leases, policy, audit
-  ↓  Merchant ticketing / commerce system (verifies execution token)
+  ↓  Bruiser Gateway — authoritative control layer (Embedded, Edge or Proxy)
+  ↓  Merchant ticketing / commerce system
   ↓  Inventory
 ```
 
 Bruiser complements CDN, WAF, DDoS, waiting rooms, payments and ticketing. It
 replaces none of them.
 
-## 22. Principles
+## 22. Product philosophy
 
 1. Do not detect humans vs AI. Authenticate the customer, control the execution.
-2. Bruiser is authoritative at the admission point, or it is not deployed. Close
-   the bypass paths first.
-3. Enforcement never depends on the agent cooperating. Aware agents get a better
-   experience; unaware agents are still controlled.
+2. **Authority is the requirement. The deployment method is an implementation
+   detail.** Bruiser is sold as the authoritative control layer for
+   scarce-inventory execution, never as middleware, a proxy or an API gateway.
+   Embedded, Edge or Proxy is chosen from the merchant's existing infrastructure.
+   Bruiser is authoritative at the admission point, or it is not deployed. Close
+   the bypass paths first. A club that cannot achieve Authority Check PASS is not
+   production-ready.
+3. **Transparent enforcement.** Bruiser never relies on agents voluntarily
+   integrating. Bruiser-aware agents get explicit acquire, renew, handoff and
+   watch, and a better UX. Bruiser-unaware agents use the merchant's existing
+   authenticated session; Bruiser extracts identity and acquires the execution
+   automatically. The same concurrency rules apply. The merchant remains
+   protected regardless of the client.
 4. Separate discovery from allocation. Search is abundant; allocation is controlled.
 5. Denial needs no coordination; only grant does. Design around it.
-6. Never be a single point of failure unnecessarily. Prefer the enforcement
-   pattern that keeps Bruiser out of the data path when the merchant can support it.
+6. Never be a single point of failure unnecessarily. Prefer the deployment method
+   that keeps Bruiser out of the data path when the merchant can support it.
 7. The merchant remains in control — of infrastructure, data, identity and policy.
 8. Do not build a ticketing system, an identity system or a lock product. A lease
-   is not a hold; coordination technology is an implementation detail.
+   is not a hold; coordination technology is an implementation detail and does not
+   appear in customer-facing positioning.
 9. Fail closed on allocation, open on discovery.
 10. Do not over-engineer V1. The primitive must be flawless before anything else.
 
@@ -530,8 +639,8 @@ own policy and watches it enforced, revokes an execution, hands control to a
 browser, and answers "why was this request denied?" from the audit log.
 
 The result must be reliable, secure, observable, self-hostable, easy to integrate
-(a middleware, not a project), easy to demonstrate, and credible to an enterprise
-CTO on first read of the design.
+(a control layer, not a project), easy to demonstrate, and credible to an
+enterprise CTO on first read of the design.
 
 ## 25. Long-term vision
 
