@@ -471,6 +471,24 @@ func TestCooperativeHandoffRequiresHolder(t *testing.T) {
 	}
 }
 
+func TestCrossCustomerCannotRenew(t *testing.T) {
+	s := connect(t)
+	ctx := context.Background()
+	m := id.New("m")
+	_ = s.EnsureMerchant(ctx, m, "test", "secret")
+	alice := acquireReq(m, "alice", "agent-1", "event:iso")
+	insertSess(t, s, m, alice.SessionID, "alice", "agent", "agent-1")
+	g, err := s.Acquire(ctx, alice)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob := id.Session()
+	insertSess(t, s, m, bob, "bob", "agent", "agent-1")
+	if _, err := s.Renew(ctx, m, g.Execution.ID, bob, id.Request(), 5*time.Second); !errors.Is(err, lease.ErrNotHolder) {
+		t.Fatalf("bob renew alice err=%v want ErrNotHolder", err)
+	}
+}
+
 func TestAgentCannotPreemptBrowser(t *testing.T) {
 	s := connect(t)
 	ctx := context.Background()

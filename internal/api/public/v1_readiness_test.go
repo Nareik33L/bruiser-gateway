@@ -15,7 +15,6 @@ import (
 	"github.com/Nareik33L/bruiser-gateway/internal/auth"
 	"github.com/Nareik33L/bruiser-gateway/internal/config"
 	"github.com/Nareik33L/bruiser-gateway/internal/id"
-	"github.com/Nareik33L/bruiser-gateway/internal/merchant"
 	"github.com/Nareik33L/bruiser-gateway/internal/ops"
 	pgstore "github.com/Nareik33L/bruiser-gateway/internal/store/postgres"
 	"github.com/Nareik33L/bruiser-gateway/internal/testlab"
@@ -168,7 +167,7 @@ func TestFailOpenOnlyWhenConfigured(t *testing.T) {
 }
 
 func TestPersistenceAcrossReplica(t *testing.T) {
-	_, srvA, _, srvB, cfg := testlab.GatewayPair(t, merchant.Empty(""))
+	_, srvA, _, srvB, cfg := testlab.GatewayPair(t, testlab.ArsenalProfile(t))
 	tok := session(t, srvA, cfg, "alice", "agent-1")
 	got := acquireJSON(t, srvA, tok)
 	if got.StatusCode != http.StatusCreated {
@@ -207,7 +206,7 @@ func TestPersistenceAcrossReplica(t *testing.T) {
 }
 
 func TestRestartNewProcessSameStore(t *testing.T) {
-	lab := testlab.Start(t, merchant.Empty(""), nil)
+	lab := testlab.Start(t, testlab.ArsenalProfile(t), nil)
 	tok := session(t, lab.Server, lab.Cfg, "alice", "agent-1")
 	got := acquireJSON(t, lab.Server, tok)
 	if got.StatusCode != http.StatusCreated {
@@ -220,7 +219,7 @@ func TestRestartNewProcessSameStore(t *testing.T) {
 	}
 	t.Cleanup(store2.Close)
 	cfg2 := lab.Cfg
-	api2 := publicapi.New(cfg2, store2, lab.Signer, slog.New(slog.NewTextHandler(io.Discard, nil)), merchant.Empty(cfg2.MerchantID))
+	api2 := publicapi.New(cfg2, store2, lab.Signer, slog.New(slog.NewTextHandler(io.Discard, nil)), testlab.ArsenalProfile(t))
 	t.Cleanup(api2.Close)
 
 	e, err := store2.Get(context.Background(), cfg2.MerchantID, got.ID)

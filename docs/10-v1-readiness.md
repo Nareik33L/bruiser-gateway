@@ -42,13 +42,18 @@ make eaf-nightly
 | Resume is observed but not counted as a new origin forward | `TestMetricsResumeDoesNotCountForwarded` |
 | Distinct admin vs edge secrets in the lab | `internal/testlab` + `startServer` |
 
-## 2. FAIL — genuinely broken
+## 2. FAIL — remaining
 
-None found in the V1 surface after the fixes in this slice:
+None remaining in the V1 surface after the fixes below. These *were*
+broken and are closed in this slice:
 
-- EAF headline no longer hard-codes downstream = 1.
-- `ALREADY_HELD` / agent acquire outcomes are recorded; resume does not increment forwarded.
-- Admin secret is distinct from the edge secret in tests and is not accepted from the query string.
+- Cross-customer renew: `holderMatches` compared principal id only, so
+  Bob/`agent-1` could heartbeat Alice/`agent-1`. Now customer (and
+  merchant) must match.
+- Dry-run / 0% Proxy path did not stamp `X-Bruiser-Origin-Secret`, so
+  origin lockdown 403'd traffic that must “continue normally.”
+- EAF headline hard-coded downstream = 1; resume counted as forwarded.
+- Lab admin secret aliased the edge secret; `?secret=` leaked on `/admin`.
 
 If a later run of `make test-race` or `make eaf-nightly` fails, treat that failure as a production blocker.
 
