@@ -1,0 +1,16 @@
+/bin/
+/dist/
+/cover.out
+/cover.html
+*.exe
+*.test
+*.out
+.DS_Store
+.env
+.env.*
+!.env.example
+vendor/
+.idea/
+.vscode/
+*.swp
+tmp/

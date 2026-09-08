@@ -1,0 +1,113 @@
+openapi: 3.0.3
+info:
+  title: Bruiser Protocol
+  version: 0.1-draft
+  description: Authoritative control layer for scarce-inventory execution.
+servers:
+  - url: /
+paths:
+  /healthz:
+    get:
+      summary: Liveness
+      responses:
+        "200": { description: process is up }
+  /readyz:
+    get:
+      summary: Readiness (store reachable)
+      responses:
+        "200": { description: ready }
+        "503": { description: store unavailable }
+  /v1/sessions:
+    post:
+      summary: Exchange a customer assertion for a Bruiser session
+      security: [{ bearerAuth: [] }]
+      responses:
+        "201": { description: session created }
+        "401": { description: invalid assertion }
+  /v1/executions/acquire:
+    post:
+      summary: Acquire an execution lease
+      security: [{ bearerAuth: [] }]
+      responses:
+        "201": { description: GRANTED }
+        "200": { description: ALREADY_HELD }
+        "409": { description: BUSY }
+        "503": { description: store unavailable }
+  /v1/executions/{id}/renew:
+    post:
+      summary: Renew an execution lease
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: renewed }
+        "410": { description: gone }
+  /v1/executions/{id}/release:
+    post:
+      summary: Release an execution lease
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: released }
+  /v1/executions/{id}:
+    get:
+      summary: Execution status
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: status }
+  /v1/executions/{id}/watch:
+    get:
+      summary: Long-poll until execution state changes
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: current or updated status }
+  /v1/authorize:
+    post:
+      summary: Edge admission check (transparent acquire)
+      description: |
+        Called by a WAF/gateway/worker with the original method and path.
+        Controlled routes extract the merchant session and acquire an execution.
+        On ALLOW the Edge injects X-Bruiser-Execution, X-Bruiser-Fence and
+        X-Bruiser-Origin-Secret toward origin.
+      parameters:
+        - in: header
+          name: X-Original-Method
+          schema: { type: string }
+        - in: header
+          name: X-Original-URI
+          schema: { type: string }
+        - in: header
+          name: X-Bruiser-Edge-Secret
+          schema: { type: string }
+        - in: header
+          name: X-Bruiser-Event-Id
+          schema: { type: string }
+      responses:
+        "200": { description: ALLOW }
+        "401": { description: missing or invalid merchant session }
+        "403": { description: unrouted or DENIED }
+        "409": { description: BUSY }
+        "503": { description: store unavailable }
+  /.well-known/bruiser/jwks.json:
+    get:
+      summary: Execution-token public keys
+      responses:
+        "200": { description: JWKS }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer

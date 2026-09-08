@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+    branches: [main, "cursor/**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bruiser
+          POSTGRES_PASSWORD: bruiser
+          POSTGRES_DB: bruiser_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bruiser"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+      - name: Test
+        env:
+          BRUISER_TEST_DATABASE_URL: postgres://bruiser:bruiser@127.0.0.1:5432/bruiser_test?sslmode=disable
+        run: make ci
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build container
+        run: docker build -t bruiser-gateway:ci .
