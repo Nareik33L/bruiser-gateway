@@ -19,6 +19,7 @@ import (
 	"github.com/Nareik33L/bruiser-gateway/internal/auth"
 	"github.com/Nareik33L/bruiser-gateway/internal/config"
 	"github.com/Nareik33L/bruiser-gateway/internal/id"
+	"github.com/Nareik33L/bruiser-gateway/internal/merchant"
 	pgstore "github.com/Nareik33L/bruiser-gateway/internal/store/postgres"
 )
 
@@ -49,7 +50,7 @@ func startServer(t *testing.T) (*httptest.Server, config.Config) {
 		t.Fatal(err)
 	}
 	signer := auth.Signer{KID: key.KID, MerchantID: cfg.MerchantID, Private: key.Private, Public: key.Public}
-	h := publicapi.New(cfg, store, signer, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	h := publicapi.New(cfg, store, signer, slog.New(slog.NewTextHandler(io.Discard, nil)), merchant.Empty(cfg.MerchantID))
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	return srv, cfg

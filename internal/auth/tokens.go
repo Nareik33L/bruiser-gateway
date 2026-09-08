@@ -23,6 +23,7 @@ type CustomerAssertion struct {
 	MerchantID string
 	Anchors    map[string]string
 	ExpiresAt  time.Time
+	JTI        string
 }
 
 type SessionClaims struct {
@@ -126,8 +127,8 @@ func ParseAssertionHS256(token, secret, audience string) (CustomerAssertion, err
 		Anchors:    map[string]string{},
 		ExpiresAt:  exp.Time,
 	}
-	if aud, err := claims.GetAudience(); err == nil && len(aud) > 0 {
-		_ = audience
+	if v, ok := claims["jti"].(string); ok {
+		out.JTI = v
 	}
 	if raw, ok := claims["bruiser_anchors"].(map[string]any); ok {
 		for k, v := range raw {
@@ -159,10 +160,24 @@ func IssueDevAssertion(secret, customerID string, ttl time.Duration, anchors map
 		"aud": "bruiser",
 		"iat": time.Now().UTC().Unix(),
 		"exp": time.Now().UTC().Add(ttl).Unix(),
+		"jti": id.New("jti"),
 	}
 	if len(anchors) > 0 {
 		claims["bruiser_anchors"] = anchors
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return tok.SignedString([]byte(secret))
+}
+
+// IssueBoxOfficeSession mints the Arsenal-like box-office cookie: sub is the
+// 7-digit membership number. Each call gets a distinct jti so two logins of
+// the same member are two unaware principals (BUSY), while a copied cookie
+// is one principal (ALREADY_HELD).
+func IssueBoxOfficeSession(secret, membershipNo string, ttl time.Duration) (string, error) {
+	if ttl == 0 {
+		ttl = time.Hour
+	}
+	return IssueDevAssertion(secret, membershipNo, ttl, map[string]string{
+		"membership_no": membershipNo,
+	})
 }

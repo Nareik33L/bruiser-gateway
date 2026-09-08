@@ -20,6 +20,7 @@ import (
 	"github.com/Nareik33L/bruiser-gateway/internal/auth"
 	"github.com/Nareik33L/bruiser-gateway/internal/config"
 	"github.com/Nareik33L/bruiser-gateway/internal/id"
+	"github.com/Nareik33L/bruiser-gateway/internal/merchant"
 	pgstore "github.com/Nareik33L/bruiser-gateway/internal/store/postgres"
 )
 
@@ -62,7 +63,7 @@ func main() {
 			os.Exit(1)
 		}
 		defer st.Close()
-		h := publicapi.New(cfg, st, signer, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		h := publicapi.New(cfg, st, signer, slog.New(slog.NewTextHandler(io.Discard, nil)), merchant.Empty(cfg.MerchantID))
 		srvs[i] = httptest.NewServer(h)
 		defer srvs[i].Close()
 	}

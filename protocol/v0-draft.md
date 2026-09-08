@@ -18,7 +18,7 @@ The Go gateway is one implementation of this protocol.
 | GET | `GET /v1/executions/{id}` | yes |
 | REVOKE | `POST /v1/executions/{id}/revoke` | M5 |
 | HANDOFF | `POST /v1/executions/{id}/handoff` | M5 |
-| AUTHORIZE | `POST /v1/authorize` | M3 (Edge) |
+| AUTHORIZE | `POST /v1/authorize` | yes (Edge) |
 | INTROSPECT | `POST /v1/introspect` | M3 |
 
 ## Identity
@@ -48,3 +48,14 @@ serialises on the domain.
 
 BUSY response: 409 with `active_execution_id`, `holder`, `expires_at`,
 `retry_after_ms`, `watch`, `can_preempt`.
+
+## AUTHORIZE (Edge)
+
+`POST /v1/authorize` is the Edge admission check. The WAF/gateway/worker
+sends the original method and path (`X-Original-Method`, `X-Original-URI`,
+or JSON `{method,path,event_id}`), the merchant session cookie, and
+`X-Bruiser-Edge-Secret`. Bruiser maps the route, extracts the customer,
+acquires transparently if the route is controlled, and returns `ALLOW` plus
+`X-Bruiser-Execution` / `X-Bruiser-Fence` / `X-Bruiser-Origin-Secret`, or
+`409 BUSY`. Uncontrolled routes (search) return `ALLOW` without a lease.
+

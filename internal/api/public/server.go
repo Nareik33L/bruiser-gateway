@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -20,6 +21,7 @@ import (
 	"github.com/Nareik33L/bruiser-gateway/internal/config"
 	"github.com/Nareik33L/bruiser-gateway/internal/id"
 	"github.com/Nareik33L/bruiser-gateway/internal/lease"
+	"github.com/Nareik33L/bruiser-gateway/internal/merchant"
 	pgstore "github.com/Nareik33L/bruiser-gateway/internal/store/postgres"
 )
 
@@ -32,23 +34,87 @@ var (
 		Name: "bruiser_store_unavailable",
 		Help: "Store unavailability events.",
 	})
+	allocationAttempts = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "bruiser_allocation_attempts_total",
+		Help: "Incoming scarce-inventory requests Bruiser saw.",
+	}, []string{"resource", "outcome"})
+	executionsForwarded = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "bruiser_executions_forwarded_total",
+		Help: "Authorised allocation requests forwarded toward origin.",
+	}, []string{"resource"})
+	observedEAF = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "bruiser_observed_eaf",
+		Help: "Incoming allocation attempts divided by authorised executions forwarded.",
+	}, []string{"resource"})
+	downstreamEAF = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "bruiser_downstream_eaf",
+		Help: "Authorised executions forwarded divided by distinct customers who attempted.",
+	}, []string{"resource"})
 )
 
-type Server struct {
-	cfg    config.Config
-	store  *pgstore.Store
-	leases lease.Store
-	signer auth.Signer
-	log    *slog.Logger
+type eafAcc struct {
+	mu        sync.Mutex
+	attempts  map[string]float64
+	forwarded map[string]float64
+	customers map[string]map[string]struct{}
 }
 
-func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.Logger) http.Handler {
+func newEAFAcc() *eafAcc {
+	return &eafAcc{
+		attempts:  map[string]float64{},
+		forwarded: map[string]float64{},
+		customers: map[string]map[string]struct{}{},
+	}
+}
+
+func (a *eafAcc) record(resource, customer, outcome string) {
+	if a == nil || resource == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.attempts[resource]++
+	allocationAttempts.WithLabelValues(resource, outcome).Inc()
+	if outcome == "allow" {
+		a.forwarded[resource]++
+		executionsForwarded.WithLabelValues(resource).Inc()
+	}
+	if customer != "" {
+		if a.customers[resource] == nil {
+			a.customers[resource] = map[string]struct{}{}
+		}
+		a.customers[resource][customer] = struct{}{}
+	}
+	att := a.attempts[resource]
+	fwd := a.forwarded[resource]
+	if fwd > 0 {
+		observedEAF.WithLabelValues(resource).Set(att / fwd)
+	}
+	n := float64(len(a.customers[resource]))
+	if n > 0 {
+		downstreamEAF.WithLabelValues(resource).Set(fwd / n)
+	}
+}
+
+type Server struct {
+	cfg     config.Config
+	store   *pgstore.Store
+	leases  lease.Store
+	signer  auth.Signer
+	log     *slog.Logger
+	profile merchant.Profile
+	eaf     *eafAcc
+}
+
+func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.Logger, profile merchant.Profile) http.Handler {
 	s := &Server{
-		cfg:    cfg,
-		store:  store,
-		leases: lease.NewBusyCache(store, 50),
-		signer: signer,
-		log:    log,
+		cfg:     cfg,
+		store:   store,
+		leases:  lease.NewBusyCache(store, 50),
+		signer:  signer,
+		log:     log,
+		profile: profile,
+		eaf:     newEAFAcc(),
 	}
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -61,6 +127,7 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 	r.Get("/.well-known/bruiser/protocol", s.protocol)
 	r.Route("/v1", func(r chi.Router) {
 		r.Post("/sessions", s.createSession)
+		r.Post("/authorize", s.authorize)
 		r.Group(func(r chi.Router) {
 			r.Use(s.sessionAuth)
 			r.Post("/executions/acquire", s.acquire)
@@ -96,7 +163,7 @@ func (s *Server) protocol(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"protocol":     "bruiser",
 		"version":      "0.1-draft",
-		"capabilities": []string{"IDENTITY", "ACQUIRE", "RENEW", "RELEASE", "WATCH"},
+		"capabilities": []string{"IDENTITY", "ACQUIRE", "RENEW", "RELEASE", "WATCH", "AUTHORIZE"},
 	})
 }
 
@@ -260,14 +327,14 @@ func (s *Server) acquire(w http.ResponseWriter, r *http.Request) {
 			retry = time.Second
 		}
 		writeJSON(w, http.StatusConflict, map[string]any{
-			"status":               "BUSY",
-			"domain":               domain,
-			"active_execution_id":  res.Busy.ActiveExecutionID,
-			"holder":               map[string]string{"type": res.Busy.Holder.Type, "id": res.Busy.Holder.ID},
-			"expires_at":           res.Busy.ExpiresAt.UTC().Format(time.RFC3339Nano),
-			"retry_after_ms":       retry.Milliseconds(),
-			"watch":                "/v1/executions/" + res.Busy.ActiveExecutionID + "/watch",
-			"can_preempt":          res.Busy.CanPreempt,
+			"status":              "BUSY",
+			"domain":              domain,
+			"active_execution_id": res.Busy.ActiveExecutionID,
+			"holder":              map[string]string{"type": res.Busy.Holder.Type, "id": res.Busy.Holder.ID},
+			"expires_at":          res.Busy.ExpiresAt.UTC().Format(time.RFC3339Nano),
+			"retry_after_ms":      retry.Milliseconds(),
+			"watch":               "/v1/executions/" + res.Busy.ActiveExecutionID + "/watch",
+			"can_preempt":         res.Busy.CanPreempt,
 		})
 	default:
 		writeErr(w, http.StatusForbidden, res.Reason)
@@ -350,19 +417,19 @@ func (s *Server) watch(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) writeExecution(w http.ResponseWriter, status int, e *lease.Execution, includeToken bool) {
 	body := map[string]any{
-		"execution_id":     e.ID,
-		"status":           e.State,
-		"domain":           e.DomainKey,
-		"resource":         e.Resource,
-		"action":           e.Action,
-		"customer_id":      e.CustomerID,
-		"principal":        map[string]string{"type": e.Principal.Type, "id": e.Principal.ID},
-		"fence":            e.Fence,
-		"granted_at":       e.GrantedAt.UTC().Format(time.RFC3339Nano),
-		"expires_at":       e.ExpiresAt.UTC().Format(time.RFC3339Nano),
-		"max_lifetime_at":  e.MaxLifetimeAt.UTC().Format(time.RFC3339Nano),
-		"renew_count":      e.RenewCount,
-		"rule_name":        e.RuleName,
+		"execution_id":    e.ID,
+		"status":          e.State,
+		"domain":          e.DomainKey,
+		"resource":        e.Resource,
+		"action":          e.Action,
+		"customer_id":     e.CustomerID,
+		"principal":       map[string]string{"type": e.Principal.Type, "id": e.Principal.ID},
+		"fence":           e.Fence,
+		"granted_at":      e.GrantedAt.UTC().Format(time.RFC3339Nano),
+		"expires_at":      e.ExpiresAt.UTC().Format(time.RFC3339Nano),
+		"max_lifetime_at": e.MaxLifetimeAt.UTC().Format(time.RFC3339Nano),
+		"renew_count":     e.RenewCount,
+		"rule_name":       e.RuleName,
 	}
 	if e.EndReason != "" {
 		body["end_reason"] = e.EndReason
@@ -380,10 +447,10 @@ func (s *Server) mutationError(w http.ResponseWriter, err error) {
 	var gone *lease.GoneError
 	if errors.As(err, &gone) {
 		writeJSON(w, http.StatusGone, map[string]any{
-			"error":         "gone",
-			"reason":        gone.Reason,
-			"execution_id":  gone.ExecutionID,
-			"successor_id":  gone.SuccessorID,
+			"error":        "gone",
+			"reason":       gone.Reason,
+			"execution_id": gone.ExecutionID,
+			"successor_id": gone.SuccessorID,
 		})
 		return
 	}

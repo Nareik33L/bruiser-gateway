@@ -141,6 +141,13 @@ conversations; the integration-discovery questionnaire
 ([06-integration-discovery.md](06-integration-discovery.md)) feeds it. Stage A
 discovery should already be underway before this milestone starts.
 
+**Standing analogue until discovery.** Engineering does not wait on a club
+call. The lab merchant is an unverified Arsenal-like profile
+([07-club-profile-arsenal.md](07-club-profile-arsenal.md), ADR-022): platform
+box office, membership-number identity, Edge first, Embedded blocked. Invented
+routes and SimTix are labelled as guesses and are replaced when a questionnaire
+comes back.
+
 Scope
 
 - **Embedded — in-application middleware.** Token verification rules and
@@ -186,6 +193,15 @@ Exit criteria
 - 1 customer × 10,000 unaware/aware agents against SimTix reports observed EAF
   ≈ 10,000× and downstream EAF = 1×.
 - A Node and a Python sample app verify tokens using the SDKs, in CI.
+
+**Landed against the Arsenal-like analogue (this tree).** `POST /v1/authorize`
+with cookie-JWT extraction; `configs/arsenal.yaml` route rules; SimTix origin
+with optional origin lockdown; Go Edge analogue (`internal/edge`) plus NGINX
+`auth_request` reference; `bruiser authority-check` in the product-feature
+PASS/FAIL format; unaware two-login BUSY vs same-cookie ALREADY_HELD; EAF
+counters/gauges on the authorize path. Still open: Embedded SDKs, Proxy
+method, per-execution rate limit (in-flight is in the Edge analogue), 1×10,000
+EAF demo, Node/Python SDKs, `AUTHORITY_CHECK` audit persistence.
 
 ---
 

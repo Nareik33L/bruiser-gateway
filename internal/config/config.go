@@ -8,18 +8,21 @@ import (
 )
 
 type Config struct {
-	HTTPAddr       string
-	DatabaseURL    string
-	DevHMACSecret  string
-	MerchantID     string
-	MerchantName   string
-	LeaseTTL       time.Duration
-	MaxLifetime    time.Duration
-	MaxActive      int
-	SessionTTL     time.Duration
-	LogLevel       string
-	ReadyTimeout   time.Duration
-	SweepInterval  time.Duration
+	HTTPAddr      string
+	DatabaseURL   string
+	DevHMACSecret string
+	MerchantID    string
+	MerchantName  string
+	LeaseTTL      time.Duration
+	MaxLifetime   time.Duration
+	MaxActive     int
+	SessionTTL    time.Duration
+	LogLevel      string
+	ReadyTimeout  time.Duration
+	SweepInterval time.Duration
+	EdgeSecret    string
+	OriginSecret  string
+	ProfilePath   string
 }
 
 func Load() Config {
@@ -36,6 +39,9 @@ func Load() Config {
 		LogLevel:      env("BRUISER_LOG_LEVEL", "info"),
 		ReadyTimeout:  envDuration("BRUISER_READY_TIMEOUT", 2*time.Second),
 		SweepInterval: envDuration("BRUISER_SWEEP_INTERVAL", 2*time.Second),
+		EdgeSecret:    env("BRUISER_EDGE_SECRET", "edge-secret-dev"),
+		OriginSecret:  env("BRUISER_ORIGIN_SECRET", "origin-lock-dev"),
+		ProfilePath:   env("BRUISER_PROFILE", "configs/arsenal.yaml"),
 	}
 }
 

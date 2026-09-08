@@ -58,4 +58,27 @@ func TestRoundTripSessionAndExecution(t *testing.T) {
 	if a.CustomerID != "alice" || a.Anchors["membership_no"] != "1" {
 		t.Fatalf("%+v", a)
 	}
+	if a.JTI == "" {
+		t.Fatal("missing jti")
+	}
+
+	c1, err := IssueBoxOfficeSession("secret", "1001234", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c2, err := IssueBoxOfficeSession("secret", "1001234", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b1, err := ParseAssertionHS256(c1, "secret", "bruiser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2, err := ParseAssertionHS256(c2, "secret", "bruiser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b1.CustomerID != "1001234" || b1.JTI == b2.JTI {
+		t.Fatalf("want distinct jti for two logins: %+v %+v", b1, b2)
+	}
 }

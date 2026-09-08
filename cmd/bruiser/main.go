@@ -13,6 +13,7 @@ import (
 	"github.com/Nareik33L/bruiser-gateway/internal/api/public"
 	"github.com/Nareik33L/bruiser-gateway/internal/auth"
 	"github.com/Nareik33L/bruiser-gateway/internal/config"
+	"github.com/Nareik33L/bruiser-gateway/internal/merchant"
 	pgstore "github.com/Nareik33L/bruiser-gateway/internal/store/postgres"
 )
 
@@ -31,6 +32,8 @@ func main() {
 		err = cmdMigrate(cfg, log)
 	case "assertion":
 		err = cmdAssertion(cfg)
+	case "authority-check":
+		err = cmdAuthorityCheck()
 	default:
 		usage()
 		os.Exit(2)
@@ -42,7 +45,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: bruiser <serve|migrate|assertion>\n")
+	fmt.Fprintf(os.Stderr, "usage: bruiser <serve|migrate|assertion|authority-check>\n")
 }
 
 func cmdMigrate(cfg config.Config, log *slog.Logger) error {
@@ -88,7 +91,7 @@ func cmdServe(cfg config.Config, log *slog.Logger) error {
 	sweeperStop := make(chan struct{})
 	go sweep(store, cfg.SweepInterval, log, sweeperStop)
 
-	handler := publicapi.New(cfg, store, signer, log)
+	handler := publicapi.New(cfg, store, signer, log, loadProfile(cfg, log))
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           handler,
@@ -144,18 +147,29 @@ func sweep(store *pgstore.Store, every time.Duration, log *slog.Logger, stop <-c
 }
 
 func cmdAssertion(cfg config.Config) error {
-	customer := "cust_alice"
+	customer := "1001234"
 	if len(os.Args) > 2 {
 		customer = os.Args[2]
 	}
-	tok, err := auth.IssueDevAssertion(cfg.DevHMACSecret, customer, time.Hour, map[string]string{
-		"membership_no": "ARS-00123456",
-	})
+	tok, err := auth.IssueBoxOfficeSession(cfg.DevHMACSecret, customer, time.Hour)
 	if err != nil {
 		return err
 	}
 	fmt.Println(tok)
 	return nil
+}
+
+func loadProfile(cfg config.Config, log *slog.Logger) merchant.Profile {
+	p, err := merchant.LoadFile(cfg.ProfilePath)
+	if err != nil {
+		log.Warn("profile file missing; using empty profile", "path", cfg.ProfilePath, "err", err)
+		return merchant.Empty(cfg.MerchantID)
+	}
+	if p.MerchantID == "" {
+		p.MerchantID = cfg.MerchantID
+	}
+	log.Info("loaded merchant profile", "merchant", p.MerchantID, "routes", len(p.Routes))
+	return p
 }
 
 func parseLevel(s string) slog.Level {

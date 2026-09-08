@@ -275,3 +275,29 @@ are implementation details.
 **Why.** Founder product principle. Selling a lock or a proxy invites a build-vs-buy
 comparison Bruiser loses; selling authority invites a fairness conversation Bruiser
 wins.
+
+## ADR-022 — Arsenal-like profile is the standing lab analogue until discovery
+
+**Decision.** Until Stage A discovery confirms a design partner, engineering
+builds against an **unverified Arsenal-like** Premier League club profile
+(`docs/07-club-profile-arsenal.md`, `configs/arsenal.yaml`). It is a working
+model of a club whose box office is a platform (Ticketmaster eTicketing
+shape), whose customer id is a membership number, and whose viable V1 path
+is **Edge** (Embedded blocked until a platform hook exists). Nothing in the
+profile is a claim that Arsenal FC is a customer.
+
+**Why.** Founder instruction to proceed on best-guess assumptions for a club
+like Arsenal until discovery can confirm. Waiting on a call would stall M3;
+a wrong-but-explicit analogue is cheaper to replace than an invented generic
+shop.
+
+**Consequences.** Lab merchant id `arsenal`; cookie `boxoffice_session`;
+invented hold/purchase paths; SimTix is the origin analogue; Authority Check
+targets those paths. Every row is tagged unverified and must be overwritten
+the moment a discovery call lands. If discovery finds the club cannot front
+the box office and has no hook, this profile is not a V1 customer — the lab
+remains useful for clubs that look like a simpler version of the same model.
+
+**Revisit when.** First Stage A questionnaire comes back; replace or fork the
+profile rather than silently drifting.
+

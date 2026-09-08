@@ -74,6 +74,33 @@ paths:
           schema: { type: string }
       responses:
         "200": { description: current or updated status }
+  /v1/authorize:
+    post:
+      summary: Edge admission check (transparent acquire)
+      description: |
+        Called by a WAF/gateway/worker with the original method and path.
+        Controlled routes extract the merchant session and acquire an execution.
+        On ALLOW the Edge injects X-Bruiser-Execution, X-Bruiser-Fence and
+        X-Bruiser-Origin-Secret toward origin.
+      parameters:
+        - in: header
+          name: X-Original-Method
+          schema: { type: string }
+        - in: header
+          name: X-Original-URI
+          schema: { type: string }
+        - in: header
+          name: X-Bruiser-Edge-Secret
+          schema: { type: string }
+        - in: header
+          name: X-Bruiser-Event-Id
+          schema: { type: string }
+      responses:
+        "200": { description: ALLOW }
+        "401": { description: missing or invalid merchant session }
+        "403": { description: unrouted or DENIED }
+        "409": { description: BUSY }
+        "503": { description: store unavailable }
   /.well-known/bruiser/jwks.json:
     get:
       summary: Execution-token public keys

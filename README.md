@@ -20,8 +20,8 @@ make serve
 Or: `docker compose -f deploy/compose/docker-compose.yml up --build`
 
 ```bash
-# Dev customer assertion (HMAC JWT)
-TOKEN=$(./bin/bruiser assertion cust_alice)
+# Dev customer assertion (HMAC JWT, membership number)
+TOKEN=$(./bin/bruiser assertion 1001234)
 
 # Session for an agent
 SESSION=$(curl -sS -X POST localhost:8080/v1/sessions \
@@ -38,6 +38,12 @@ curl -sS -X POST localhost:8080/v1/executions/acquire \
 
 A second agent for the same customer and resource receives `409 BUSY`.
 
+Dev assertions default to membership `1001234` (Alice in the Arsenal-like lab):
+
+```bash
+./bin/bruiser assertion 1001234
+```
+
 `GET /healthz` liveness, `GET /readyz` store readiness, `GET /metrics` Prometheus.
 
 ## Documents
@@ -50,6 +56,7 @@ A second agent for the same customer and resource receives `409 BUSY`.
 | [docs/04-decisions.md](docs/04-decisions.md) | Architecture decision log |
 | [docs/05-decisions-from-founder-review.md](docs/05-decisions-from-founder-review.md) | Founder decisions |
 | [docs/06-integration-discovery.md](docs/06-integration-discovery.md) | Stage A discovery questionnaire |
+| [docs/07-club-profile-arsenal.md](docs/07-club-profile-arsenal.md) | Unverified Arsenal-like standing analogue |
 | [protocol/v0-draft.md](protocol/v0-draft.md) | Bruiser Protocol v0 draft |
 
 ## Licensing (intended, pending legal review)
@@ -59,7 +66,29 @@ No licence files are committed until the OSS/Core boundary is formally decided.
 
 ## Status
 
-M0 foundations, M1 execution-lease primitive, and an M2 thesis check
-(multiple in-process gateways, many agents, exactly one ACTIVE execution)
-are in this tree. Embedded / Edge / Proxy, the Authority Check and SimTix
-(M3) come next. Stage A commercial discovery runs in parallel.
+M0–M2 are in this tree. M3 Edge is standing up against an **unverified
+Arsenal-like** club profile (`docs/07-club-profile-arsenal.md`,
+`configs/arsenal.yaml`) until Stage A discovery confirms or replaces it:
+`POST /v1/authorize`, transparent acquire from `boxoffice_session`, SimTix
+origin + Edge analogue, `bruiser authority-check`. Embedded SDKs, Proxy, and
+the 1×10,000 EAF demo remain. Stage A commercial discovery runs in parallel.
+
+## Arsenal-like lab (best guess until discovery)
+
+Identity is a 7-digit membership number. The box office is treated as a
+platform origin Bruiser sits in front of (Edge), not club-owned checkout
+(Embedded). Invented allocation routes: `POST /api/events/{event}/holds` and
+`POST /api/orders`.
+
+```bash
+export BRUISER_DATABASE_URL=postgres://bruiser:bruiser@127.0.0.1:5432/bruiser?sslmode=disable
+make serve          # :8080  — gateway, merchant arsenal
+make simtix         # :8090 origin (lockdown), :8091 Edge analogue
+make authority-check
+```
+
+Two logins of membership `1001234` against `POST /api/events/ars-che/holds`
+via the Edge: first hold is created, second session receives `409 BUSY`.
+The same cookie is `ALREADY_HELD`. Direct origin holds without
+`X-Bruiser-Origin-Secret` are `403`. With origin lockdown off, Authority
+Check reports Overall Result FAIL and names the open path.
