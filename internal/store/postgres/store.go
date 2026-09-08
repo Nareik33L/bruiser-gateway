@@ -76,6 +76,17 @@ func Migrate(ctx context.Context, url string) error {
 func migrateDB(ctx context.Context, db *sql.DB) error {
 	migrateMu.Lock()
 	defer migrateMu.Unlock()
+	lock, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if _, err := lock.ExecContext(ctx, `select pg_advisory_lock(872514001)`); err != nil {
+		return fmt.Errorf("migration lock: %w", err)
+	}
+	defer func() {
+		_, _ = lock.ExecContext(context.Background(), `select pg_advisory_unlock(872514001)`)
+	}()
 	if _, err := db.ExecContext(ctx, `
 		create table if not exists schema_migrations (
 			filename text primary key,

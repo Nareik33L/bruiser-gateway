@@ -1,5 +1,5 @@
 -- +goose Up
-create table runtime_controls (
+create table if not exists runtime_controls (
     merchant_id         text primary key,
     mode                text not null default 'enforce',
     enforcement         boolean not null default true,
@@ -12,7 +12,7 @@ create table runtime_controls (
     updated_by          text
 );
 
-create table dry_run_holds (
+create table if not exists dry_run_holds (
     hold_id      text primary key,
     merchant_id  text not null,
     domain_key   text not null,
@@ -25,9 +25,9 @@ create table dry_run_holds (
     created_at   timestamptz not null default now(),
     expires_at   timestamptz not null
 );
-create index dry_run_holds_domain on dry_run_holds (merchant_id, domain_key, kind);
+create index if not exists dry_run_holds_domain on dry_run_holds (merchant_id, domain_key, kind);
 
-create table dry_run_events (
+create table if not exists dry_run_events (
     seq          bigserial primary key,
     merchant_id  text not null,
     at           timestamptz not null default now(),
@@ -40,7 +40,7 @@ create table dry_run_events (
     rule_name    text,
     request_id   text
 );
-create index dry_run_events_merchant_at on dry_run_events (merchant_id, at desc);
+create index if not exists dry_run_events_merchant_at on dry_run_events (merchant_id, at desc);
 
 -- +goose Down
 drop table if exists dry_run_events;
