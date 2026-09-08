@@ -67,6 +67,52 @@ func TestBoundedQueuePromoteOnRelease(t *testing.T) {
 	}
 }
 
+func TestQueueDoesNotLineUpOtherCustomers(t *testing.T) {
+	s := connect(t)
+	ctx := context.Background()
+	m := id.New("m")
+	if err := s.EnsureMerchant(ctx, m, "test", "secret"); err != nil {
+		t.Fatal(err)
+	}
+
+	alice := acquireReq(m, "alice", "agent-1", "event:derby")
+	g, err := s.Acquire(ctx, alice)
+	if err != nil || g.Status != lease.StatusGranted {
+		t.Fatalf("alice grant: %+v %v", g, err)
+	}
+
+	alice2 := acquireReq(m, "alice", "agent-2", "event:derby")
+	alice2.MaxWaiters = 1
+	q, err := s.Acquire(ctx, alice2)
+	if err != nil || q.Status != lease.StatusQueued {
+		t.Fatalf("alice waiter: %+v %v", q, err)
+	}
+
+	// Bob is a different customer on the same resource: different domain.
+	// He must GRANT immediately — not sit behind Alice.
+	bob := acquireReq(m, "bob", "agent-1", "event:derby")
+	bob.MaxWaiters = 1
+	bg, err := s.Acquire(ctx, bob)
+	if err != nil || bg.Status != lease.StatusGranted {
+		t.Fatalf("bob must GRANT independently, got %+v %v", bg, err)
+	}
+	if bg.Execution.ID == g.Execution.ID || bg.Execution.DomainKey == g.Execution.DomainKey {
+		t.Fatalf("bob shared alice domain %s", bg.Execution.DomainKey)
+	}
+
+	if _, err := s.Release(ctx, m, g.Execution.ID, alice.SessionID, id.Request()); err != nil {
+		t.Fatal(err)
+	}
+	promoted, err := s.Get(ctx, m, q.Queue.WaiterID)
+	if err != nil || promoted.State != lease.StateActive || promoted.CustomerID != "alice" {
+		t.Fatalf("alice waiter should proceed: %+v %v", promoted, err)
+	}
+	still, err := s.Get(ctx, m, bg.Execution.ID)
+	if err != nil || still.State != lease.StateActive || still.CustomerID != "bob" {
+		t.Fatalf("bob must stay ACTIVE: %+v %v", still, err)
+	}
+}
+
 func TestLeaveQueue(t *testing.T) {
 	s := connect(t)
 	ctx := context.Background()

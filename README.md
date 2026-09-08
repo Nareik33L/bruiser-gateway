@@ -37,7 +37,9 @@ curl -sS -X POST localhost:8080/v1/executions/acquire \
 ```
 
 A second agent for the same customer and resource receives `409 BUSY`
-(or `202 QUEUED` when the rule sets `waiting.mode: bounded`).
+(or `202 QUEUED` when the rule sets `waiting.mode: bounded`). That queue
+is intra-customer concurrency — Alice’s extra agents wait for Alice, not
+behind Bob. A second customer on the same resource is granted independently.
 
 Drop-in: copy `configs/example.yaml`, list your hold/purchase routes, point
 Edge or Proxy at the origin you already have. Unmatched traffic passes

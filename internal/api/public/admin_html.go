@@ -75,7 +75,8 @@ a{color:var(--gold)}
     <tbody id="execs"></tbody></table>
   </section>
   <section style="grid-column:1/-1">
-    <h2>Intra-customer queue</h2>
+    <h2>Same-customer waiters</h2>
+    <p class="sub">Not a waiting room. Extra agents of one customer, waiting for that customer’s next execution.</p>
     <table><thead><tr><th>Customer</th><th>Principal</th><th>Resource</th><th>Expires</th></tr></thead>
     <tbody id="waiters"></tbody></table>
   </section>

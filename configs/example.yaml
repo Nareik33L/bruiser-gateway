@@ -46,7 +46,9 @@ policy:
       scope: [customer, resource]
       max_active: 1
       precedence: [browser, agent]
-      # Optional: one ACTIVE, one QUEUED, further agents BUSY.
+      # Optional intra-customer concurrency (not a waiting room):
+      # one ACTIVE for this customer; extra agents QUEUED, then BUSY.
+      # A second customer on the same resource is a different domain.
       # waiting: { mode: bounded, max_waiters: 1 }
     - name: discovery
       match: { action: [search] }

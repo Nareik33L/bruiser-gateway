@@ -46,9 +46,11 @@ type Rule struct {
 	Waiting         Waiting  `yaml:"waiting" json:"waiting"`
 }
 
-// Waiting is an optional intra-customer queue. Inter-customer waiting rooms
-// stay out of scope. mode "bounded" with max_waiters N: N waiters get QUEUED,
-// further agents get BUSY.
+// Waiting is optional intra-customer concurrency, not a waiting room.
+// One customer: one ACTIVE (or max_active); extra agents of that customer
+// may QUEUED up to max_waiters, then BUSY. A second customer is a different
+// domain and is never lined up behind the first. Inter-customer rooms
+// (Queue-it etc.) stay out of scope.
 type Waiting struct {
 	Mode       string `yaml:"mode" json:"mode"`
 	MaxWaiters int    `yaml:"max_waiters" json:"max_waiters"`

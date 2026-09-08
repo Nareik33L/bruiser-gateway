@@ -5,8 +5,10 @@
 ### Added
 
 - Optional bounded intra-customer queue (`waiting.mode: bounded`, `max_waiters`).
-  One ACTIVE, up to N QUEUED (HTTP 202), overflow BUSY. Promote on release,
-  revoke, and expire. Same principal re-acquire while queued is idempotent.
+  Customer-concurrency only: one ACTIVE per customer/domain; extra agents of
+  that customer QUEUED (HTTP 202), overflow BUSY. A second customer is never
+  lined up behind the first. Promote on release, revoke, and expire. Same
+  principal re-acquire while queued is idempotent.
 - OIDC / JWKS identity extractor (`identity.extractor: oidc`, `jwks_url`).
   RS256, EdDSA, optional issuer/audience. JWKS cached 5 minutes.
 - Agent-side Go client (`sdk/go` `Client`: session, acquire, renew, release, get).

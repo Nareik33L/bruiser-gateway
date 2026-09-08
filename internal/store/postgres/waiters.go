@@ -1,5 +1,11 @@
 package postgres
 
+// Waiters are intra-customer only. The domain key already includes
+// customer=, so Alice's agents never share a line with Bob. One customer
+// has one ACTIVE execution; extra agents of that customer may wait; when
+// that execution ends the next permitted one proceeds. This is not a
+// waiting room.
+
 import (
 	"context"
 	"errors"

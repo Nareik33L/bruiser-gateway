@@ -435,20 +435,34 @@ fourth placement is required.
 
 ## ADR-029 — Optional bounded intra-customer queue
 
-**Decision.** Default remains BUSY. When a rule sets `waiting.mode: bounded`
-and `max_waiters: N`, further agents of the **same customer / same domain**
-are QUEUED (HTTP 202) up to N, then BUSY. Release, revoke, and expiry promote
-the oldest waiter to a fenced GRANT. Same principal already waiting is
-idempotent. Inter-customer waiting rooms stay out of scope. The busy cache
+**Decision.** The queue is a **customer-concurrency** mechanism, not a
+waiting room. Invariant:
+
+> One customer can have one active execution (or `max_active`) on a scarcity
+> domain. Additional agents of *that same customer* become waiters. When the
+> execution ends, the next permitted execution of that customer can proceed.
+
+Default remains BUSY. When a rule sets `waiting.mode: bounded` and
+`max_waiters: N`, further agents of the **same customer / same domain** are
+QUEUED (HTTP 202) up to N, then BUSY. Release, revoke, and expiry promote the
+oldest waiter of that domain to a fenced GRANT. Same principal already waiting
+is idempotent. A second customer on the same resource is a **different
+domain** and is granted independently.
+
+Inter-customer waiting rooms (Queue-it, Cloudflare Waiting Room, lotteries)
+stay out of scope. Bruiser must not order Alice behind Bob. The busy cache
 does not answer locally when `MaxWaiters > 0`.
 
-**Why.** v2.4 asks for optional coalescing so 10,000 agents do not independently
-retry origin, without becoming a public waiting-room product.
+**Why.** v2.4 asks for optional coalescing so 10,000 agents of one customer do
+not independently retry origin. That is still “one customer remains one
+customer.” Becoming a public waiting-room product muddies the proposition
+(ADR-006).
 
-**Consequences.** Waiter rows live in Postgres, serialised on the domain lock.
-Promote uses the waiter id as the execution id so watch/GET keep working.
-Overflow is still BUSY.
+**Consequences.** Waiter rows live in Postgres, serialised on the domain lock
+(domain key already includes `customer=`). Promote uses the waiter id as the
+execution id so watch/GET keep working. Overflow is still BUSY.
 
-**Revisit when.** Merchants need fair inter-customer queues (explicitly out of
-scope) or durable wait longer than `max_lifetime`.
+**Revisit when.** Merchants need fair inter-customer queues (explicitly a
+product decision, not a technical one) or durable wait longer than
+`max_lifetime`.
 
