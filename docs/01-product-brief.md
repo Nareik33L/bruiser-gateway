@@ -25,6 +25,23 @@ enterprise due-diligence. The concrete design lives in
 | 9 | **Agent-side adoption path added.** SDKs and an MCP/tool definition so agent frameworks speak Bruiser natively. | The protocol only becomes a standard if agents implement it, not just merchants. |
 | 10 | **Calendar estimates removed from the plan; replaced by milestones with exit criteria.** | Milestones are verifiable; dates are not. |
 
+### v2.1 — incorporating founder decisions
+
+Founder answers to the open questions (recorded in
+[05-decisions-from-founder-review.md](05-decisions-from-founder-review.md)) changed
+the following:
+
+| # | Change | Source |
+|---|--------|--------|
+| 11 | **Authority is a requirement, not a mode.** Bruiser must be authoritative over the protected allocation operation. Integration is defined as closing every path to `hold`/`purchase` that does not pass Bruiser's admission check. Three enforcement patterns are offered (in-app middleware, edge/API-gateway integration, Bruiser reverse proxy); the merchant picks whichever makes Bruiser authoritative in their environment. | Q2, Q13 |
+| 12 | **Enforcement must work for agents that have never heard of Bruiser.** In edge and proxy patterns Bruiser derives the customer from the merchant's existing authenticated session and acquires the execution *transparently*. Bruiser-aware agents get a better experience (watch, handoff, explicit renew); unaware agents are still controlled. Agent-facing tooling (SDKs, MCP) is convenience, never the enforcement mechanism. | Q8, Q13 |
+| 13 | **Identity anchors to the club's existing supporter identity.** Membership/supporter IDs preferred; existing account login acceptable initially. Bruiser does not create an identity system. | Q1 |
+| 14 | **Licensing decided in principle.** Protocol, schemas, specifications and SDKs: Apache-2.0. Gateway core: BSL 1.1, subject to legal review. Repository private until the OSS/Core boundary is formalised. The gateway tier is therefore described as *source-available*, and the genuinely open-source assets are the protocol and SDKs. | Q3 |
+| 15 | **Hosted public sandbox/demo is in scope** as a sales and developer-discovery asset; production remains self-hosted. | Q5 |
+| 16 | **Design-partner acquisition is an immediate commercial priority** and the integration-discovery questionnaire ([06-integration-discovery.md](06-integration-discovery.md)) is how those conversations validate requirements. | Q7 |
+| 17 | **Audit retention** configurable, default 13 months. **Pricing** stays simple: Core within a documented fair-use envelope, no per-request metering; the gateway reports plain usage figures for transparency. **Trademark clearance** before public launch or significant commercial investment. **External security review** is an M8 exit criterion. | Q9–Q12 |
+| 18 | **Positioning principle made explicit: Bruiser is not a distributed-lock product.** Coordination technology is an implementation detail. The product is the identity, execution-control, lease, policy, queueing, handoff, audit and merchant-integration layer around scarce-inventory transactions. | Founder principle |
+
 ---
 
 ## 1. Vision
@@ -102,9 +119,19 @@ the authenticated customer**; principals hold it on the customer's behalf.
 
 ## 4. Identity: what Bruiser trusts and what it adds
 
-Bruiser does **not** authenticate humans. It trusts a signed *customer assertion*
-from the merchant's identity provider (OIDC ID token or merchant-signed JWT) and
-binds a principal to it.
+Bruiser does **not** authenticate humans and does not create an identity system.
+It anchors to the club's existing authenticated supporter/customer identity. The
+preferred anchor is a membership or supporter ID; an existing account login is
+acceptable initially. Bruiser obtains that identity in one of two ways:
+
+- a signed *customer assertion* from the merchant's identity provider (OIDC ID
+  token or merchant-signed JWT), exchanged for a Bruiser session — used by
+  Bruiser-aware agents and browsers; or
+- the merchant's **existing session credential** (cookie or bearer token),
+  validated by Bruiser with the merchant's keys at the edge or proxy — used to
+  control clients that do not speak the Bruiser protocol (§9).
+
+Either way, a principal is bound to the customer.
 
 To give merchants leverage against multi-accounting, a customer assertion may
 carry **identity anchors** — attributes the merchant already knows:
@@ -224,23 +251,43 @@ next-in-line is promoted on release/expiry and must claim within a short window.
 Out of scope: fair queueing *across* customers. That is the merchant's waiting
 room. Bruiser sits behind it.
 
-## 9. Integration: two enforcement modes
+## 9. Integration: Bruiser must be authoritative
 
-**Mode A — Token verification (primary).** The merchant's hold/purchase endpoints
-require an `X-Bruiser-Execution` token. A Bruiser SDK middleware verifies it
-offline against Bruiser's JWKS (signature, expiry, domain, fence) and optionally
-calls Bruiser's introspection endpoint for the final purchase step. Bruiser is not
-in the request path; a Bruiser outage stops *new* grants (fail closed) but does not
-break purchases already authorised.
+**The authority requirement.** Bruiser can only guarantee its policy if every path
+to the protected allocation operation (`hold`, `purchase`, and anything else that
+consumes or reserves scarce inventory) passes Bruiser's admission check. Direct
+paths must be removed, restricted or otherwise made unable to circumvent policy.
+Integration is therefore defined as *closing the unenforced paths*, and every
+deployment ships with an **authority check** that probes the allocation endpoints
+without a valid execution and confirms they refuse.
 
-**Mode B — Proxy.** Bruiser proxies allocation calls to the merchant via a
-*merchant adapter* (`search / hold / release / purchase / cancel`) and attaches the
-fence itself. Suited to merchants who cannot modify their system, and to the
-simulated ticketing system used for development and demos.
+Bruiser is platform-agnostic and does not depend on a partnership with any
+ticketing platform. First customers are clubs where a technically viable path
+exists to make Bruiser authoritative. Three enforcement patterns cover the mixed
+setups we expect; all share the same lease core and policy engine.
 
-Both modes share the same lease core. The adapter interface is designed so future
-adapters (ticketing platforms, ecommerce, hotels, restaurants, appointments) are
-additive. V1 ships one adapter: the simulator.
+| Pattern | Where enforcement happens | When it fits |
+|---------|---------------------------|--------------|
+| **P1 — In-app middleware** | The merchant's checkout code verifies the Bruiser execution token (SDK, offline against JWKS, optional introspection at purchase). | Club controls its checkout code. Bruiser stays out of the data path; an outage stops new grants but not authorised purchases. |
+| **P2 — Edge / API-gateway** | The merchant's existing reverse proxy, API gateway or CDN worker (NGINX `auth_request`, Envoy `ext_authz`, Kong/Tyk plugin, Cloudflare Worker…) asks Bruiser `/v1/authorize` before forwarding allocation requests. | Club or platform fronts checkout with an edge it controls but cannot change the application. |
+| **P3 — Bruiser reverse proxy** | Bruiser itself terminates allocation traffic and forwards to the merchant/platform through a *merchant adapter*, attaching the fence. | Neither the app nor an edge can be changed; or for the simulator and demos. |
+
+In every pattern the origin must only accept allocation traffic that has passed
+the enforcement point (network policy, mTLS or shared secret between edge and
+origin, WAF rule requiring a Bruiser header). The authority check verifies this.
+
+**Transparent enforcement.** Enforcement cannot depend on agents choosing to use
+Bruiser. In P2 and P3 Bruiser identifies the customer from the merchant's existing
+session credential and, on the first allocation request, **acquires the execution
+on the customer's behalf**. A second agent presenting the same customer identity
+receives BUSY (or is preempted per precedence) exactly as a Bruiser-aware agent
+would. Bruiser-aware clients gain explicit acquire/renew/watch/handoff and better
+UX; unaware clients are still controlled. Agent-facing SDKs and the MCP tooling
+(§10) are adoption aids, not the enforcement mechanism.
+
+The adapter interface (`search / hold / release / purchase / cancel`) is designed so
+future adapters (ticketing platforms, ecommerce, hotels, restaurants, appointments)
+are additive. V1 ships one adapter: the simulator.
 
 ## 10. Bruiser Protocol
 
@@ -253,12 +300,16 @@ merchant verification rules.
 |-----------|-----------|
 | IDENTITY (sessions, principals, anchors) | implemented |
 | ACQUIRE / RENEW / RELEASE / REVOKE / HANDOFF | implemented |
-| HOLD / ALLOCATE / PURCHASE / CANCEL | pass-through via adapter (Mode B); token-gated (Mode A) |
+| HOLD / ALLOCATE / PURCHASE / CANCEL | admission-checked at the enforcement point (P1–P3); pass-through via adapter in P3 |
 | DISCOVER / QUOTE | uncontrolled pass-through; protocol names reserved |
 | REFUND | reserved |
 
-Protocol and SDKs are published under a permissive licence regardless of what the
-gateway itself is licensed under (see open questions).
+The protocol, its schemas, specifications and SDKs are **Apache-2.0**, so that
+developers, agent frameworks and alternative gateway implementations can adopt them
+freely. The architecture is protocol-first — OpenAPI, JSON Schema, token spec and a
+conformance suite — so nothing about it is bound to the Go implementation. Native
+agent-facing integrations (MCP server / tool definitions, agent SDKs) follow at
+V1.5; they improve the agent's experience but are never required for enforcement.
 
 ## 11. Deployment
 
@@ -268,9 +319,15 @@ of data, network, auth, policy, logs and availability.
 
 Runtime footprint for V1: **one static binary + PostgreSQL**. Nothing else is
 required. Developer environment: `docker compose up`. Enterprise: Helm chart,
-horizontal scaling, external Postgres (RDS/Cloud SQL/etc.).
+horizontal scaling, external Postgres (RDS/Cloud SQL/etc.). Self-hosting is also
+the primary mechanism for data residency: the merchant's data never leaves the
+merchant's environment.
 
-Bruiser provides software, protocol, updates and support — not hosting.
+Bruiser provides software, protocol, updates and support — not production hosting.
+The one hosted Bruiser is the **public sandbox/demo** (`sandbox.bruiser-gateway.com`):
+a sales and developer-discovery asset where developers can obtain a throwaway
+merchant, try the API and SDKs, and watch the demo scenarios. It runs the same
+binary and is not a production offering.
 
 ## 12. Security posture
 
@@ -314,6 +371,8 @@ Scenarios:
 | 1 customer × 10,000 agents × 1 event | 10,000 hold attempts hit SimTix; hold churn; Alice may end up with several seats | 1 GRANTED, 9,999 BUSY; SimTix sees one execution; Alice gets one seat |
 | 1,000 customers × 10 agents × 1,000 seats | 10,000 concurrent holds thrash 1,000 seats; legitimate customers see "unavailable" while holds expire | ≤1,000 downstream executions; each customer's agents coalesce |
 | Handoff | — | Alice clicks "Take control"; agent's next renew returns 410; browser completes purchase; agent's stale token rejected by SimTix |
+| Bypass attempt | agent goes straight to SimTix and succeeds | the same request is refused at the origin; the authority check reports no open paths |
+| Unaware agent | — | an agent that has never heard of Bruiser hits checkout with the club session cookie; Bruiser acquires transparently; the customer's second agent gets BUSY |
 
 The dashboard shows side by side: downstream requests, active executions, BUSY
 responses, seats-per-customer distribution, SimTix p99 latency. The point must
@@ -341,19 +400,37 @@ EXECUTION_HANDED_OFF     POLICY_UPDATED           STORE_UNAVAILABLE
 
 Each event carries merchant, customer, principal, domain, execution, fence, policy
 rule matched, store timestamp and a decision reason. Events are append-only and
-exportable (JSONL, webhook, OTel).
+exportable (JSONL, webhook, OTel). Retention is configurable per merchant; the
+default is 13 months, subject to legal/security review and individual merchant
+requirements.
 
-## 17. Product tiers
+## 17. Product tiers and licensing
 
 | Tier | Price | Purpose | Contents |
 |------|-------|---------|----------|
-| **OSS** | £0 | adoption, credibility, protocol spread | gateway core, protocol spec, SDKs, simulator, basic admin, Compose deployment, community support. Genuinely usable in production by a capable team. |
-| **Core** | £20k/yr | production for clubs and mid-size operators | production licence, supported releases and upgrades, full policy engine, admin UI, audit export, analytics, Helm chart, SSO for admin, documented integrations, commercial support, security updates |
-| **Enterprise** | £100k+/yr | mission-critical, high-volume | everything in Core plus advanced policy, bounded/fair waiting, multi-region, enterprise auth, HA guidance, compliance pack, premium adapters, SLA, dedicated support, deployment assistance |
+| **Community** (source-available) | £0 | adoption, credibility, protocol spread | gateway core under BSL 1.1 (production use permitted; offering Bruiser as a hosted service to third parties is not), protocol spec and SDKs under Apache-2.0, simulator, basic admin, Compose deployment, community support. Genuinely usable by a capable team. |
+| **Core** | £20k/yr within a fair-use envelope | production for clubs and mid-size operators | commercial licence, supported releases and upgrades, full policy engine, admin UI, audit export and retention tooling, analytics, Helm chart, SSO for admin, documented integrations, commercial support, security updates |
+| **Enterprise** | from £100k/yr | mission-critical, high-volume | everything in Core plus advanced policy, bounded waiting, multi-region, enterprise auth, HA guidance, compliance pack, premium adapters, SLA, dedicated support, deployment assistance |
 
-The OSS boundary is a founder decision (see open questions) but the rule is: OSS
-must be good enough that a developer builds with it and a small merchant could run
-it; Core must be the obvious choice the moment someone's job depends on it.
+**Licensing.** Protocol, schemas, specifications and SDKs: Apache-2.0, to maximise
+adoption. Gateway core: BSL 1.1 (subject to legal review), with an Additional Use
+Grant permitting production use and forbidding use of the software to provide a
+competing hosted Bruiser service, and a Change Licence of Apache-2.0 after the
+change date. BSL is not an OSI-approved open-source licence, so the gateway tier is
+described honestly as *source-available*; the open-source assets are the protocol
+and SDKs. The repository stays private until the boundary is formally decided.
+
+**Fair-use envelope.** Pricing stays simple: no per-request metering. Core is
+bounded by a documented envelope (indicative dimensions: one production deployment,
+a single legal entity, up to a stated peak of concurrent executions and events per
+year — numbers to be set with the first design partners). The gateway reports plain
+usage figures (peak concurrent executions, executions per month, events protected)
+in the admin UI so both sides can see where a deployment sits; it never throttles
+on them.
+
+The rule for the boundary: Community must be good enough that a developer builds
+with it and a small merchant could run it; Core must be the obvious choice the
+moment someone's job depends on it.
 
 ## 18. Why customers keep paying
 
@@ -363,14 +440,23 @@ development, new adapters, anonymised industry benchmarks, and (later) a trusted
 agent identity/reputation network. The merchant is paying for a maintained
 standard, not for a lock.
 
-## 19. Moat
+## 19. Positioning and moat
 
-A competent team can build `customer_id + Redis lock` in a week. Defensibility is
-built around: protocol adoption, agent-side SDKs/tooling, merchant adapters,
-policy engine, handoff UX, audit/fairness evidence for disputes, operational
-expertise, security track record, benchmarks and — later — reputation network
-effects. The ambition is for Bruiser to be the recognised admission standard
-between agents and scarce inventory.
+**Bruiser is not a distributed-lock product.** Whether V1 coordinates through
+PostgreSQL, or a later version through Redis or something else, is an
+implementation detail and must never appear in positioning. The product is the
+customer-identity, execution-control, lease, concurrency, policy, queueing,
+handoff, audit and merchant-integration layer that sits around scarce-inventory
+transactions. Bruiser is not a bot detector, not a DDoS product, not a ticketing
+platform and not a locking service; it is a control layer for autonomous commerce.
+
+A competent team can build `customer_id + lock` in a week. Defensibility is built
+around: protocol adoption, agent-side SDKs/tooling, merchant adapters and
+enforcement patterns, the authority check and integration know-how, policy engine,
+handoff UX, audit/fairness evidence for disputes, operational expertise, security
+track record, benchmarks and — later — reputation network effects. The ambition is
+for Bruiser to be the recognised admission standard between agents and scarce
+inventory.
 
 ## 20. Go-to-market
 
@@ -387,9 +473,13 @@ Two motions run in parallel: OSS → developer adoption → protocol familiarity
 production; and outbound → design-partner clubs → Core → Enterprise → references.
 Do not wait for OSS traction before selling Core.
 
-A critical GTM dependency: whether the club controls its checkout or a ticketing
-platform does. Where a platform owns checkout, Mode A requires the platform's
-cooperation; the adapter roadmap and partnership strategy follow from the answer.
+There are no confirmed design partners yet; acquiring them is an immediate
+commercial priority that runs alongside development. Each club conversation is
+also an integration-discovery exercise ([06-integration-discovery.md](06-integration-discovery.md)):
+where is the admission point, who controls it, and which enforcement pattern makes
+Bruiser authoritative there. Clubs with a viable path are qualified; clubs whose
+allocation path cannot be closed are deferred, not force-fitted. Bruiser does not
+wait on any ticketing-platform partnership to validate the product.
 
 ## 21. Where Bruiser sits
 
@@ -409,13 +499,19 @@ replaces none of them.
 ## 22. Principles
 
 1. Do not detect humans vs AI. Authenticate the customer, control the execution.
-2. Separate discovery from allocation. Search is abundant; allocation is controlled.
-3. Denial needs no coordination; only grant does. Design around it.
-4. Never be a single point of failure unnecessarily. Prefer being out of the data path.
-5. The merchant remains in control — of infrastructure, data and policy.
-6. Do not build a ticketing system. A lease is not a hold.
-7. Fail closed on allocation, open on discovery.
-8. Do not over-engineer V1. The primitive must be flawless before anything else.
+2. Bruiser is authoritative at the admission point, or it is not deployed. Close
+   the bypass paths first.
+3. Enforcement never depends on the agent cooperating. Aware agents get a better
+   experience; unaware agents are still controlled.
+4. Separate discovery from allocation. Search is abundant; allocation is controlled.
+5. Denial needs no coordination; only grant does. Design around it.
+6. Never be a single point of failure unnecessarily. Prefer the enforcement
+   pattern that keeps Bruiser out of the data path when the merchant can support it.
+7. The merchant remains in control — of infrastructure, data, identity and policy.
+8. Do not build a ticketing system, an identity system or a lock product. A lease
+   is not a hold; coordination technology is an implementation detail.
+9. Fail closed on allocation, open on discovery.
+10. Do not over-engineer V1. The primitive must be flawless before anything else.
 
 ## 23. Not in V1
 
