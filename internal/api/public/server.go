@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -267,7 +268,7 @@ func (s *Server) protocol(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"protocol":     "bruiser",
 		"version":      "0.1-draft",
-		"capabilities": []string{"IDENTITY", "ACQUIRE", "RENEW", "HEARTBEAT", "RELEASE", "HANDOFF", "REVOKE", "WATCH", "AUTHORIZE", "INTROSPECT", "POLICY", "ADMIN", "AUTHORITY_CHECK"},
+		"capabilities": []string{"IDENTITY", "ACQUIRE", "RENEW", "HEARTBEAT", "RELEASE", "HANDOFF", "REVOKE", "WATCH", "QUEUE", "AUTHORIZE", "INTROSPECT", "POLICY", "ADMIN", "AUTHORITY_CHECK"},
 	})
 }
 
@@ -291,8 +292,7 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body sessionReq
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid json")
+	if !decodeJSON(w, r, &body) {
 		return
 	}
 	if body.Principal.Type == "" {
@@ -387,8 +387,7 @@ type acquireReq struct {
 func (s *Server) acquire(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r.Context())
 	var body acquireReq
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid json")
+	if !decodeJSON(w, r, &body) {
 		return
 	}
 	if body.Resource == "" {
@@ -421,6 +420,7 @@ func (s *Server) acquire(w http.ResponseWriter, r *http.Request) {
 		TTL:         d.TTL,
 		MaxLifetime: d.MaxLifetime,
 		Precedence:  d.Precedence,
+		MaxWaiters:  d.MaxWaiters,
 		RequestID:   reqID,
 	})
 	if err != nil {
@@ -433,6 +433,8 @@ func (s *Server) acquire(w http.ResponseWriter, r *http.Request) {
 		s.writeExecution(w, http.StatusCreated, res.Execution, true)
 	case lease.StatusAlreadyHeld:
 		s.writeExecution(w, http.StatusOK, res.Execution, true)
+	case lease.StatusQueued:
+		s.writeQueued(w, d.DomainKey, d.RuleName, res)
 	case lease.StatusBusy:
 		retry := time.Until(res.Busy.ExpiresAt)
 		if retry < 0 {
@@ -492,7 +494,7 @@ func (s *Server) handoff(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r.Context())
 	var body handoffReq
 	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
 	}
 	exeID := chi.URLParam(r, "id")
 	var prec []string
@@ -525,7 +527,7 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r.Context())
 	var body revokeReq
 	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
 	}
 	e, err := s.leases.Revoke(r.Context(), sess.MerchantID, chi.URLParam(r, "id"), sess.SessionID, requestID(r), body.Reason)
 	if err != nil {
@@ -607,6 +609,9 @@ func (s *Server) writeExecution(w http.ResponseWriter, status int, e *lease.Exec
 	if e.State == lease.StateActive {
 		body["heartbeat_after_ms"] = s.cfg.HeartbeatInterval.Milliseconds()
 	}
+	if e.State == lease.StateQueued && e.QueuePosition > 0 {
+		body["position"] = e.QueuePosition
+	}
 	if e.EndReason != "" {
 		body["end_reason"] = e.EndReason
 	}
@@ -620,6 +625,28 @@ func (s *Server) writeExecution(w http.ResponseWriter, status int, e *lease.Exec
 		}
 	}
 	writeJSON(w, status, body)
+}
+
+func (s *Server) writeQueued(w http.ResponseWriter, domain, rule string, res lease.AcquireResult) {
+	retry := time.Until(res.Busy.ExpiresAt)
+	if retry < 0 {
+		retry = time.Second
+	}
+	body := map[string]any{
+		"status":              "QUEUED",
+		"domain":              domain,
+		"rule_name":           rule,
+		"execution_id":        res.Queue.WaiterID,
+		"position":            res.Queue.Position,
+		"active_execution_id": res.Queue.ActiveExecutionID,
+		"expires_at":          res.Queue.ExpiresAt.UTC().Format(time.RFC3339Nano),
+		"retry_after_ms":      retry.Milliseconds(),
+		"watch":               "/v1/executions/" + res.Queue.WaiterID + "/watch",
+	}
+	if res.Busy != nil {
+		body["holder"] = map[string]string{"type": res.Busy.Holder.Type, "id": res.Busy.Holder.ID}
+	}
+	writeJSON(w, http.StatusAccepted, body)
 }
 
 func (s *Server) mutationError(w http.ResponseWriter, err error) {
@@ -672,6 +699,15 @@ func requestID(r *http.Request) string {
 		return v
 	}
 	return id.Request()
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json")
+		return false
+	}
+	return true
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

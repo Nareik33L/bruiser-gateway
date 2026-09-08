@@ -112,6 +112,10 @@ func (c *BusyCache) lookup(merchantID, domainKey string) (cacheItem, bool) {
 func (c *BusyCache) Acquire(ctx context.Context, req AcquireRequest) (AcquireResult, error) {
 	n := c.n.Add(1)
 	refresh := c.hedge > 0 && n%c.hedge == 0
+	// A local BUSY would skip the store and starve the intra-customer queue.
+	if req.MaxWaiters > 0 {
+		refresh = true
+	}
 	if !refresh {
 		if it, ok := c.lookup(req.MerchantID, req.DomainKey); ok {
 			same := it.holder.Type == req.Principal.Type && it.holder.ID == req.Principal.ID
@@ -154,6 +158,8 @@ func (c *BusyCache) Acquire(ctx context.Context, req AcquireRequest) (AcquireRes
 		c.remember(req.MerchantID, req.DomainKey, res.Execution, ma, occ)
 	case StatusBusy:
 		c.rememberBusy(req.MerchantID, req.DomainKey, res.Busy, ma)
+	case StatusQueued:
+		// Do not cache a full domain: a later waiter may still fit.
 	}
 	return res, nil
 }

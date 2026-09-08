@@ -33,6 +33,7 @@ type UsageFigures struct {
 	Executions30d       int `json:"executions_30d"`
 	ResourcesProtected  int `json:"resources_protected"`
 	PeakConcurrentToday int `json:"peak_concurrent_today"`
+	QueueDepth          int `json:"queue_depth"`
 }
 
 func (s *Store) WriteAudit(ctx context.Context, merchantID, typ, reason, requestID string, attrs map[string]any) error {
@@ -181,9 +182,11 @@ func (s *Store) UsageFigures(ctx context.Context, merchantID string) (UsageFigur
 			    select count(*) as c from executions
 			    where merchant_id = $1 and granted_at::date = current_date
 			    group by date_trunc('minute', granted_at)
-			) s)`,
+			) s),
+			(select count(*) from waiters
+			  where merchant_id = $1 and expires_at > now())`,
 		merchantID,
-	).Scan(&u.ActiveExecutions, &u.Executions30d, &u.ResourcesProtected, &u.PeakConcurrentToday)
+	).Scan(&u.ActiveExecutions, &u.Executions30d, &u.ResourcesProtected, &u.PeakConcurrentToday, &u.QueueDepth)
 	return u, wrapStore(err)
 }
 

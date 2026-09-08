@@ -43,6 +43,15 @@ type Rule struct {
 	Precedence      []string `yaml:"precedence" json:"precedence"`
 	Control         string   `yaml:"control" json:"control"`
 	OnMissingAnchor string   `yaml:"on_missing_anchor" json:"on_missing_anchor"`
+	Waiting         Waiting  `yaml:"waiting" json:"waiting"`
+}
+
+// Waiting is an optional intra-customer queue. Inter-customer waiting rooms
+// stay out of scope. mode "bounded" with max_waiters N: N waiters get QUEUED,
+// further agents get BUSY.
+type Waiting struct {
+	Mode       string `yaml:"mode" json:"mode"`
+	MaxWaiters int    `yaml:"max_waiters" json:"max_waiters"`
 }
 
 type Match struct {
@@ -66,6 +75,7 @@ type Decision struct {
 	TTL         time.Duration
 	MaxLifetime time.Duration
 	Precedence  []string
+	MaxWaiters  int
 	ControlNone bool
 	Denied      bool
 	Reason      string
@@ -167,6 +177,7 @@ func Compile(d Document) (Compiled, error) {
 		if len(r.Precedence) == 0 {
 			r.Precedence = append([]string{}, defPrec...)
 		}
+		r.Waiting = normalizeWaiting(r.Waiting)
 		out.rules = append(out.rules, compiledRule{Rule: r, ttl: ttl, lifetime: life})
 	}
 	return out, nil
@@ -194,6 +205,7 @@ func (c Compiled) Evaluate(req Request) Decision {
 			TTL:         r.ttl,
 			MaxLifetime: r.lifetime,
 			Precedence:  r.Precedence,
+			MaxWaiters:  r.Waiting.MaxWaiters,
 		}
 	}
 	if c.fallback == FallbackAllowUncontrolled {
@@ -272,6 +284,21 @@ func validDim(dim string) bool {
 		return true
 	}
 	return strings.HasPrefix(dim, "anchor:") && len(dim) > len("anchor:")
+}
+
+func normalizeWaiting(w Waiting) Waiting {
+	mode := strings.ToLower(strings.TrimSpace(w.Mode))
+	switch mode {
+	case "bounded", "queue", "intra-customer":
+		w.Mode = "bounded"
+		if w.MaxWaiters < 1 {
+			w.MaxWaiters = 1
+		}
+	default:
+		w.Mode = "none"
+		w.MaxWaiters = 0
+	}
+	return w
 }
 
 func parseDur(s string, def time.Duration) (time.Duration, error) {

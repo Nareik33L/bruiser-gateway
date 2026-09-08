@@ -433,3 +433,22 @@ No vendor telemetry unless `BRUISER_TELEMETRY=1`.
 **Revisit when.** Counsel signs BSL parameters, or a design partner proves a
 fourth placement is required.
 
+## ADR-029 — Optional bounded intra-customer queue
+
+**Decision.** Default remains BUSY. When a rule sets `waiting.mode: bounded`
+and `max_waiters: N`, further agents of the **same customer / same domain**
+are QUEUED (HTTP 202) up to N, then BUSY. Release, revoke, and expiry promote
+the oldest waiter to a fenced GRANT. Same principal already waiting is
+idempotent. Inter-customer waiting rooms stay out of scope. The busy cache
+does not answer locally when `MaxWaiters > 0`.
+
+**Why.** v2.4 asks for optional coalescing so 10,000 agents do not independently
+retry origin, without becoming a public waiting-room product.
+
+**Consequences.** Waiter rows live in Postgres, serialised on the domain lock.
+Promote uses the waiter id as the execution id so watch/GET keep working.
+Overflow is still BUSY.
+
+**Revisit when.** Merchants need fair inter-customer queues (explicitly out of
+scope) or durable wait longer than `max_lifetime`.
+

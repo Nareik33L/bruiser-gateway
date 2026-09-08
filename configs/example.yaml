@@ -46,6 +46,8 @@ policy:
       scope: [customer, resource]
       max_active: 1
       precedence: [browser, agent]
+      # Optional: one ACTIVE, one QUEUED, further agents BUSY.
+      # waiting: { mode: bounded, max_waiters: 1 }
     - name: discovery
       match: { action: [search] }
       control: none

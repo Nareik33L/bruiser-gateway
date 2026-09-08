@@ -22,3 +22,17 @@ secrets:
   BRUISER_ADMIN_SECRET: change-me
 originURL: ""
 resources: {}
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 70
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+networkPolicy:
+  enabled: false
+serviceMonitor:
+  enabled: false
+migrate:
+  enabled: true

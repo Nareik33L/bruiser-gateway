@@ -31,6 +31,7 @@ paths:
       responses:
         "201": { description: GRANTED }
         "200": { description: ALREADY_HELD (same principal; TTL extended) }
+        "202": { description: QUEUED (bounded intra-customer wait) }
         "409": { description: BUSY }
         "503": { description: store unavailable }
   /v1/executions/{id}/renew:
@@ -132,6 +133,7 @@ paths:
           schema: { type: string }
       responses:
         "200": { description: ALLOW }
+        "202": { description: QUEUED }
         "401": { description: missing or invalid merchant session }
         "403": { description: unrouted or DENIED }
         "409": { description: BUSY }

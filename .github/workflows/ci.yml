@@ -40,6 +40,16 @@ jobs:
           BRUISER_TEST_DATABASE_URL: postgres://bruiser:bruiser@127.0.0.1:5432/bruiser_test?sslmode=disable
         run: make ci
 
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
   image:
     runs-on: ubuntu-latest
     steps:

@@ -68,6 +68,8 @@ func ExtractInput(ctx context.Context, in Input) (Customer, error) {
 		return fromEdgeSigned(in.Header, firstNonEmpty(in.EdgeSecret, in.Secret))
 	case "introspect", "introspection":
 		return fromIntrospect(ctx, in)
+	case "oidc", "jwks":
+		return fromOIDC(ctx, in)
 	case "auto":
 		if in.Cookie != "" {
 			if c, err := fromJWT(in.Secret, claim(id), in.Cookie); err == nil {
@@ -77,6 +79,11 @@ func ExtractInput(ctx context.Context, in Input) (Customer, error) {
 		if in.Bearer != "" {
 			if c, err := fromJWT(in.Secret, claim(id), in.Bearer); err == nil {
 				return c, nil
+			}
+			if id.JWKSURL != "" {
+				if c, err := fromOIDC(ctx, in); err == nil {
+					return c, nil
+				}
 			}
 			if c, err := fromIntrospect(ctx, in); err == nil {
 				return c, nil
@@ -110,6 +117,8 @@ func merchantSource(src string) string {
 		return "jwt"
 	case "cookie":
 		return "cookie-jwt"
+	case "oidc", "jwks":
+		return "oidc"
 	default:
 		return src
 	}

@@ -11,6 +11,9 @@ concurrency:
 lease:
   ttl: 60s
   heartbeat: 20s
+# waiting:
+#   mode: bounded
+#   max_waiters: 1
 unmatched: allow
 routes:
   - match: { method: POST, path: "/api/holds" }

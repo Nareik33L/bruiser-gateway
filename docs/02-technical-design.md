@@ -61,7 +61,7 @@ Domain          merchant_id, domain_key  (PK), fence bigint, updated_at
 Execution       execution_id, merchant_id, domain_key, customer_id, principal,
                 resource, action, rule_name, fence, state, granted_at,
                 expires_at, max_lifetime_at, renew_count, ended_at, end_reason
-Waiter (V1.5)   merchant_id, domain_key, seq, session_id, enqueued_at, claim_deadline
+Waiter          merchant_id, domain_key, waiter_id (= future execution_id), principal, expires_at
 AuditEvent      seq, merchant_id, at (store clock), type, customer_id, principal,
                 domain_key, execution_id, fence, rule_name, reason, request_id, attrs{}
 ```

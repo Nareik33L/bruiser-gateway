@@ -43,7 +43,14 @@
           "max_lifetime": { "type": "string" },
           "precedence": { "type": "array", "items": { "type": "string" } },
           "control": { "enum": ["none"] },
-          "on_missing_anchor": { "enum": ["deny", "fallthrough"] }
+          "on_missing_anchor": { "enum": ["deny", "fallthrough"] },
+          "waiting": {
+            "type": "object",
+            "properties": {
+              "mode": { "enum": ["none", "bounded", "queue", "intra-customer"] },
+              "max_waiters": { "type": "integer", "minimum": 1 }
+            }
+          }
         }
       }
     },
