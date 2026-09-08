@@ -64,6 +64,7 @@ a{color:var(--gold)}
     <h2>Usage (fair-use, informational)</h2>
     <table>
       <tr><td>Active executions</td><td id="u-active">0</td></tr>
+      <tr><td>Queue depth</td><td id="u-queue">0</td></tr>
       <tr><td>Executions / 30d</td><td id="u-30">0</td></tr>
       <tr><td>Resources protected</td><td id="u-res">0</td></tr>
     </table>
@@ -72,6 +73,11 @@ a{color:var(--gold)}
     <h2>Active executions</h2>
     <table><thead><tr><th>Customer</th><th>Principal</th><th>Resource</th><th>Fence</th><th></th></tr></thead>
     <tbody id="execs"></tbody></table>
+  </section>
+  <section style="grid-column:1/-1">
+    <h2>Intra-customer queue</h2>
+    <table><thead><tr><th>Customer</th><th>Principal</th><th>Resource</th><th>Expires</th></tr></thead>
+    <tbody id="waiters"></tbody></table>
   </section>
   <section style="grid-column:1/-1">
     <h2>Audit (why?)</h2>
@@ -97,6 +103,7 @@ function paint(d){
   document.getElementById('pol').textContent = d.policy_version||0;
   const u=d.usage||{};
   document.getElementById('u-active').textContent = u.active_executions||0;
+  document.getElementById('u-queue').textContent = u.queue_depth||0;
   document.getElementById('u-30').textContent = u.executions_30d||0;
   document.getElementById('u-res').textContent = u.resources_protected||0;
   const tb=document.getElementById('execs'); tb.innerHTML='';
@@ -106,6 +113,14 @@ function paint(d){
     tr.innerHTML='<td>'+x.customer_id+'</td><td>'+p.type+':'+p.id+'</td><td>'+x.resource+'</td><td>'+x.fence+'</td><td><button data-rev="'+x.execution_id+'">Revoke</button></td>';
     tb.appendChild(tr);
   });
+  const wtb=document.getElementById('waiters'); if(wtb){ wtb.innerHTML='';
+    (d.waiters||[]).forEach(x=>{
+      const tr=document.createElement('tr');
+      const p=x.principal||{};
+      tr.innerHTML='<td>'+x.customer_id+'</td><td>'+p.type+':'+p.id+'</td><td>'+x.resource+'</td><td>'+(x.expires_at||'')+'</td>';
+      wtb.appendChild(tr);
+    });
+  }
   const last=d.last_authority_check;
   if(last){
     const ok=last.reason==='PASS';

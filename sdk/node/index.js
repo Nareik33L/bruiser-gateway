@@ -110,6 +110,51 @@ function protect({ key, header, fences } = {}) {
   };
 }
 
+class Client {
+  constructor(baseURL, fetchImpl) {
+    this.baseURL = String(baseURL || "").replace(/\/$/, "");
+    this.fetch = fetchImpl || globalThis.fetch;
+  }
+  async createSession(assertion, principalType, principalId) {
+    return this.#json("POST", "/v1/sessions", assertion, {
+      principal: { type: principalType || "agent", id: principalId },
+    }, 201);
+  }
+  async acquire(sessionToken, resource, action) {
+    return this.#json("POST", "/v1/executions/acquire", sessionToken, {
+      resource,
+      action: action || "purchase",
+    });
+  }
+  async renew(sessionToken, executionId) {
+    return this.#json("POST", `/v1/executions/${executionId}/renew`, sessionToken, null, 200);
+  }
+  async release(sessionToken, executionId) {
+    return this.#json("POST", `/v1/executions/${executionId}/release`, sessionToken, null, 200);
+  }
+  async get(sessionToken, executionId) {
+    return this.#json("GET", `/v1/executions/${executionId}`, sessionToken, null, 200);
+  }
+  async #json(method, path, bearer, body, want) {
+    const headers = {};
+    if (bearer) headers.Authorization = "Bearer " + bearer;
+    const init = { method, headers };
+    if (body != null) {
+      headers["Content-Type"] = "application/json";
+      init.body = JSON.stringify(body);
+    }
+    const resp = await this.fetch(this.baseURL + path, init);
+    const text = await resp.text();
+    if (want && resp.status !== want) {
+      throw new Error(`bruiser ${method} ${path}: ${resp.status} ${text}`);
+    }
+    if (!want && resp.status >= 400) {
+      throw new Error(`bruiser ${method} ${path}: ${resp.status} ${text}`);
+    }
+    return text ? JSON.parse(text) : {};
+  }
+}
+
 module.exports = {
   FenceCache,
   tokenFrom,
@@ -117,4 +162,5 @@ module.exports = {
   publicFromRaw,
   verify,
   protect,
+  Client,
 };

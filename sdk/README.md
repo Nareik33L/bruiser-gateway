@@ -7,8 +7,8 @@ checkout *places* the control layer.
 | Language | Path | Verify | Fence | Agent client |
 |----------|------|--------|-------|--------------|
 | Go | `sdk/go` | EdDSA JWT + JWKS | `FenceCache` | `Client` (session/acquire/renew/release) |
-| Node | `sdk/node` | Node `crypto` JWK | `FenceCache` | — |
-| Python | `sdk/python` | `cryptography` Ed25519 | `FenceCache` | — |
+| Node | `sdk/node` | Node `crypto` JWK | `FenceCache` | `Client` |
+| Python | `sdk/python` | `cryptography` Ed25519 | `FenceCache` | `Client` |
 
 Protocol and SDKs are intended Apache-2.0 after legal review. No licence
 file is committed yet.

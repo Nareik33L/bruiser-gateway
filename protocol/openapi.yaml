@@ -58,14 +58,24 @@ paths:
         "410": { description: gone }
   /v1/executions/{id}/release:
     post:
-      summary: Release an execution lease
+      summary: Release an execution lease (or leave the intra-customer queue)
       parameters:
         - in: path
           name: id
           required: true
           schema: { type: string }
       responses:
-        "200": { description: released }
+        "200": { description: released or dequeued }
+  /v1/executions/{id}/leave:
+    post:
+      summary: Leave the intra-customer queue (alias of release on a waiter)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: dequeued }
   /v1/executions/{id}/handoff:
     post:
       summary: Transfer an execution (cooperative or preemptive)

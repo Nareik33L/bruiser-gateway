@@ -62,6 +62,10 @@ var (
 		Name: "bruiser_revoke_total",
 		Help: "Customer or admin revokes.",
 	})
+	queueDepth = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "bruiser_queue_depth",
+		Help: "Live intra-customer waiters.",
+	}, []string{"merchant"})
 )
 
 type eafAcc struct {
@@ -197,6 +201,7 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
+	r.Use(requestDeadline(8 * time.Second))
 	r.Get("/healthz", s.healthz)
 	r.Get("/readyz", s.readyz)
 	r.Handle("/metrics", promhttp.Handler())
@@ -227,6 +232,7 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 			r.Post("/executions/{id}/renew", s.renew)
 			r.Post("/executions/{id}/heartbeat", s.renew)
 			r.Post("/executions/{id}/release", s.release)
+			r.Post("/executions/{id}/leave", s.release)
 			r.Post("/executions/{id}/handoff", s.handoff)
 			r.Post("/executions/{id}/revoke", s.revoke)
 			r.Get("/executions/{id}", s.get)
@@ -699,6 +705,20 @@ func requestID(r *http.Request) string {
 		return v
 	}
 	return id.Request()
+}
+
+func requestDeadline(d time.Duration) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/watch") || strings.HasSuffix(r.URL.Path, "/stream") {
+				next.ServeHTTP(w, r)
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), d)
+			defer cancel()
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {

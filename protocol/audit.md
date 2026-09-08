@@ -10,6 +10,8 @@ Default retention **13 months** (`BRUISER_AUDIT_RETENTION`). Export:
 | `EXECUTION_RENEWED` | Heartbeat or resume |
 | `EXECUTION_BUSY` | Domain at `max_active` and queue full or disabled |
 | `EXECUTION_QUEUED` | Intra-customer waiter accepted |
+| `EXECUTION_DEQUEUED` | Waiter left the queue |
+| `EXECUTION_QUEUE_EXPIRED` | Waiter TTL elapsed |
 | `EXECUTION_RELEASED` | Holder released |
 | `EXECUTION_EXPIRED` | Sweeper materialised expiry |
 | `EXECUTION_REVOKED` | Customer or admin revoke |

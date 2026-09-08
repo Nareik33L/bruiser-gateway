@@ -25,6 +25,7 @@ The Go gateway is one implementation of this protocol.
 | ADMIN | `GET /admin`, `/v1/admin/*` | yes |
 | AUTHORITY_CHECK | `POST/GET /v1/authority-check` | yes (audit `AUTHORITY_CHECK`) |
 | QUEUE | acquire returns `202 QUEUED` when `waiting.mode: bounded` | yes (intra-customer only) |
+| LEAVE | `POST /v1/executions/{id}/leave` | yes (alias of release on a waiter) |
 
 ## Identity
 

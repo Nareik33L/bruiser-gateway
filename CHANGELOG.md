@@ -21,6 +21,11 @@
 
 - Protocol capabilities advertise `QUEUE`.
 - Admin usage figures include `queue_depth`.
+- Admin dashboard shows queue depth and live waiters.
+- `POST .../release` (and `/leave`) dequeues a waiter; sweeper expires stale waiters.
+- Node and Python SDKs include a thin agent `Client`.
+- CycloneDX SBOM in CI; Grafana panel for `bruiser_queue_depth`.
+- Per-request 8s deadline except watch/SSE.
 
 Humans still own: LICENSE/counsel, trademark, external security review,
 hosted sandbox DNS, Stage A outbound, image signing keys.

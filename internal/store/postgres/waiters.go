@@ -323,6 +323,131 @@ func (s *Store) promoteDue(ctx context.Context, merchantID, domainKey string) er
 	return nil
 }
 
+func (s *Store) dequeue(ctx context.Context, merchantID, waiterID, sessionID, requestID string) (lease.Execution, error) {
+	domainKey, err := s.lookupDomainKey(ctx, merchantID, waiterID)
+	if err != nil {
+		return lease.Execution{}, err
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return lease.Execution{}, wrapStore(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := s.lockDomain(ctx, tx, merchantID, domainKey); err != nil {
+		return lease.Execution{}, wrapStore(err)
+	}
+	row := tx.QueryRow(ctx, waiterSelect+`
+		where merchant_id = $1 and waiter_id = $2
+		for update`, merchantID, waiterID)
+	w, err := scanWaiter(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return lease.Execution{}, lease.ErrNotFound
+	}
+	if err != nil {
+		return lease.Execution{}, wrapStore(err)
+	}
+	e := waiterAsExecution(w)
+	if err := s.holderMatches(ctx, e, sessionID); err != nil {
+		return lease.Execution{}, err
+	}
+	if _, err := tx.Exec(ctx, `delete from waiters where waiter_id = $1`, waiterID); err != nil {
+		return lease.Execution{}, wrapStore(err)
+	}
+	if err := insertAudit(ctx, tx, merchantID, auditRow{
+		typ: "EXECUTION_DEQUEUED", customerID: w.CustomerID,
+		principalType: w.Principal.Type, principalID: w.Principal.ID,
+		domainKey: domainKey, executionID: waiterID, ruleName: w.RuleName,
+		reason: "left_queue", requestID: requestID,
+	}); err != nil {
+		return lease.Execution{}, wrapStore(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return lease.Execution{}, wrapStore(err)
+	}
+	now := time.Now().UTC()
+	e.State = lease.StateReleased
+	e.EndReason = lease.ReasonReleased
+	e.EndedAt = &now
+	return e, nil
+}
+
+func (s *Store) ExpireWaiters(ctx context.Context, limit int) (int, error) {
+	if limit < 1 {
+		limit = 100
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, wrapStore(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	rows, err := tx.Query(ctx, `
+		select waiter_id, merchant_id, customer_id, principal_type, principal_id, domain_key, rule_name
+		from waiters
+		where expires_at <= now()
+		limit $1
+		for update skip locked`, limit)
+	if err != nil {
+		return 0, wrapStore(err)
+	}
+	type expired struct {
+		id, merchant, customer, ptype, pid, domain, rule string
+	}
+	var list []expired
+	for rows.Next() {
+		var d expired
+		if err := rows.Scan(&d.id, &d.merchant, &d.customer, &d.ptype, &d.pid, &d.domain, &d.rule); err != nil {
+			rows.Close()
+			return 0, wrapStore(err)
+		}
+		list = append(list, d)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, wrapStore(err)
+	}
+	for _, d := range list {
+		if _, err := tx.Exec(ctx, `delete from waiters where waiter_id = $1`, d.id); err != nil {
+			return 0, wrapStore(err)
+		}
+		if err := insertAudit(ctx, tx, d.merchant, auditRow{
+			typ: "EXECUTION_QUEUE_EXPIRED", customerID: d.customer,
+			principalType: d.ptype, principalID: d.pid,
+			domainKey: d.domain, executionID: d.id, ruleName: d.rule,
+			reason: "expired",
+		}); err != nil {
+			return 0, wrapStore(err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, wrapStore(err)
+	}
+	return len(list), nil
+}
+
+func (s *Store) ListWaiters(ctx context.Context, merchantID, customerID string, limit int) ([]lease.Execution, error) {
+	if limit < 1 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx, waiterSelect+`
+		where merchant_id = $1 and expires_at > now()
+		  and ($2 = '' or customer_id = $2)
+		order by created_at
+		limit $3`, merchantID, customerID, limit)
+	if err != nil {
+		return nil, wrapStore(err)
+	}
+	defer rows.Close()
+	var out []lease.Execution
+	for rows.Next() {
+		w, err := scanWaiter(rows)
+		if err != nil {
+			return nil, wrapStore(err)
+		}
+		out = append(out, waiterAsExecution(w))
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) CountWaiters(ctx context.Context, merchantID string) (int, error) {
 	var n int
 	err := s.pool.QueryRow(ctx, `

@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/Nareik33L/bruiser-gateway/internal/check"
-	"github.com/Nareik33L/bruiser-gateway/internal/testlab"
 	pgstore "github.com/Nareik33L/bruiser-gateway/internal/store/postgres"
+	"github.com/Nareik33L/bruiser-gateway/internal/testlab"
 )
 
 func TestAdminStatusAndAuditExport(t *testing.T) {
@@ -77,7 +77,7 @@ func TestAdminStatusAndAuditExport(t *testing.T) {
 	}
 	html, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != 200 || !strings.Contains(string(html), "Observed EAF") {
+	if resp.StatusCode != 200 || !strings.Contains(string(html), "Observed EAF") || !strings.Contains(string(html), "Queue depth") {
 		t.Fatalf("admin page %d", resp.StatusCode)
 	}
 }

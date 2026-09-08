@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 import json
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
@@ -134,6 +136,54 @@ def asgi_protect(cfg: Protect) -> Callable:
         return inner
 
     return wrapper
+
+
+class Client:
+    """Bruiser-aware agent client. Enforcement never depends on it."""
+
+    def __init__(self, base_url: str) -> None:
+        self.base_url = base_url.rstrip("/")
+
+    def create_session(self, assertion: str, principal_type: str, principal_id: str) -> dict[str, Any]:
+        return self._json(
+            "POST",
+            "/v1/sessions",
+            assertion,
+            {"principal": {"type": principal_type or "agent", "id": principal_id}},
+            201,
+        )
+
+    def acquire(self, session_token: str, resource: str, action: str = "purchase") -> dict[str, Any]:
+        return self._json("POST", "/v1/executions/acquire", session_token, {"resource": resource, "action": action})
+
+    def renew(self, session_token: str, execution_id: str) -> dict[str, Any]:
+        return self._json("POST", f"/v1/executions/{execution_id}/renew", session_token, None, 200)
+
+    def release(self, session_token: str, execution_id: str) -> dict[str, Any]:
+        return self._json("POST", f"/v1/executions/{execution_id}/release", session_token, None, 200)
+
+    def get(self, session_token: str, execution_id: str) -> dict[str, Any]:
+        return self._json("GET", f"/v1/executions/{execution_id}", session_token, None, 200)
+
+    def _json(self, method: str, path: str, bearer: str, body: dict[str, Any] | None, want: int | None = None) -> dict[str, Any]:
+        data = None if body is None else json.dumps(body).encode()
+        req = urllib.request.Request(self.base_url + path, data=data, method=method)
+        if bearer:
+            req.add_header("Authorization", "Bearer " + bearer)
+        if body is not None:
+            req.add_header("Content-Type", "application/json")
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                raw = resp.read().decode()
+                code = resp.status
+        except urllib.error.HTTPError as e:
+            raw = e.read().decode()
+            code = e.code
+        if want and code != want:
+            raise BruiserError(f"bruiser {method} {path}: {code} {raw}")
+        if want is None and code >= 400:
+            raise BruiserError(f"bruiser {method} {path}: {code} {raw}")
+        return json.loads(raw) if raw else {}
 
 
 async def _send_json(send, status: int, body: dict[str, Any]) -> None:

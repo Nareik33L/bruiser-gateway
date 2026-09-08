@@ -70,6 +70,15 @@ func (s *Store) lookupDomainKey(ctx context.Context, merchantID, executionID str
 	err := s.pool.QueryRow(ctx, `
 		select domain_key from executions
 		where merchant_id = $1 and execution_id = $2`, merchantID, executionID).Scan(&domainKey)
+	if err == nil {
+		return domainKey, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", wrapStore(err)
+	}
+	err = s.pool.QueryRow(ctx, `
+		select domain_key from waiters
+		where merchant_id = $1 and waiter_id = $2`, merchantID, executionID).Scan(&domainKey)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", lease.ErrNotFound
 	}
@@ -129,6 +138,13 @@ func (s *Store) Renew(ctx context.Context, merchantID, executionID, sessionID, r
 }
 
 func (s *Store) Release(ctx context.Context, merchantID, executionID, sessionID, requestID string) (lease.Execution, error) {
+	e, err := s.Get(ctx, merchantID, executionID)
+	if err != nil {
+		return lease.Execution{}, err
+	}
+	if e.State == lease.StateQueued {
+		return s.dequeue(ctx, merchantID, executionID, sessionID, requestID)
+	}
 	return s.end(ctx, merchantID, executionID, sessionID, requestID, lease.StateReleased, lease.ReasonReleased, true)
 }
 

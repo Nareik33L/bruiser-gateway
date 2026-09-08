@@ -8,7 +8,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from bruiser import FenceCache, Protect, StaleFence, public_from_jwks, verify  # noqa: E402
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from threading import Thread
+
+from bruiser import Client, FenceCache, Protect, StaleFence, public_from_jwks, verify  # noqa: E402
 
 
 def mint():
@@ -45,6 +48,46 @@ class TestProtect(unittest.TestCase):
         self.assertEqual(got["exe"], "exe_1")
         with self.assertRaises(StaleFence):
             p({"X-Bruiser-Execution": minted["stale"]})
+
+    def test_agent_client(self):
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *_args):
+                return
+
+            def _write(self, code, body):
+                raw = json.dumps(body).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(raw)
+
+            def do_POST(self):
+                if self.path == "/v1/sessions":
+                    self._write(201, {"session_id": "ses_1", "session_token": "sess", "customer_id": "alice"})
+                    return
+                if self.path == "/v1/executions/acquire":
+                    self._write(201, {"execution_id": "exe_1", "status": "ACTIVE"})
+                    return
+                if self.path == "/v1/executions/exe_1/renew":
+                    self._write(200, {"execution_id": "exe_1", "status": "ACTIVE"})
+                    return
+                if self.path == "/v1/executions/exe_1/release":
+                    self._write(200, {"execution_id": "exe_1", "state": "RELEASED"})
+                    return
+                self._write(404, {})
+
+        srv = HTTPServer(("127.0.0.1", 0), H)
+        Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            c = Client(f"http://127.0.0.1:{srv.server_address[1]}")
+            sess = c.create_session("assert", "agent", "a1")
+            self.assertEqual(sess["session_token"], "sess")
+            exe = c.acquire(sess["session_token"], "event:x")
+            self.assertEqual(exe["execution_id"], "exe_1")
+            c.renew(sess["session_token"], exe["execution_id"])
+            c.release(sess["session_token"], exe["execution_id"])
+        finally:
+            srv.shutdown()
 
 
 if __name__ == "__main__":

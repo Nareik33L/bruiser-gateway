@@ -4,7 +4,7 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { spawnSync } = require("child_process");
 const path = require("path");
-const { publicFromJWKS, verify, FenceCache, protect } = require("./index");
+const { publicFromJWKS, verify, FenceCache, protect, Client } = require("./index");
 
 function mint() {
   const r = spawnSync("go", ["run", "./sdk/mint"], {
@@ -60,6 +60,47 @@ test("verify + stale fence", () => {
   mw2({ headers: { "x-bruiser-execution": minted.ok } }, mockRes(), () => {});
   mw2({ headers: { "x-bruiser-execution": minted.stale } }, staleRes, () => {});
   assert.equal(staleRes.statusCode, 403);
+});
+
+test("agent client acquire renew release", async () => {
+  const { createServer } = require("http");
+  const srv = createServer((req, res) => {
+    const url = req.url || "";
+    res.setHeader("Content-Type", "application/json");
+    if (req.method === "POST" && url === "/v1/sessions") {
+      res.statusCode = 201;
+      res.end(JSON.stringify({ session_id: "ses_1", session_token: "sess", customer_id: "alice" }));
+      return;
+    }
+    if (req.method === "POST" && url === "/v1/executions/acquire") {
+      res.statusCode = 201;
+      res.end(JSON.stringify({ execution_id: "exe_1", status: "ACTIVE" }));
+      return;
+    }
+    if (req.method === "POST" && url === "/v1/executions/exe_1/renew") {
+      res.end(JSON.stringify({ execution_id: "exe_1", status: "ACTIVE" }));
+      return;
+    }
+    if (req.method === "POST" && url === "/v1/executions/exe_1/release") {
+      res.end(JSON.stringify({ execution_id: "exe_1", state: "RELEASED" }));
+      return;
+    }
+    res.statusCode = 404;
+    res.end("{}");
+  });
+  await new Promise((resolve) => srv.listen(0, resolve));
+  const { port } = srv.address();
+  try {
+    const c = new Client(`http://127.0.0.1:${port}`);
+    const sess = await c.createSession("assert", "agent", "a1");
+    assert.equal(sess.session_token, "sess");
+    const exe = await c.acquire(sess.session_token, "event:x", "purchase");
+    assert.equal(exe.execution_id, "exe_1");
+    await c.renew(sess.session_token, exe.execution_id);
+    await c.release(sess.session_token, exe.execution_id);
+  } finally {
+    srv.close();
+  }
 });
 
 function mockRes() {
