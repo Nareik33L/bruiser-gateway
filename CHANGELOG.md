@@ -11,6 +11,9 @@
   from local configuration. Origin verifies execution JWT + fence.
 - Canonical resource IDs; merchant execution budget; session logout;
   replay keys; inbound `X-Bruiser-*` strip; keyed rate limits.
+- RC1 `make soak` (10k agents, 30m) re-run: ACTIVE=1, 3.46M requests,
+  0 errors, p50 27ms / p99 51ms. About 12% fewer requests than the
+  V1 3.94M baseline; latency and health at or better.
 
 ### Added
 
