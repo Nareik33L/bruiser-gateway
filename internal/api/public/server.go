@@ -37,12 +37,19 @@ var (
 type Server struct {
 	cfg    config.Config
 	store  *pgstore.Store
+	leases lease.Store
 	signer auth.Signer
 	log    *slog.Logger
 }
 
 func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.Logger) http.Handler {
-	s := &Server{cfg: cfg, store: store, signer: signer, log: log}
+	s := &Server{
+		cfg:    cfg,
+		store:  store,
+		leases: lease.NewBusyCache(store, 50),
+		signer: signer,
+		log:    log,
+	}
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -223,7 +230,7 @@ func (s *Server) acquire(w http.ResponseWriter, r *http.Request) {
 	rule := lease.DefaultRuleName()
 	domain := lease.DomainKey(sess.MerchantID, rule, sess.CustomerID, body.Resource)
 	reqID := requestID(r)
-	res, err := s.store.Acquire(r.Context(), lease.AcquireRequest{
+	res, err := s.leases.Acquire(r.Context(), lease.AcquireRequest{
 		MerchantID:  sess.MerchantID,
 		DomainKey:   domain,
 		CustomerID:  sess.CustomerID,
@@ -270,7 +277,7 @@ func (s *Server) acquire(w http.ResponseWriter, r *http.Request) {
 func (s *Server) renew(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r.Context())
 	exeID := chi.URLParam(r, "id")
-	e, err := s.store.Renew(r.Context(), sess.MerchantID, exeID, sess.SessionID, requestID(r), s.cfg.LeaseTTL)
+	e, err := s.leases.Renew(r.Context(), sess.MerchantID, exeID, sess.SessionID, requestID(r), s.cfg.LeaseTTL)
 	if err != nil {
 		s.mutationError(w, err)
 		return
@@ -281,7 +288,7 @@ func (s *Server) renew(w http.ResponseWriter, r *http.Request) {
 func (s *Server) release(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r.Context())
 	exeID := chi.URLParam(r, "id")
-	e, err := s.store.Release(r.Context(), sess.MerchantID, exeID, sess.SessionID, requestID(r))
+	e, err := s.leases.Release(r.Context(), sess.MerchantID, exeID, sess.SessionID, requestID(r))
 	if err != nil {
 		s.mutationError(w, err)
 		return
@@ -295,7 +302,7 @@ func (s *Server) release(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r.Context())
-	e, err := s.store.Get(r.Context(), sess.MerchantID, chi.URLParam(r, "id"))
+	e, err := s.leases.Get(r.Context(), sess.MerchantID, chi.URLParam(r, "id"))
 	if err != nil {
 		s.storeError(w, err)
 		return
@@ -310,7 +317,7 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 func (s *Server) watch(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r.Context())
 	exeID := chi.URLParam(r, "id")
-	initial, err := s.store.Get(r.Context(), sess.MerchantID, exeID)
+	initial, err := s.leases.Get(r.Context(), sess.MerchantID, exeID)
 	if err != nil {
 		s.storeError(w, err)
 		return
@@ -328,7 +335,7 @@ func (s *Server) watch(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-time.After(200 * time.Millisecond):
 		}
-		next, err := s.store.Get(r.Context(), sess.MerchantID, exeID)
+		next, err := s.leases.Get(r.Context(), sess.MerchantID, exeID)
 		if err != nil {
 			break
 		}

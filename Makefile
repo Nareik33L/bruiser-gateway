@@ -21,6 +21,9 @@ test:
 test-race:
 	BRUISER_TEST_DATABASE_URL="$(TEST_DATABASE_URL)" $(GO) test -race $(PKG) -count=1
 
+torture: build
+	BRUISER_TEST_DATABASE_URL="$(TEST_DATABASE_URL)" $(GO) run ./cmd/torture
+
 vet:
 	$(GO) vet $(PKG)
 

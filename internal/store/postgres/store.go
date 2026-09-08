@@ -32,8 +32,8 @@ func Connect(ctx context.Context, url string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse database url: %w", err)
 	}
-	cfg.MaxConns = 32
-	cfg.MinConns = 2
+	cfg.MaxConns = 8
+	cfg.MinConns = 0
 	cfg.MaxConnIdleTime = 5 * time.Minute
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {

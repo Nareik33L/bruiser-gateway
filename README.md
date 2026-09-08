@@ -59,6 +59,7 @@ No licence files are committed until the OSS/Core boundary is formally decided.
 
 ## Status
 
-M0 foundations and M1 execution-lease primitive are in this tree. Distributed
-correctness (M2), deployment methods and the Authority Check (M3) come next.
-Stage A commercial discovery runs in parallel.
+M0 foundations, M1 execution-lease primitive, and an M2 thesis check
+(multiple in-process gateways, many agents, exactly one ACTIVE execution)
+are in this tree. Embedded / Edge / Proxy, the Authority Check and SimTix
+(M3) come next. Stage A commercial discovery runs in parallel.
