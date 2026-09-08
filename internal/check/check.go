@@ -147,6 +147,29 @@ func Run(cfg Config) (Report, error) {
 		return false, fmt.Sprintf("want 401 got %d %s", code, body)
 	}))
 
+	rep.Probes = append(rep.Probes, probe("GET on allocation route does not grant", func() (bool, string) {
+		req, _ := http.NewRequest(http.MethodGet, edge+holdPath, nil)
+		resp, err := client.Do(req)
+		if err != nil {
+			return false, err.Error()
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			return false, fmt.Sprintf("GET hold succeeded (%d)", resp.StatusCode)
+		}
+		return true, fmt.Sprintf("GET hold not allocated (%d)", resp.StatusCode)
+	}))
+
+	rep.Probes = append(rep.Probes, probe("Stale execution rejected", func() (bool, string) {
+		code, body := postJSON(client, edge+holdPath, map[string]string{
+			"X-Bruiser-Execution": "stale.not.a.valid.execution",
+		}, map[string]int{"seats": 1})
+		if code >= 200 && code < 300 {
+			return false, fmt.Sprintf("front allocated with a stale execution token (%d) %s", code, body)
+		}
+		return true, fmt.Sprintf("stale execution not allocated (%d)", code)
+	}))
+
 	rep.Probes = append(rep.Probes, probe("Direct allocation bypass blocked", func() (bool, string) {
 		if origin == "" {
 			return false, "origin URL not set"

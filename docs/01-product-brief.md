@@ -1,12 +1,24 @@
-# Bruiser Gateway — Product & Technical Brief (v2.3)
+# Bruiser Gateway — Product & Technical Brief (v2.4)
 
 Working name: **Bruiser Gateway** · Domain: bruiser-gateway.com
 
-This is a revision of the original brief. It keeps the product direction intact and
-sharpens the parts that would otherwise cause trouble in engineering, sales or
-enterprise due-diligence. The concrete design lives in
-[02-technical-design.md](02-technical-design.md); the build sequence lives in
-[03-execution-plan.md](03-execution-plan.md).
+**Binding product instructions:** [00-product-instructions.md](00-product-instructions.md).
+This file keeps the v2–v2.3 rationale and technical sharpening. Where they
+conflict, **v2.4 wins**.
+
+The concrete design lives in [02-technical-design.md](02-technical-design.md);
+the build sequence lives in [03-execution-plan.md](03-execution-plan.md).
+
+### v2.4 — merchant-controlled drop-in (binding)
+
+| # | Change | Why it matters |
+|---|--------|----------------|
+| 28 | **North-star is install-in-front, merchant-held data.** Self-hosted by default. Vendor telemetry off unless explicitly opted in; no PII in telemetry. | Prevents Bruiser becoming a hosted identity/ticketing silo. |
+| 29 | **Discovery is a parallel commercial track, not an engineering gate.** Generic adapters first. “Can I put Bruiser in front of my existing system?” | Stops the roadmap waiting on club calls. |
+| 30 | **Identity extractors are configuration:** JWT, cookie JWT, introspection, edge-signed headers. | Configure Bruiser; do not custom-build per merchant. |
+| 31 | **Heartbeat default 20 s** (TTL 60 s). | Matches the instructed lease loop. |
+| 32 | **Free tier is Bruiser Community**, not “OSS”. Protocol/SDKs Apache-2.0 (intended); core BSL 1.1 pending counsel. | Honest licensing. |
+| 33 | **Initial integrations are generic** (Proxy, NGINX, Cloudflare Worker, Node, API Gateway, Compose, Helm). Not a Ticketmaster partnership. | First product is useful without a platform deal. |
 
 ---
 
@@ -52,7 +64,7 @@ the following:
 | 22 | **Execution Amplification Factor (EAF) is the primary operational KPI.** `EAF = incoming allocation attempts ÷ authorised executions forwarded`. The dashboard, demo and sales conversation all lead with it. | Turns the 10,000-agents story into a number a ticketing office can watch. |
 | 23 | **Transparent enforcement is a named product principle**, with two client classes: Bruiser-aware (explicit APIs, better UX) and Bruiser-unaware (merchant session, automatic acquire, same rules). | The merchant is protected regardless of the client. |
 | 24 | **Commercial messaging rule is binding.** Never: Redis lock, bot detection, DDoS, ticketing platform, middleware, a proxy or an API gateway. Always: the authoritative control layer for autonomous commerce that ensures one customer remains one customer, regardless of how many agents they deploy. | Prevents the product being sold as something a competent team builds in a week, or as a box. |
-| 25 | **Stage A commercial discovery starts immediately**, before significant engineering investment, and is a core product activity — not a post-MVP sales exercise. | Integration requirements that shape V1 come from clubs, not from the lab. |
+| 25 | **Commercial discovery starts immediately, in parallel with engineering.** It validates demand and recruits design partners. It does **not** decide whether Bruiser can be built. | v2.4 §30–32 |
 
 ### v2.3 — lease heartbeat and recovery
 

@@ -11,8 +11,10 @@ Secondary purposes: learn which identity source and anchors exist (feeds policy
 design), and learn the club's operational constraints (feeds deployment and
 support scope).
 
-This discovery process is a core product activity, not a post-MVP sales exercise.
-It starts immediately, before significant engineering investment.
+This questionnaire is a **commercial** tool: it validates demand, maps which
+standard placement (Embedded / Edge / Proxy) fits, and recruits design
+partners. It is **not** an engineering gate. Bruiser is built as a generic
+drop-in; conversations run in parallel (v2.4 §30).
 
 Run it with the head of digital/IT or their lead engineer present; the ticketing
 office answers the commercial and fairness questions. Fill in the summary at the

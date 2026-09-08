@@ -75,7 +75,7 @@ Scope
   increment.
 - Idempotent re-acquire by the same principal (ALREADY_HELD); BUSY response shape.
 - Heartbeat renewal: `POST .../renew` and `POST .../heartbeat` extend TTL;
-  `heartbeat_after_ms` on ACTIVE responses (default interval 25 s, lease TTL 60 s).
+  `heartbeat_after_ms` on ACTIVE responses (default interval 20 s, lease TTL 60 s).
 - Recovery: reconnect before expiry resumes the same execution (TTL extended,
   session rebound); after expiry a new execution may be acquired.
 - Expiry as derived state plus a sweeper that materialises `EXPIRED` and emits audit.

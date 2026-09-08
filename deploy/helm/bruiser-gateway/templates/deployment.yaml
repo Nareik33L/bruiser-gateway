@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bruiser-gateway
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: bruiser-gateway
+  template:
+    metadata:
+      labels:
+        app: bruiser-gateway
+    spec:
+      containers:
+        - name: gateway
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          args: ["serve"]
+          ports:
+            - containerPort: 8080
+              name: http
+            - containerPort: 8081
+              name: proxy
+          env:
+            {{- range $k, $v := .Values.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- if .Values.originURL }}
+            - name: BRUISER_ORIGIN_URL
+              value: {{ .Values.originURL | quote }}
+            {{- end }}
+            {{- range $k, $v := .Values.secrets }}
+            - name: {{ $k }}
+              valueFrom:
+                secretKeyRef:
+                  name: bruiser-gateway
+                  key: {{ $k }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bruiser-gateway
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app: bruiser-gateway
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+    - name: proxy
+      port: {{ .Values.service.proxyPort }}
+      targetPort: proxy
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: bruiser-gateway
+type: Opaque
+stringData:
+  {{- range $k, $v := .Values.secrets }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}

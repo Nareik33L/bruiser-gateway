@@ -9,6 +9,7 @@ import (
 type PerExecution struct {
 	MaxInFlight int
 	RPS         float64
+	Burst       int
 
 	mu   sync.Mutex
 	byID map[string]*slot
@@ -27,9 +28,14 @@ func New(maxInFlight int, rps float64) *PerExecution {
 	if rps <= 0 {
 		rps = 5
 	}
+	burst := int(rps) + 5
+	if burst < 1 {
+		burst = 10
+	}
 	return &PerExecution{
 		MaxInFlight: maxInFlight,
 		RPS:         rps,
+		Burst:       burst,
 		byID:        map[string]*slot{},
 	}
 }
@@ -49,8 +55,12 @@ func (p *PerExecution) Take(executionID string, now time.Time) (release func(), 
 	elapsed := now.Sub(s.last).Seconds()
 	if elapsed > 0 {
 		s.tokens += elapsed * p.RPS
-		if s.tokens > p.RPS {
-			s.tokens = p.RPS
+		cap := p.RPS
+		if p.Burst > 0 {
+			cap = float64(p.Burst)
+		}
+		if s.tokens > cap {
+			s.tokens = cap
 		}
 		s.last = now
 	}

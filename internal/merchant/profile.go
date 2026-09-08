@@ -22,12 +22,31 @@ type Profile struct {
 }
 
 type Identity struct {
-	Extractor       string `yaml:"extractor"` // auto | cookie-jwt | bearer-jwt | header
+	Extractor       string `yaml:"extractor"` // auto | cookie-jwt | bearer-jwt | header | introspect | edge-signed
+	Source          string `yaml:"source"`    // compact alias of extractor
 	Cookie          string `yaml:"cookie"`
 	Header          string `yaml:"header"`
 	PrincipalHeader string `yaml:"principal_header"`
 	SubjectClaim    string `yaml:"subject_claim"`
+	Claim           string `yaml:"claim"` // compact alias of subject_claim
 	HMACSecretEnv   string `yaml:"hmac_secret_env"`
+	IntrospectURL   string `yaml:"introspect_url"`
+}
+
+// Compact fields — accepted at the document root so a merchant can write
+// merchant / identity.source / concurrency.max_active / lease.ttl.
+type compactRoot struct {
+	Merchant    string `yaml:"merchant"`
+	Concurrency struct {
+		MaxActive int `yaml:"max_active"`
+	} `yaml:"concurrency"`
+	Resource struct {
+		Scope string `yaml:"scope"`
+	} `yaml:"resource"`
+	Lease struct {
+		TTL       string `yaml:"ttl"`
+		Heartbeat string `yaml:"heartbeat"`
+	} `yaml:"lease"`
 }
 
 type Route struct {
@@ -56,6 +75,23 @@ func Parse(b []byte) (Profile, error) {
 	if err := yaml.Unmarshal(b, &p); err != nil {
 		return p, err
 	}
+	var compact compactRoot
+	_ = yaml.Unmarshal(b, &compact)
+	if p.MerchantID == "" {
+		p.MerchantID = compact.Merchant
+	}
+	if p.Identity.Extractor == "" && p.Identity.Source != "" {
+		p.Identity.Extractor = mapSource(p.Identity.Source)
+	}
+	if p.Identity.SubjectClaim == "" && p.Identity.Claim != "" {
+		p.Identity.SubjectClaim = p.Identity.Claim
+	}
+	if compact.Concurrency.MaxActive > 0 && p.Policy.MaxActive < 1 {
+		p.Policy.MaxActive = compact.Concurrency.MaxActive
+	}
+	if compact.Lease.TTL != "" && p.Policy.LeaseTTL == "" {
+		p.Policy.LeaseTTL = compact.Lease.TTL
+	}
 	if p.MerchantID == "" {
 		return p, fmt.Errorf("merchant_id required")
 	}
@@ -78,6 +114,23 @@ func Parse(b []byte) (Profile, error) {
 		p.Unmatched = "allow"
 	}
 	return p, nil
+}
+
+func mapSource(src string) string {
+	switch strings.ToLower(strings.TrimSpace(src)) {
+	case "jwt", "bearer":
+		return "bearer-jwt"
+	case "cookie", "cookie-jwt":
+		return "cookie-jwt"
+	case "header":
+		return "header"
+	case "introspect", "introspection":
+		return "introspect"
+	case "edge-signed", "signed-header":
+		return "edge-signed"
+	default:
+		return src
+	}
 }
 
 func (p Profile) UnmatchedAllow() bool {

@@ -12,7 +12,7 @@ still genuinely open is listed at the end.
 | Q4 | Team / language | 1–2 engineers comfortable in Go. Go preferred for the gateway; architecture must not become unnecessarily language-dependent. | Design rule 9 (protocol-first); ADR-008 unchanged |
 | Q5 | Hosted sandbox | Yes — encouraged as a sales and developer-discovery asset. Production stays self-hosted. | Brief §11; design §15; ADR-016; execution plan M6, M8 |
 | Q6 | Inter-customer fairness | Out of scope for V1 and V1.5. Not replacing waiting-room products. | Unchanged (brief §2, §8; ADR-006) |
-| Q7 | Design partners | None confirmed. Immediate commercial priority alongside development; use club conversations to validate integration requirements. | Brief §20; execution plan commercial track (Stage A starts immediately, before significant engineering investment), R13; `06-integration-discovery.md` |
+| Q7 | Design partners | None confirmed. Commercial track runs in parallel with engineering: outreach, demo, design-partner pilots. Conversations validate demand and environments. They are not a prerequisite for building Bruiser. | v2.4 §30–32; `00-product-instructions.md` |
 | Q8 | Agent ecosystem | Yes to MCP server / tool definitions and agent SDKs eventually, but enforcement must never depend on agents voluntarily using Bruiser tooling. | Brief §9.2, §10, philosophy 3; design §5.1a, §9; ADR-002a; V1.5 track |
 | Q9 | Data residency / retention | Merchant self-hosting is the primary residency control. Retention configurable, default 13 months, subject to legal/security review and merchant requirements. | Brief §11, §16; design §13; ADR-018; execution plan M7 |
 | Q10 | External security review | Yes; budgeted; part of M8 production-readiness criteria. | Execution plan M8 exit criteria |
@@ -37,8 +37,20 @@ still genuinely open is listed at the end.
 
 | Addition | Where it landed |
 |----------|-----------------|
-| Heartbeat renewal every 20–30 s (default 25 s); missed heartbeat expires at TTL (default 60 s) | Brief §5; design §4.3; ADR-023; protocol RENEW/HEARTBEAT; `BRUISER_HEARTBEAT_INTERVAL` |
+| Heartbeat renewal every 20–30 s (default **20 s** as of v2.4); missed heartbeat expires at TTL (default 60 s) | Brief §5; v2.4 §10; ADR-023; `BRUISER_HEARTBEAT_INTERVAL` |
 | Recovery: reconnect before expiry resumes the same execution; after expiry a new execution may be acquired | Brief §5, §24; design §6; M1 exit criteria; store resume path |
+
+## v2.4 — product instructions (binding)
+
+| Addition | Where it landed |
+|----------|-----------------|
+| Merchant-controlled self-host; telemetry disabled by default | `00-product-instructions.md` §3; `BRUISER_TELEMETRY` |
+| Configure, do not custom-build; compact profile | §4; `configs/example.yaml`, `configs/compact.yaml` |
+| Extractors: JWT, cookie, introspect, edge-signed header | `internal/identity` |
+| Heartbeat default 20 s | `BRUISER_HEARTBEAT_INTERVAL` |
+| Bruiser Community (not OSS); Core £20k; Enterprise £100k+ | §25–26 |
+| Generic adapters + Helm + Cloudflare Worker first | `internal/adapter`, `deploy/helm`, `deploy/edge/cloudflare-worker.js` |
+| North-star: install in front without handing data to the vendor | §34 |
 
 ## Still open (do not block engineering)
 
@@ -47,5 +59,5 @@ still genuinely open is listed at the end.
 | BSL 1.1 parameters (Additional Use Grant wording, Change Date) confirmed by counsel; OSS/Core boundary signed off | Founder + counsel | M8 publication |
 | Fair-use envelope numbers (peak concurrent executions, events/year, deployments) | Founder, with first design partners | Core licence template, M8 |
 | Trademark search result for "Bruiser Gateway" | Founder + counsel | Before hosted demo goes public (M6) and before launch |
-| Which three clubs become design partners, and which deployment method each needs | Founder (commercial track Stage A, starts immediately) | Shapes M3 scope; ideally before M3 starts |
-| Anchor set per design partner (membership number, household, payment fingerprint availability) | Discovery calls | M4 |
+| Which clubs become design partners | Founder (commercial track, parallel) | Pilots — does not block the generic product |
+| Anchor set per design partner | Discovery calls | Policy examples, not the engine |

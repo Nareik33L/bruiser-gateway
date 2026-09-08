@@ -36,6 +36,10 @@ func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) statusPayload(ctx context.Context) map[string]any {
 	obs, down, att, fwd := s.eaf.headline()
+	absorbed := att - fwd
+	if absorbed < 0 {
+		absorbed = 0
+	}
 	usage, _ := s.store.UsageFigures(ctx, s.cfg.MerchantID)
 	active, _ := s.store.ListActive(ctx, s.cfg.MerchantID, "", 50)
 	execs := make([]map[string]any, 0, len(active))
@@ -53,13 +57,16 @@ func (s *Server) statusPayload(ctx context.Context) map[string]any {
 	}
 	body := map[string]any{
 		"merchant":       s.cfg.MerchantID,
+		"version":        "0.1.0-dev",
+		"telemetry":      s.cfg.Telemetry,
 		"policy_version": s.PolicyVersion(),
 		"eaf": map[string]any{
-			"observed":    obs,
-			"downstream":  down,
-			"attempts":    att,
-			"forwarded":   fwd,
-			"resources":   s.eaf.snapshotAll(),
+			"observed":   obs,
+			"downstream": down,
+			"attempts":   att,
+			"forwarded":  fwd,
+			"absorbed":   absorbed,
+			"resources":  s.eaf.snapshotAll(),
 		},
 		"usage":      usage,
 		"executions": execs,

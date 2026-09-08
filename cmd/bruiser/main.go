@@ -105,6 +105,9 @@ func cmdServe(cfg config.Config, log *slog.Logger) error {
 		return fmt.Errorf("BRUISER_ORIGIN_URL is required when BRUISER_PROXY_ADDR is set")
 	}
 
+	if !cfg.Telemetry {
+		log.Info("telemetry disabled (merchant-controlled; no vendor phone-home)")
+	}
 	handler := publicapi.New(cfg, store, signer, log, loadProfile(cfg, log))
 	handler.Start(ctx)
 	defer handler.Close()

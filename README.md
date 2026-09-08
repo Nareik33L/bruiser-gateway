@@ -54,7 +54,8 @@ Dev assertions default to membership `1001234` (Alice in the Arsenal-like lab):
 
 | Document | Purpose |
 |----------|---------|
-| [docs/01-product-brief.md](docs/01-product-brief.md) | Product brief (v2.3) |
+| [docs/00-product-instructions.md](docs/00-product-instructions.md) | Binding product instructions (v2.4) |
+| [docs/01-product-brief.md](docs/01-product-brief.md) | Product brief (v2.4) |
 | [docs/02-technical-design.md](docs/02-technical-design.md) | V1 design |
 | [docs/03-execution-plan.md](docs/03-execution-plan.md) | Milestones M0–M8 |
 | [docs/04-decisions.md](docs/04-decisions.md) | Architecture decision log |
@@ -69,8 +70,10 @@ Dev assertions default to membership `1001234` (Alice in the Arsenal-like lab):
 
 ## Licensing (intended, pending legal review)
 
-Protocol, schemas, specifications and SDKs: Apache-2.0. Gateway core: BSL 1.1.
-No licence files are committed until the OSS/Core boundary is formally decided.
+Protocol, schemas, specifications and SDKs: intended Apache-2.0. Gateway core:
+intended BSL 1.1 (source-available). The free tier is **Bruiser Community**,
+not “open source”. No licence files until counsel signs the split.
+Vendor telemetry is **off** unless `BRUISER_TELEMETRY=1`.
 
 ## Status
 

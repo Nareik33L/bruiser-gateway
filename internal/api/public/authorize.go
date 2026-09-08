@@ -94,10 +94,16 @@ func (s *Server) admit(ctx context.Context, method, path, eventID string, r *htt
 		return admitResult{status: http.StatusOK, allow: true, headers: h, body: map[string]string{"status": "ALLOW", "action": route.Action}}
 	}
 
-	cust, err := identity.Extract(s.profile.Identity, s.cfg.DevHMACSecret,
-		cookieValue(r, s.profile.Identity.Cookie), bearer(r),
-		headerValue(r, s.profile.Identity.Header),
-		headerValue(r, s.profile.Identity.PrincipalHeader))
+	cust, err := identity.ExtractInput(ctx, identity.Input{
+		Identity:   s.profile.Identity,
+		Secret:     s.cfg.DevHMACSecret,
+		EdgeSecret: s.cfg.EdgeSecret,
+		Cookie:     cookieValue(r, s.profile.Identity.Cookie),
+		Bearer:     bearer(r),
+		Header:     headerValue(r, s.profile.Identity.Header),
+		Principal:  headerValue(r, s.profile.Identity.PrincipalHeader),
+		Introspect: firstNonEmpty(s.profile.Identity.IntrospectURL, s.cfg.IntrospectURL),
+	})
 	if err != nil {
 		s.eaf.record(resourceOrPath(route, params, eventID), "", "unauthorized")
 		return admitResult{status: http.StatusUnauthorized, body: map[string]string{"error": "missing merchant session"}}
@@ -277,6 +283,13 @@ func headerValue(r *http.Request, name string) string {
 		return ""
 	}
 	return r.Header.Get(name)
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 func resourceOrPath(route merchant.Route, params map[string]string, eventID string) string {
