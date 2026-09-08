@@ -87,5 +87,12 @@ Dashboard: `GET /admin`.
 Optional `principal_header` distinguishes two agents of the same customer
 (BUSY). Same cookie `jti` resumes (ALREADY_HELD / heartbeat).
 
+Bruiser trusts the merchant’s authenticated identity boundary. It does
+not invent a customer. Unsigned identity headers (`extractor: header`,
+or `auto` falling through to `X-Customer-Id`) must only be accepted from
+a trusted, authenticated edge. The JWT / cookie-JWT / OIDC / edge-signed
+extractors are the correct V1 demonstration. Stronger signed-identity
+options can come later; this is not a V1 blocker.
+
 The Arsenal-like file (`configs/arsenal.yaml`) is a lab example of this same
 plug-in, not a prerequisite and not a customer claim.

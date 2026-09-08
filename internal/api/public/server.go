@@ -50,11 +50,11 @@ var (
 	}, []string{"resource"})
 	observedEAF = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "bruiser_observed_eaf",
-		Help: "Incoming allocation attempts divided by authorised executions forwarded.",
+		Help: "Process-local incoming allocation attempts ÷ authorised executions forwarded. Do not sum this gauge across replicas. Cluster EAF = sum(allocation_attempts_total) / sum(executions_forwarded_total).",
 	}, []string{"resource"})
 	downstreamEAF = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "bruiser_downstream_eaf",
-		Help: "Authorised executions forwarded divided by distinct customers who attempted.",
+		Help: "Process-local authorised executions forwarded ÷ distinct customers this process saw. Do not sum across replicas.",
 	}, []string{"resource"})
 	handoffTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "bruiser_handoff_total",

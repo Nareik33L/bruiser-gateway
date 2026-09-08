@@ -1,9 +1,12 @@
 # Bruiser Gateway — V1 readiness
 
-Feature-complete V1 is treated as frozen. This document records whether
-the existing implementation is production-functional, what was proven,
-and what remains a deployment limitation. It does not add product
-requirements.
+Feature-complete V1 is **frozen**. No new product features. This document
+records whether the existing implementation is production-functional, what
+was proven, and what remains a deployment limitation.
+
+Operational edges closed in this revision: process-local EAF gauges
+documented (do not sum), unsigned header identity documented as a
+merchant trust-boundary, and a long-churn soak (`make soak`) added.
 
 Reproduce everything here with:
 
@@ -70,15 +73,16 @@ not double-grant).
 |------|----------------------------|
 | `unmatched: allow` | Discovery fail-open by design. `config validate` FAILs if origin lockdown is off. Authority Check probes common forgotten paths on the front **and** the origin. |
 | Admin cookie is not `Secure` | Lab HTTP. Terminate TLS at the ingress and do not expose `/admin` publicly without a network policy. |
-| Prometheus counters are process-global | Per-replica. Admin `/v1/admin/status` EAF is per process. Do not sum `bruiser_observed_eaf` across replicas as a single truth. |
+| Prometheus EAF gauges are process-local | Do not sum `bruiser_observed_eaf` or `bruiser_downstream_eaf` across replicas. Cluster EAF is `sum(allocation_attempts_total) / sum(executions_forwarded_total)`. See `docs/ops.md` and `deploy/prometheus/eaf.rules.yaml`. |
 | Busy cache is in-process | Correctness is the store. A replica restart rebuilds the cache. |
 | 10,000-agent proof is nightly | Default CI uses 200 + 3×250. `make eaf-nightly` is the 1×10,000 command. |
 | `fail_closed=false` and `enforcement=false` | Operator-chosen fail-open. Default is fail-closed on allocation. |
-| Header-extractor identity | Spoofable if the merchant profile trusts an unsigned header. Arsenal-like V1 uses cookie JWT. |
+| Header-extractor identity | Bruiser trusts the merchant’s authenticated identity boundary. Unsigned headers must only be accepted from a trusted edge. JWT/OIDC/edge-signed is the V1 demonstration. Not a V1 blocker. |
 | P1 items | Full MCP server, OTel, admin SSO, Testcontainers, published k6, Helm ZDT, protocol v1 — not required for Stage A. |
 
 ## 4. Tests added or strengthened
 
+- `internal/torture/soak_test.go` — long-churn soak (renew/reconnect/release/queue + replica restart)
 - `internal/check/adversarial_test.go` — final attack pass: one customer, one active origin execution
 - `internal/check/deploy_accept_test.go` — one suite against Embedded, Edge, and Proxy install paths
 - `internal/check/v1_accept_test.go` — lifecycle, ramp, authority, placement, amplification
@@ -107,6 +111,9 @@ bruiser authority-check --front http://127.0.0.1:8091 --origin http://127.0.0.1:
 
 # 1 customer × 10,000 agents (origin held must stay 1)
 make eaf-nightly
+
+# Long churn (default 30m × 10,000 agents). Not default CI.
+make soak
 ```
 
 ## 6. Remaining production blockers
@@ -146,8 +153,10 @@ Still **human-owned** (not software gaps):
 - Postgres is the backing store (one logical database, one or more
   Bruiser replicas).
 - Merchant identity is already authenticated; Bruiser consumes it.
-- `make eaf-nightly` is the reproducible 10k command; default CI stays
-  smaller so it remains runnable.
+- `make eaf-nightly` is the reproducible 10k burst; `make soak` is the
+  30-minute 10k churn. Default CI stays smaller so it remains runnable.
+- V1 is frozen. Remaining work is human-owned (LICENSE, counsel, external
+  review, signing keys, sandbox DNS, Stage A outbound).
 - No new product features were added. Admin login now sets a cookie
   instead of putting the secret in the query string — a security fix of
   the existing admin surface.

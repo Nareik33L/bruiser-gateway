@@ -1,0 +1,13 @@
+# Cluster observed EAF from additive counters.
+# Do not sum bruiser_observed_eaf or bruiser_downstream_eaf — those gauges
+# are process-local. Downstream EAF (forwarded ÷ distinct customers) cannot
+# be reconstructed from per-replica series without double-counting customers
+# who hit more than one replica; leave that gauge alone.
+groups:
+  - name: bruiser_eaf
+    rules:
+      - record: bruiser:observed_eaf:ratio
+        expr: |
+          sum(increase(bruiser_allocation_attempts_total[5m]))
+          /
+          clamp_min(sum(increase(bruiser_executions_forwarded_total[5m])), 1)

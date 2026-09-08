@@ -95,15 +95,16 @@ Vendor telemetry is **off** unless `BRUISER_TELEMETRY=1`.
 
 ## Status
 
-M0–M7 lab work is in this tree against the **unverified Arsenal-like**
-profile: Edge, Proxy, Go/Node/Python Embedded SDKs, Authority Check (persisted),
-EAF (PR CI 200×; `make eaf-nightly` 10,000×), YAML policy with cross-node
-NOTIFY, handoff/revoke plus torture I2/I4, demo swarm + `/admin` dashboard,
-audit export and 13-month purge, bounded intra-customer queue, OIDC/JWKS
-extractor, Helm HPA/PDB/NetworkPolicy/ServiceMonitor/migrate, dry-run,
-doctor / config validate, emergency controls. M8 human work
-(legal BSL/LICENSE, trademark, external security review, hosted sandbox DNS,
-image signing keys) and Stage A outbound are not claimed.
+**V1 is frozen.** No new product features. Remaining work is human-owned
+(LICENSE/counsel, trademark, external security review, hosted sandbox DNS,
+image signing keys, Stage A outbound).
+
+The tree has Edge, Proxy, Go/Node/Python Embedded SDKs, Authority Check,
+EAF (`make eaf-nightly` 10,000× burst; `make soak` 30-minute 10k churn),
+YAML policy, handoff/revoke, bounded intra-customer queue, OIDC/JWKS,
+Helm, dry-run, doctor, emergency controls, and deployment acceptance
+across Embedded / Edge / Proxy. `bruiser_observed_eaf` is process-local —
+do not sum it across replicas (`docs/ops.md`).
 
 ## Arsenal-like lab (best guess until discovery)
 

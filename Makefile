@@ -6,7 +6,7 @@ DATABASE_URL ?= postgres://bruiser:bruiser@127.0.0.1:5432/bruiser?sslmode=disabl
 TEST_DATABASE_URL ?= postgres://bruiser:bruiser@127.0.0.1:5432/bruiser_test?sslmode=disable
 
 .PHONY: all build test test-race lint fmt vet serve migrate tidy ci torture simtix authority-check eaf-demo eaf-nightly sdk-test doctor \
-	demo-1x10000 demo-1000x10 demo-handoff demo-bypass demo-unaware demo-up v1-accept
+	demo-1x10000 demo-1000x10 demo-handoff demo-bypass demo-unaware demo-up v1-accept soak
 
 all: build
 
@@ -61,6 +61,14 @@ eaf-demo: build
 eaf-nightly: build
 	BRUISER_TEST_DATABASE_URL="$(TEST_DATABASE_URL)" BRUISER_EAF_N=10000 \
 		$(GO) test ./internal/check -count=1 -timeout 10m -run TestEAFNightly
+
+# Long churn: 10,000 agents, 30 minutes, renew/reconnect/release/queue.
+# Override with BRUISER_SOAK_DURATION=60m BRUISER_SOAK_AGENTS=10000.
+soak:
+	BRUISER_TEST_DATABASE_URL="$(TEST_DATABASE_URL)" \
+	BRUISER_SOAK_DURATION="$${BRUISER_SOAK_DURATION:-30m}" \
+	BRUISER_SOAK_AGENTS="$${BRUISER_SOAK_AGENTS:-10000}" \
+		$(GO) test ./internal/torture -count=1 -timeout 90m -run TestSoakChurn -v
 
 v1-accept:
 	BRUISER_TEST_DATABASE_URL="$(TEST_DATABASE_URL)" $(GO) test ./internal/check ./internal/api/public ./internal/store/postgres ./internal/ops ./internal/simtix \

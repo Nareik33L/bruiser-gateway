@@ -18,6 +18,9 @@ unmatched: allow
 identity:
   # auto: cookie JWT, then bearer JWT, then X-Customer-Id (or identity.header).
   # Bruiser consumes that identifier; it does not mint customer identities.
+  # Unsigned headers (extractor: header, or auto's header fallback) must
+  # only be accepted from a trusted/authenticated edge. Prefer cookie-jwt
+  # / bearer-jwt / oidc / edge-signed in production.
   extractor: auto
   cookie: session
   header: X-Customer-Id

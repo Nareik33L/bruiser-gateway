@@ -139,6 +139,54 @@ when policy `waiting.mode` is `bounded`.
 - `GET /readyz` — JSON: `store`, `signing_key`, `mode`, `enforcement`, `upstream` (informational). 503 if store or signing key is not ready.
 - `GET /metrics` — Prometheus (EAF, acquire outcomes, store unavailable)
 
+## Prometheus / EAF
+
+`bruiser_observed_eaf` and `bruiser_downstream_eaf` are **process-local
+gauges**. Each replica only sees the traffic that hit that process.
+**Do not sum them across replicas.** `sum(bruiser_observed_eaf)` is not
+a cluster amplification factor.
+
+Admin `GET /v1/admin/status` `eaf` is the same: per process.
+
+The counters **are** additive:
+
+| Metric | Sum across replicas? |
+|--------|----------------------|
+| `bruiser_allocation_attempts_total` | Yes |
+| `bruiser_executions_forwarded_total` | Yes |
+| `bruiser_acquire_total` | Yes |
+| `bruiser_observed_eaf` | **No** |
+| `bruiser_downstream_eaf` | **No** |
+| `bruiser_queue_depth` | No (gauge; use `max` or admin `usage`) |
+
+Cluster observed EAF (the correct aggregate):
+
+```promql
+sum(increase(bruiser_allocation_attempts_total[5m]))
+/
+clamp_min(sum(increase(bruiser_executions_forwarded_total[5m])), 1)
+```
+
+A ready recording rule is in `deploy/prometheus/eaf.rules.yaml`
+(`bruiser:observed_eaf:ratio`). Load that file; do not change how the
+process gauges work.
+
+## Identity trust boundary
+
+Bruiser **consumes** the merchant’s authenticated customer identifier.
+It does not mint one and it does not decide who a human is.
+
+- Signed extractors (`cookie-jwt`, `bearer-jwt`, `oidc`, `edge-signed`)
+  are the V1 demonstration. The Arsenal-like lab uses a cookie JWT.
+- `identity.extractor: header` (and the `auto` fallback to
+  `X-Customer-Id`) trusts an **unsigned** header. Accept that only from
+  a trusted, authenticated edge (mTLS, network policy, or the edge
+  secret already wrapping `/v1/authorize`). If clients can set
+  `X-Customer-Id` themselves, they pick their customer.
+- Stronger signed-identity options can come later. Unsigned-header
+  hardening is not a V1 blocker when the club uses JWT/OIDC the way the
+  lab already does.
+
 ## Emergency controls
 
 `GET/PUT /v1/admin/controls` (admin secret). Audited as `CONTROL_CHANGED`.
@@ -173,7 +221,9 @@ enforce  = (bucket < enforce_percent)
 
 - `customer_id` is the merchant-authenticated identifier Bruiser
   consumed (cookie JWT `sub`, bearer subject, edge-signed header, or
-  introspected subject). Bruiser does not invent one.
+  introspected subject). Bruiser does not invent one. Unsigned identity
+  headers are only safe behind a trusted edge — see **Identity trust
+  boundary**.
 - `ramp_salt` is optional (`PUT /v1/admin/controls`). Changing it
   reshuffles the cohort; the new mapping is deterministic and auditable
   via `CONTROL_CHANGED`.

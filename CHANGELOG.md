@@ -36,6 +36,11 @@
 - Ops runbook, threat model, protocol token/audit notes, this changelog.
 - HTTP body limit (1 MiB) on session and acquire.
 
+- V1 freeze: process-local EAF gauges documented (do not sum);
+  `bruiser:observed_eaf:ratio` recording rule from additive counters;
+  unsigned identity-header trust boundary documented; `make soak` long
+  churn (10k agents, 30m).
+
 ### Changed
 
 - Protocol capabilities advertise `QUEUE`.
