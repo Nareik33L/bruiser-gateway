@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/Nareik33L/bruiser-gateway/internal/auth"
-	"github.com/Nareik33L/bruiser-gateway/internal/lease"
 )
 
 func (s *Server) introspect(w http.ResponseWriter, r *http.Request) {
@@ -29,7 +29,7 @@ func (s *Server) introspect(w http.ResponseWriter, r *http.Request) {
 	}
 	active := false
 	if e, err := s.leases.Get(r.Context(), s.cfg.MerchantID, claims.ExecutionID); err == nil {
-		active = e.State == lease.StateActive
+		active = e.IsActive(time.Now().UTC())
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"active":       active,

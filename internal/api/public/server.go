@@ -51,6 +51,14 @@ var (
 		Name: "bruiser_downstream_eaf",
 		Help: "Authorised executions forwarded divided by distinct customers who attempted.",
 	}, []string{"resource"})
+	handoffTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "bruiser_handoff_total",
+		Help: "Handoff operations by mode.",
+	}, []string{"mode"})
+	revokeTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "bruiser_revoke_total",
+		Help: "Customer or admin revokes.",
+	})
 )
 
 type eafAcc struct {
@@ -148,6 +156,8 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 			r.Post("/executions/{id}/renew", s.renew)
 			r.Post("/executions/{id}/heartbeat", s.renew)
 			r.Post("/executions/{id}/release", s.release)
+			r.Post("/executions/{id}/handoff", s.handoff)
+			r.Post("/executions/{id}/revoke", s.revoke)
 			r.Get("/executions/{id}", s.get)
 			r.Get("/executions/{id}/watch", s.watch)
 		})
@@ -187,7 +197,7 @@ func (s *Server) protocol(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"protocol":     "bruiser",
 		"version":      "0.1-draft",
-		"capabilities": []string{"IDENTITY", "ACQUIRE", "RENEW", "HEARTBEAT", "RELEASE", "WATCH", "AUTHORIZE", "INTROSPECT"},
+		"capabilities": []string{"IDENTITY", "ACQUIRE", "RENEW", "HEARTBEAT", "RELEASE", "HANDOFF", "REVOKE", "WATCH", "AUTHORIZE", "INTROSPECT"},
 	})
 }
 
@@ -391,6 +401,60 @@ func (s *Server) release(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type handoffReq struct {
+	To struct {
+		Type string `json:"type"`
+		ID   string `json:"id"`
+	} `json:"to"`
+	Mode string `json:"mode"`
+}
+
+func (s *Server) handoff(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r.Context())
+	var body handoffReq
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+	}
+	res, err := s.leases.Handoff(r.Context(), lease.HandoffRequest{
+		MerchantID:  sess.MerchantID,
+		ExecutionID: chi.URLParam(r, "id"),
+		SessionID:   sess.SessionID,
+		To:          lease.Principal{Type: body.To.Type, ID: body.To.ID},
+		Mode:        body.Mode,
+		TTL:         s.cfg.LeaseTTL,
+		RequestID:   requestID(r),
+	})
+	if err != nil {
+		s.mutationError(w, err)
+		return
+	}
+	handoffTotal.WithLabelValues(res.Mode).Inc()
+	s.writeExecution(w, http.StatusCreated, &res.Successor, true)
+}
+
+type revokeReq struct {
+	Reason string `json:"reason"`
+}
+
+func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r.Context())
+	var body revokeReq
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+	}
+	e, err := s.leases.Revoke(r.Context(), sess.MerchantID, chi.URLParam(r, "id"), sess.SessionID, requestID(r), body.Reason)
+	if err != nil {
+		s.mutationError(w, err)
+		return
+	}
+	revokeTotal.Inc()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"execution_id": e.ID,
+		"state":        e.State,
+		"end_reason":   e.EndReason,
+	})
+}
+
 func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r.Context())
 	e, err := s.leases.Get(r.Context(), sess.MerchantID, chi.URLParam(r, "id"))
@@ -461,6 +525,9 @@ func (s *Server) writeExecution(w http.ResponseWriter, status int, e *lease.Exec
 	if e.EndReason != "" {
 		body["end_reason"] = e.EndReason
 	}
+	if e.SuccessorID != "" {
+		body["successor_id"] = e.SuccessorID
+	}
 	if includeToken && e.State == lease.StateActive {
 		tok, err := s.signer.SignExecution(*e)
 		if err == nil {
@@ -483,6 +550,10 @@ func (s *Server) mutationError(w http.ResponseWriter, err error) {
 	}
 	if errors.Is(err, lease.ErrNotHolder) {
 		writeErr(w, http.StatusForbidden, "not holder")
+		return
+	}
+	if errors.Is(err, lease.ErrPrecedence) {
+		writeErr(w, http.StatusForbidden, "cannot preempt")
 		return
 	}
 	s.storeError(w, err)

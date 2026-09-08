@@ -90,6 +90,8 @@ Two logins of membership `1001234` against `POST /api/events/ars-che/holds`
 via the Edge: first hold is created, second session receives `409 BUSY`.
 The same cookie is `ALREADY_HELD` and heartbeats the lease. A reconnect before
 expiry resumes the same execution; after expiry a new execution may be acquired.
-Direct origin holds without
+A Bruiser-aware browser can take control of an agent's execution (`handoff`
+mode `preempt`); the agent's next renew is `410` and a stale fence is rejected
+at origin. Direct origin holds without
 `X-Bruiser-Origin-Secret` are `403`. With origin lockdown off, Authority
 Check reports Overall Result FAIL and names the open path.

@@ -41,14 +41,17 @@ func (f *fakeStore) Renew(context.Context, string, string, string, string, time.
 func (f *fakeStore) Release(context.Context, string, string, string, string) (Execution, error) {
 	return Execution{}, nil
 }
-func (f *fakeStore) Revoke(context.Context, string, string, string, string) (Execution, error) {
+func (f *fakeStore) Revoke(context.Context, string, string, string, string, string) (Execution, error) {
 	return Execution{}, nil
+}
+func (f *fakeStore) Handoff(context.Context, HandoffRequest) (HandoffResult, error) {
+	return HandoffResult{}, nil
 }
 func (f *fakeStore) Get(context.Context, string, string) (Execution, error) {
 	return Execution{}, nil
 }
 func (f *fakeStore) ExpireDue(context.Context, int) (int, error) { return 0, nil }
-func (f *fakeStore) Ping(context.Context) error                 { return nil }
+func (f *fakeStore) Ping(context.Context) error                  { return nil }
 
 func TestBusyCacheAbsorbsForeignAcquires(t *testing.T) {
 	inner := &fakeStore{}

@@ -5,6 +5,7 @@ package simtix
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"strconv"
@@ -19,6 +20,8 @@ import (
 
 const CookieName = "boxoffice_session"
 const DefaultEvent = "ars-che"
+
+var ErrStaleFence = errors.New("stale fence")
 
 type Config struct {
 	HMACSecret       string
@@ -250,6 +253,10 @@ func (s *Server) executionOK(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	if err := s.cfg.VerifyExecution(tok); err != nil {
+		if errors.Is(err, ErrStaleFence) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "stale fence"})
+			return false
+		}
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid execution token"})
 		return false
 	}

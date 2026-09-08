@@ -20,13 +20,13 @@ type Merchant struct {
 }
 
 type SessionRow struct {
-	ID             string
-	MerchantID     string
-	CustomerID     string
-	Anchors        map[string]string
-	PrincipalType  string
-	PrincipalID    string
-	ExpiresAt      time.Time
+	ID            string
+	MerchantID    string
+	CustomerID    string
+	Anchors       map[string]string
+	PrincipalType string
+	PrincipalID   string
+	ExpiresAt     time.Time
 }
 
 type SigningKey struct {

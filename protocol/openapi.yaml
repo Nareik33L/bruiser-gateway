@@ -65,6 +65,30 @@ paths:
           schema: { type: string }
       responses:
         "200": { description: released }
+  /v1/executions/{id}/handoff:
+    post:
+      summary: Transfer an execution (cooperative or preemptive)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "201": { description: successor granted }
+        "403": { description: cannot preempt }
+        "410": { description: gone }
+  /v1/executions/{id}/revoke:
+    post:
+      summary: End an execution (holder or higher-precedence principal)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: revoked }
+        "403": { description: cannot preempt }
+        "410": { description: gone }
   /v1/executions/{id}:
     get:
       summary: Execution status

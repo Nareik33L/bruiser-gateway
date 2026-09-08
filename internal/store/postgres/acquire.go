@@ -87,6 +87,7 @@ func (s *Store) Acquire(ctx context.Context, req lease.AcquireRequest) (lease.Ac
 				ActiveExecutionID: holder.ID,
 				Holder:            holder.Principal,
 				ExpiresAt:         holder.ExpiresAt,
+				CanPreempt:        lease.CanPreempt(req.Principal, holder.Principal),
 			},
 		}, nil
 	}

@@ -132,9 +132,33 @@ func (s *Store) Release(ctx context.Context, merchantID, executionID, sessionID,
 	return s.end(ctx, merchantID, executionID, sessionID, requestID, lease.StateReleased, lease.ReasonReleased, true)
 }
 
-func (s *Store) Revoke(ctx context.Context, merchantID, executionID, requestID, reason string) (lease.Execution, error) {
+func (s *Store) Revoke(ctx context.Context, merchantID, executionID, sessionID, requestID, reason string) (lease.Execution, error) {
 	if reason == "" {
 		reason = lease.ReasonRevoked
+	}
+	if sessionID == "" {
+		return s.end(ctx, merchantID, executionID, "", requestID, lease.StateRevoked, reason, false)
+	}
+	e, err := s.Get(ctx, merchantID, executionID)
+	if err != nil {
+		return lease.Execution{}, err
+	}
+	sess, err := s.Session(ctx, sessionID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return lease.Execution{}, lease.ErrNotHolder
+		}
+		return lease.Execution{}, err
+	}
+	if sess.CustomerID != e.CustomerID {
+		return lease.Execution{}, lease.ErrNotFound
+	}
+	caller := lease.Principal{Type: sess.PrincipalType, ID: sess.PrincipalID}
+	if err := s.holderMatches(ctx, e, sessionID); err != nil && !lease.CanPreempt(caller, e.Principal) {
+		if errors.Is(err, lease.ErrNotHolder) {
+			return lease.Execution{}, lease.ErrPrecedence
+		}
+		return lease.Execution{}, err
 	}
 	return s.end(ctx, merchantID, executionID, "", requestID, lease.StateRevoked, reason, false)
 }

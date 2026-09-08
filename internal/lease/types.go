@@ -23,6 +23,9 @@ const (
 	ReasonRevoked   = "REVOKED"
 	ReasonHandedOff = "HANDED_OFF"
 	ReasonReleased  = "RELEASED"
+
+	ModePreempt     = "preempt"
+	ModeCooperative = "cooperative"
 )
 
 var (
@@ -31,12 +34,14 @@ var (
 	ErrUnavailable  = errors.New("store unavailable")
 	ErrGone         = errors.New("execution is no longer active")
 	ErrInvalidInput = errors.New("invalid input")
+	ErrPrecedence   = errors.New("caller cannot preempt holder")
+	ErrForbidden    = errors.New("not allowed")
 )
 
 type GoneError struct {
-	Reason       string
-	SuccessorID  string
-	ExecutionID  string
+	Reason      string
+	SuccessorID string
+	ExecutionID string
 }
 
 func (e *GoneError) Error() string {
@@ -76,18 +81,18 @@ func (e Execution) IsActive(now time.Time) bool {
 }
 
 type AcquireRequest struct {
-	MerchantID    string
-	DomainKey     string
-	CustomerID    string
-	Principal     Principal
-	SessionID     string
-	Resource      string
-	Action        string
-	RuleName      string
-	MaxActive     int
-	TTL           time.Duration
-	MaxLifetime   time.Duration
-	RequestID     string
+	MerchantID  string
+	DomainKey   string
+	CustomerID  string
+	Principal   Principal
+	SessionID   string
+	Resource    string
+	Action      string
+	RuleName    string
+	MaxActive   int
+	TTL         time.Duration
+	MaxLifetime time.Duration
+	RequestID   string
 }
 
 type BusyInfo struct {
@@ -104,11 +109,28 @@ type AcquireResult struct {
 	Reason    string
 }
 
+type HandoffRequest struct {
+	MerchantID  string
+	ExecutionID string
+	SessionID   string
+	To          Principal
+	Mode        string // "preempt", "cooperative", or empty (inferred)
+	TTL         time.Duration
+	RequestID   string
+}
+
+type HandoffResult struct {
+	Predecessor Execution
+	Successor   Execution
+	Mode        string
+}
+
 type Store interface {
 	Acquire(ctx context.Context, req AcquireRequest) (AcquireResult, error)
 	Renew(ctx context.Context, merchantID, executionID, sessionID, requestID string, ttl time.Duration) (Execution, error)
 	Release(ctx context.Context, merchantID, executionID, sessionID, requestID string) (Execution, error)
-	Revoke(ctx context.Context, merchantID, executionID, requestID, reason string) (Execution, error)
+	Revoke(ctx context.Context, merchantID, executionID, sessionID, requestID, reason string) (Execution, error)
+	Handoff(ctx context.Context, req HandoffRequest) (HandoffResult, error)
 	Get(ctx context.Context, merchantID, executionID string) (Execution, error)
 	ExpireDue(ctx context.Context, limit int) (int, error)
 	Ping(ctx context.Context) error
