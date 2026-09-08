@@ -47,8 +47,13 @@ func (p Profile) SafetyIssues(opts SafetyOpts) []Issue {
 			if p.Identity.Audience == "" && opts.Audience == "" {
 				out = append(out, Issue{"FAIL", "identity.audience", "production requires identity.audience"})
 			}
+			if ext == "auto" && strings.TrimSpace(p.Identity.Header) != "" && !p.Identity.AllowUnsignedHeader {
+				out = append(out, Issue{"FAIL", "identity.header", "production refuses extractor: auto with an unsigned customer header unless identity.allow_unsigned_header is explicitly true"})
+			}
 		case "header":
-			out = append(out, Issue{"FAIL", "identity.extractor", "production refuses unsigned header identity; use oidc/jwks or a trusted edge-signed extractor"})
+			if !p.Identity.AllowUnsignedHeader {
+				out = append(out, Issue{"FAIL", "identity.extractor", "production refuses unsigned header identity unless identity.allow_unsigned_header is explicitly true"})
+			}
 		}
 	}
 	if !p.UnmatchedAllow() {

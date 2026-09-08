@@ -88,6 +88,7 @@ policy:
       scope: [customer, resource]
       max_active: 1
       precedence: [browser, agent]
+      budget: { max_ops: 1 }
       # waiting: { mode: bounded, max_waiters: 1 }
   fallback: deny
 `

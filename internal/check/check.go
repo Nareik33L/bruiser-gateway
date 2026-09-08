@@ -17,14 +17,16 @@ import (
 )
 
 type Config struct {
-	EdgeURL    string
-	OriginURL  string
-	ControlURL string
-	HMACSecret string
-	EdgeSecret string
-	Membership string
-	EventID    string
-	Timeout    time.Duration
+	EdgeURL      string
+	OriginURL    string
+	ControlURL   string
+	HMACSecret   string
+	EdgeSecret   string
+	OriginSecret string
+	AdminSecret  string
+	Membership   string
+	EventID      string
+	Timeout      time.Duration
 }
 
 type Probe struct {
@@ -85,6 +87,18 @@ func Run(cfg Config) (Report, error) {
 	}
 	if cfg.EdgeSecret == "" {
 		cfg.EdgeSecret = "edge-secret-dev"
+	}
+	if cfg.OriginSecret == "" {
+		cfg.OriginSecret = os.Getenv("BRUISER_ORIGIN_SECRET")
+	}
+	if cfg.OriginSecret == "" {
+		cfg.OriginSecret = "origin-lock-dev"
+	}
+	if cfg.AdminSecret == "" {
+		cfg.AdminSecret = os.Getenv("BRUISER_ADMIN_SECRET")
+	}
+	if cfg.AdminSecret == "" {
+		cfg.AdminSecret = "admin-secret-dev"
 	}
 	client := &http.Client{Timeout: cfg.Timeout}
 	edge := strings.TrimRight(cfg.EdgeURL, "/")
@@ -226,17 +240,57 @@ func Run(cfg Config) (Report, error) {
 			return pass("spoofed origin secret rejected (%d)", code)
 		}))
 
+		rep.Probes = append(rep.Probes, probe("Origin secret required with a valid execution", func() Probe {
+			if control == "" {
+				return fail("--control is required to mint an execution")
+			}
+			exe, err := mintHoldExecution(client, control, cfg, fmt.Sprintf("nosecret-%d", time.Now().UnixNano()))
+			if err != nil {
+				return fail("%s", err.Error())
+			}
+			code, body := postJSON(client, origin+holdPath, map[string]string{
+				"X-Bruiser-Execution": exe.Token,
+				"X-Bruiser-Fence":     exe.Fence,
+			}, map[string]int{"seats": 1})
+			if code >= 200 && code < 300 {
+				return fail("origin allocated with a valid execution but no origin secret (%d) %s; path trust is off", code, body)
+			}
+			return pass("valid execution without origin secret rejected (%d)", code)
+		}))
+
+		rep.Probes = append(rep.Probes, probe("Wrong origin secret rejected with a valid execution", func() Probe {
+			if control == "" {
+				return fail("--control is required to mint an execution")
+			}
+			exe, err := mintHoldExecution(client, control, cfg, fmt.Sprintf("badsecret-%d", time.Now().UnixNano()))
+			if err != nil {
+				return fail("%s", err.Error())
+			}
+			code, body := postJSON(client, origin+holdPath, map[string]string{
+				"X-Bruiser-Origin-Secret": "wrong-origin-secret",
+				"X-Bruiser-Execution":     exe.Token,
+				"X-Bruiser-Fence":         exe.Fence,
+			}, map[string]int{"seats": 1})
+			if code >= 200 && code < 300 {
+				return fail("origin accepted a valid execution with a spoofed origin secret (%d) %s", code, body)
+			}
+			return pass("valid execution + spoofed origin secret rejected (%d)", code)
+		}))
+
 		rep.Probes = append(rep.Probes, probe("Direct allocation bypass blocked", func() Probe {
 			tok, err := auth.IssueBoxOfficeSession(cfg.HMACSecret, cfg.Membership, time.Hour)
 			if err != nil {
 				return fail("%s", err.Error())
 			}
 			code, body := postJSON(client, origin+holdPath, cookieHeader(tok), map[string]int{"seats": 1})
+			if code >= 200 && code < 300 {
+				return fail("origin accepted a bypass hold (%d); missing execution authority", code)
+			}
 			if code == http.StatusForbidden && strings.Contains(body, "origin lockdown") {
 				return pass("direct origin hold rejected without Edge secret")
 			}
-			if code >= 200 && code < 300 {
-				return fail("origin accepted a bypass hold (%d); lockdown is off or missing", code)
+			if code == http.StatusUnauthorized {
+				return pass("direct origin hold rejected without execution authority (%d)", code)
 			}
 			return fail("unexpected origin bypass response %d %s", code, body)
 		}))
@@ -408,32 +462,148 @@ func Run(cfg Config) (Report, error) {
 		return pass("case/slash variants stayed on one execution")
 	}))
 
+	rep.Probes = append(rep.Probes, probe("Lookalike resources are rejected", func() Probe {
+		if control == "" {
+			return fail("--control is required to prove lookalike resources are rejected")
+		}
+		tok, err := auth.IssueBoxOfficeSession(cfg.HMACSecret, fmt.Sprintf("lookalike-%d", time.Now().UnixNano()), time.Hour)
+		if err != nil {
+			return fail("%s", err.Error())
+		}
+		hdr := map[string]string{
+			"Cookie":                simtix.CookieName + "=" + tok,
+			"X-Bruiser-Edge-Secret": cfg.EdgeSecret,
+		}
+		for _, path := range []string{
+			"/api/events/ars:che/holds",
+			"/api/events/ars–che/holds",
+			"/api/events/ars‐che/holds",
+			"/api/events/ars-che./holds",
+		} {
+			code, body := postJSON(client, control+"/v1/authorize", hdr, map[string]string{
+				"method": "POST", "path": path,
+			})
+			if code >= 200 && code < 300 {
+				if strings.Contains(body, `"status":"ALLOW"`) && strings.Contains(body, "execution_id") {
+					return fail("lookalike %s minted an execution (%d) %s", path, code, body)
+				}
+			}
+		}
+		return pass("colon/Unicode/trailing-punct lookalikes did not mint a domain")
+	}))
+
 	rep.Probes = append(rep.Probes, probe("Forged execution rejected at origin", func() Probe {
 		if origin == "" {
 			return fail("--origin is required")
 		}
 		code, body := postJSON(client, origin+holdPath, map[string]string{
-			"X-Bruiser-Execution": "forged.not.signed",
-			"X-Bruiser-Fence":     "1",
+			"X-Bruiser-Origin-Secret": cfg.OriginSecret,
+			"X-Bruiser-Execution":     "forged.not.signed",
+			"X-Bruiser-Fence":         "1",
 		}, map[string]int{"seats": 1})
 		if code >= 200 && code < 300 {
-			return fail("origin accepted forged execution (%d) %s", code, body)
+			return fail("origin accepted forged execution with a valid origin secret (%d) %s", code, body)
 		}
-		return pass("forged execution rejected (%d)", code)
+		if code != http.StatusUnauthorized && code != http.StatusForbidden {
+			return fail("forged execution want 401/403 got %d %s", code, body)
+		}
+		return pass("forged execution + valid origin secret rejected (%d)", code)
 	}))
 
 	rep.Probes = append(rep.Probes, probe("Modified fence rejected", func() Probe {
+		if origin == "" || control == "" {
+			return fail("--origin and --control are required")
+		}
+		exe, err := mintHoldExecution(client, control, cfg, fmt.Sprintf("fence-%d", time.Now().UnixNano()))
+		if err != nil {
+			return fail("%s", err.Error())
+		}
+		code, body := postJSON(client, origin+holdPath, map[string]string{
+			"X-Bruiser-Origin-Secret": cfg.OriginSecret,
+			"X-Bruiser-Execution":     exe.Token,
+			"X-Bruiser-Fence":         "999999",
+		}, map[string]int{"seats": 1})
+		if code >= 200 && code < 300 {
+			return fail("origin accepted modified fence with a valid origin secret (%d) %s", code, body)
+		}
+		if code != http.StatusUnauthorized && code != http.StatusForbidden {
+			return fail("modified fence want 401/403 got %d %s", code, body)
+		}
+		return pass("valid token + modified fence rejected (%d)", code)
+	}))
+
+	rep.Probes = append(rep.Probes, probe("Expired execution rejected at origin", func() Probe {
 		if origin == "" {
 			return fail("--origin is required")
 		}
 		code, body := postJSON(client, origin+holdPath, map[string]string{
-			"X-Bruiser-Execution": "stale.not.a.valid.execution",
-			"X-Bruiser-Fence":     "999999",
+			"X-Bruiser-Origin-Secret": cfg.OriginSecret,
+			"X-Bruiser-Execution":     "eyJhbGciOiJFZERTQSJ9.eyJleHAiOjF9.not-a-signature",
+			"X-Bruiser-Fence":         "1",
 		}, map[string]int{"seats": 1})
 		if code >= 200 && code < 300 {
-			return fail("origin accepted modified fence (%d) %s", code, body)
+			return fail("origin accepted expired/garbage execution (%d) %s", code, body)
 		}
-		return pass("modified fence rejected (%d)", code)
+		return pass("expired/invalid execution + valid origin secret rejected (%d)", code)
+	}))
+
+	rep.Probes = append(rep.Probes, probe("Revoked execution rejected at origin", func() Probe {
+		if origin == "" || control == "" {
+			return fail("--origin and --control are required")
+		}
+		exe, err := mintHoldExecution(client, control, cfg, fmt.Sprintf("revoked-%d", time.Now().UnixNano()))
+		if err != nil {
+			return fail("%s", err.Error())
+		}
+		revCode, revBody := postJSON(client, control+"/v1/admin/executions/"+exe.ID+"/revoke", map[string]string{
+			"X-Bruiser-Admin-Secret": cfg.AdminSecret,
+		}, map[string]string{"reason": "authority-check"})
+		if revCode != http.StatusOK {
+			return fail("admin revoke %d %s", revCode, revBody)
+		}
+		code, body := postJSON(client, origin+holdPath, map[string]string{
+			"X-Bruiser-Origin-Secret": cfg.OriginSecret,
+			"X-Bruiser-Execution":     exe.Token,
+			"X-Bruiser-Fence":         exe.Fence,
+		}, map[string]int{"seats": 1})
+		if code >= 200 && code < 300 {
+			return fail("origin accepted revoked execution (%d) %s", code, body)
+		}
+		return pass("revoked execution + valid origin secret rejected (%d)", code)
+	}))
+
+	rep.Probes = append(rep.Probes, probe("Wrong resource rejected at origin", func() Probe {
+		if origin == "" || control == "" {
+			return fail("--origin and --control are required")
+		}
+		exe, err := mintPathExecution(client, control, cfg, fmt.Sprintf("wrongres-%d", time.Now().UnixNano()), "/api/events/other-evt/holds")
+		if err != nil {
+			return fail("%s", err.Error())
+		}
+		code, body := postJSON(client, origin+holdPath, map[string]string{
+			"X-Bruiser-Origin-Secret": cfg.OriginSecret,
+			"X-Bruiser-Execution":     exe.Token,
+			"X-Bruiser-Fence":         exe.Fence,
+		}, map[string]int{"seats": 1})
+		if code >= 200 && code < 300 {
+			return fail("origin accepted execution for the wrong resource (%d) %s", code, body)
+		}
+		return pass("wrong-resource execution + valid origin secret rejected (%d)", code)
+	}))
+
+	rep.Probes = append(rep.Probes, probe("Wrong merchant rejected at origin", func() Probe {
+		if origin == "" {
+			return fail("--origin is required")
+		}
+		code, body := postJSON(client, origin+holdPath, map[string]string{
+			"X-Bruiser-Origin-Secret": cfg.OriginSecret,
+			"X-Bruiser-Execution":     "forged.other-merchant",
+			"X-Bruiser-Fence":         "1",
+		}, map[string]int{"seats": 1})
+		if code >= 200 && code < 300 {
+			return fail("origin accepted a foreign-merchant token (%d) %s", code, body)
+		}
+		return pass("wrong-merchant token + valid origin secret rejected (%d)", code)
 	}))
 
 	rep.Probes = append(rep.Probes, probe("Unsigned identity rejected outside trusted edge", func() Probe {
@@ -526,6 +696,71 @@ func finalize(rep *Report) {
 
 func cookieHeader(tok string) map[string]string {
 	return map[string]string{"Cookie": simtix.CookieName + "=" + tok}
+}
+
+type mintedExecution struct {
+	Token string
+	Fence string
+	ID    string
+}
+
+func mintHoldExecution(client *http.Client, control string, cfg Config, membership string) (mintedExecution, error) {
+	return mintPathExecution(client, control, cfg, membership, "/api/events/"+cfg.EventID+"/holds")
+}
+
+func mintPathExecution(client *http.Client, control string, cfg Config, membership, path string) (mintedExecution, error) {
+	tok, err := auth.IssueBoxOfficeSession(cfg.HMACSecret, membership, time.Hour)
+	if err != nil {
+		return mintedExecution{}, err
+	}
+	code, body, hdr := postJSONHdr(client, control+"/v1/authorize", map[string]string{
+		"Cookie":                simtix.CookieName + "=" + tok,
+		"X-Bruiser-Edge-Secret": cfg.EdgeSecret,
+	}, map[string]string{"method": "POST", "path": path})
+	if code != http.StatusOK {
+		return mintedExecution{}, fmt.Errorf("authorize %d %s", code, body)
+	}
+	var out struct {
+		ExecutionID string `json:"execution_id"`
+		Fence       int64  `json:"fence"`
+		Status      string `json:"status"`
+	}
+	_ = json.Unmarshal([]byte(body), &out)
+	exe := mintedExecution{
+		Token: hdr.Get("X-Bruiser-Execution"),
+		Fence: hdr.Get("X-Bruiser-Fence"),
+		ID:    out.ExecutionID,
+	}
+	if exe.Token == "" {
+		return mintedExecution{}, fmt.Errorf("authorize did not return an execution token: %s", body)
+	}
+	if exe.Fence == "" && out.Fence != 0 {
+		exe.Fence = fmt.Sprintf("%d", out.Fence)
+	}
+	return exe, nil
+}
+
+func postJSONHdr(client *http.Client, url string, headers map[string]string, body any) (int, string, http.Header) {
+	var buf io.Reader
+	if body != nil {
+		b, _ := json.Marshal(body)
+		buf = bytes.NewReader(b)
+	}
+	req, err := http.NewRequest(http.MethodPost, url, buf)
+	if err != nil {
+		return 0, err.Error(), nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err.Error(), nil
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	return resp.StatusCode, strings.TrimSpace(string(b)), resp.Header.Clone()
 }
 
 func postJSON(client *http.Client, url string, headers map[string]string, body any) (int, string) {

@@ -3,12 +3,14 @@
 package simtix
 
 import (
+	"crypto/ed25519"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,19 +18,48 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/Nareik33L/bruiser-gateway/internal/auth"
+	"github.com/Nareik33L/bruiser-gateway/internal/resource"
 )
 
 const CookieName = "boxoffice_session"
 const DefaultEvent = "ars-che"
 
-var ErrStaleFence = errors.New("stale fence")
+var (
+	ErrStaleFence    = errors.New("stale fence")
+	ErrWrongMerchant = errors.New("wrong merchant")
+	ErrWrongResource = errors.New("resource mismatch")
+	ErrRevoked       = errors.New("revoked execution")
+	ErrMissingToken  = errors.New("missing execution token")
+	ErrNoVerifier    = errors.New("execution verifier not configured")
+)
 
 type Config struct {
 	HMACSecret       string
-	OriginSecret     string // empty = origin lockdown off
+	OriginSecret     string // empty = origin lockdown off (path trust only)
 	Seats            int
+	MerchantID       string
+	Public           ed25519.PublicKey
+	IntrospectURL    string
 	RequireExecution bool
 	VerifyExecution  func(token string) error
+}
+
+// Lab is the Edge/Proxy origin config: origin secret is path trust;
+// execution JWT + fence + introspect is authorisation.
+func Lab(hmac, originSecret, merchantID string, pub ed25519.PublicKey, controlURL string, seats int) Config {
+	intro := ""
+	if controlURL != "" {
+		intro = strings.TrimRight(controlURL, "/") + "/v1/introspect"
+	}
+	return Config{
+		HMACSecret:       hmac,
+		OriginSecret:     originSecret,
+		MerchantID:       merchantID,
+		Public:           pub,
+		IntrospectURL:    intro,
+		Seats:            seats,
+		RequireExecution: true,
+	}
 }
 
 type Server struct {
@@ -63,6 +94,9 @@ func New(cfg Config) *Server {
 	}
 	if cfg.Seats <= 0 {
 		cfg.Seats = 50
+	}
+	if !cfg.RequireExecution && (len(cfg.Public) > 0 || cfg.VerifyExecution != nil || cfg.IntrospectURL != "") {
+		cfg.RequireExecution = true
 	}
 	return &Server{
 		cfg: cfg,
@@ -156,13 +190,13 @@ func (s *Server) getEvent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createHold(w http.ResponseWriter, r *http.Request) {
-	if !s.executionOK(w, r) {
-		return
-	}
+	eventID := chi.URLParam(r, "event")
 	if !s.originOK(w, r, true) {
 		return
 	}
-	eventID := chi.URLParam(r, "event")
+	if !s.executionOK(w, r, "event:"+eventID) {
+		return
+	}
 	var body struct {
 		Seats int `json:"seats"`
 	}
@@ -196,18 +230,22 @@ func (s *Server) createHold(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createOrder(w http.ResponseWriter, r *http.Request) {
-	if !s.executionOK(w, r) {
-		return
-	}
-	if !s.originOK(w, r, true) {
-		return
-	}
 	var body struct {
 		EventID string `json:"event_id"`
 		HoldID  string `json:"hold_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	want := ""
+	if body.EventID != "" {
+		want = "event:" + body.EventID
+	}
+	if !s.originOK(w, r, true) {
+		return
+	}
+	if !s.executionOK(w, r, want) {
 		return
 	}
 	s.mu.Lock()
@@ -239,10 +277,7 @@ func (s *Server) reset(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "reset"})
 }
 
-func (s *Server) executionOK(w http.ResponseWriter, r *http.Request) bool {
-	if !s.cfg.RequireExecution {
-		return true
-	}
+func (s *Server) executionOK(w http.ResponseWriter, r *http.Request, wantResource string) bool {
 	tok := r.Header.Get("X-Bruiser-Execution")
 	if tok == "" {
 		h := r.Header.Get("Authorization")
@@ -254,19 +289,65 @@ func (s *Server) executionOK(w http.ResponseWriter, r *http.Request) bool {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing execution token"})
 		return false
 	}
-	if s.cfg.VerifyExecution == nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "execution verifier not configured"})
-		return false
-	}
-	if err := s.cfg.VerifyExecution(tok); err != nil {
-		if errors.Is(err, ErrStaleFence) {
+	if err := s.verifyExecution(tok, r.Header.Get("X-Bruiser-Fence"), wantResource); err != nil {
+		switch {
+		case errors.Is(err, ErrStaleFence):
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "stale fence"})
-			return false
+		case errors.Is(err, ErrWrongResource), errors.Is(err, ErrRevoked):
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		default:
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid execution token"})
 		}
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid execution token"})
 		return false
 	}
 	return true
+}
+
+func (s *Server) verifyExecution(tok, fenceHdr, wantResource string) error {
+	if s.cfg.VerifyExecution != nil {
+		if err := s.cfg.VerifyExecution(tok); err != nil {
+			return err
+		}
+		if fenceHdr != "" && len(s.cfg.Public) > 0 {
+			claims, err := auth.ParseExecution(tok, s.cfg.Public)
+			if err != nil {
+				return err
+			}
+			return s.checkClaims(claims, fenceHdr, wantResource)
+		}
+		return s.introspectLive(tok)
+	}
+	if len(s.cfg.Public) == 0 {
+		return ErrNoVerifier
+	}
+	claims, err := auth.ParseExecution(tok, s.cfg.Public)
+	if err != nil {
+		return err
+	}
+	if err := s.checkClaims(claims, fenceHdr, wantResource); err != nil {
+		return err
+	}
+	return s.introspectLive(tok)
+}
+
+func (s *Server) checkClaims(claims auth.ExecutionClaims, fenceHdr, wantResource string) error {
+	if s.cfg.MerchantID != "" && claims.MerchantID != s.cfg.MerchantID {
+		return ErrWrongMerchant
+	}
+	if wantResource != "" {
+		want, werr := resource.Canonical(wantResource)
+		got, gerr := resource.Canonical(claims.Resource)
+		if werr != nil || gerr != nil || want != got {
+			return ErrWrongResource
+		}
+	}
+	if fenceHdr != "" {
+		got, err := strconv.ParseInt(fenceHdr, 10, 64)
+		if err != nil || got != claims.Fence {
+			return ErrStaleFence
+		}
+	}
+	return nil
 }
 
 func (s *Server) originOK(w http.ResponseWriter, r *http.Request, allocation bool) bool {

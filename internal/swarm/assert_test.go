@@ -16,12 +16,8 @@ func TestDemoAssertion(t *testing.T) {
 	if os.Getenv("BRUISER_TEST_DATABASE_URL") == "" {
 		t.Skip("BRUISER_TEST_DATABASE_URL not set")
 	}
-	api, gw, cfg, _ := testlab.GatewayAPI(t, testlab.ArsenalProfile(t))
-	origin := simtix.New(simtix.Config{
-		HMACSecret:   cfg.DevHMACSecret,
-		OriginSecret: cfg.OriginSecret,
-		Seats:        400,
-	})
+	api, gw, cfg, signer := testlab.GatewayAPI(t, testlab.ArsenalProfile(t))
+	origin := simtix.New(simtix.Lab(cfg.DevHMACSecret, cfg.OriginSecret, cfg.MerchantID, signer.Public, gw.URL, 400))
 	originSrv := httptest.NewServer(origin.Handler())
 	t.Cleanup(originSrv.Close)
 	ph, err := api.ProxyHandler(originSrv.URL)

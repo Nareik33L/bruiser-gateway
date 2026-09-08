@@ -1,6 +1,9 @@
 package merchant
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestExampleProfileValidates(t *testing.T) {
 	p, err := LoadFile("../../configs/example.yaml")
@@ -43,6 +46,42 @@ func TestUnmatchedAllowWithoutLockdownFails(t *testing.T) {
 	}
 	if fail {
 		t.Fatalf("lockdown on should not FAIL: %+v", issues)
+	}
+}
+
+func TestProductionRejectsAutoUnsignedHeader(t *testing.T) {
+	p, err := LoadFile("../../configs/example.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	issues := p.SafetyIssues(SafetyOpts{
+		OriginSecret: "prod-origin-unique",
+		Production:   true,
+		JWKSURL:      "https://idp.example/.well-known/jwks.json",
+		Issuer:       "https://idp.example",
+		Audience:     "bruiser",
+	})
+	found := false
+	for _, i := range issues {
+		if i.Level == "FAIL" && i.Field == "identity.header" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("production auto+header must FAIL without opt-in: %+v", issues)
+	}
+	p.Identity.AllowUnsignedHeader = true
+	issues = p.SafetyIssues(SafetyOpts{
+		OriginSecret: "prod-origin-unique",
+		Production:   true,
+		JWKSURL:      "https://idp.example/.well-known/jwks.json",
+		Issuer:       "https://idp.example",
+		Audience:     "bruiser",
+	})
+	for _, i := range issues {
+		if i.Level == "FAIL" && strings.HasPrefix(i.Field, "identity") {
+			t.Fatalf("opt-in should allow unsigned header: %+v", issues)
+		}
 	}
 }
 

@@ -16,9 +16,10 @@ name: Example merchant
 unmatched: allow
 
 identity:
-  # Production: oidc/jwks with issuer + audience. HS256 is development-only
-  # (BRUISER_DEV_ASSERTIONS=1) and production refuses to start with it on.
-  # Unsigned headers must only be accepted from a trusted edge.
+  # Lab drop-in. Production refuses extractor: auto + unsigned header
+  # unless identity.allow_unsigned_header: true is set on purpose.
+  # Production identity is oidc/jwks with issuer + audience.
+  # HS256 requires BRUISER_ENV=lab and BRUISER_DEV_ASSERTIONS=1.
   extractor: auto
   cookie: session
   header: X-Customer-Id
@@ -56,8 +57,9 @@ policy:
       scope: [customer, resource]
       max_active: 1
       precedence: [browser, agent]
-      # Optional merchant execution budget (0 = unlimited):
-      # budget: { max_ops: 8, max_checkout_actions: 1 }
+      # One-seat example: one ACTIVE and one protected op. Merchants
+      # who need more set a higher cap; omit the block for unlimited.
+      budget: { max_ops: 1 }
       # Optional intra-customer concurrency (not a waiting room):
       # one ACTIVE for this customer; extra agents QUEUED, then BUSY.
       # A second customer on the same resource is a different domain.

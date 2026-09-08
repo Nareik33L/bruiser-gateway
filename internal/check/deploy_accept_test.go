@@ -26,9 +26,8 @@ import (
 // that the integration boundaries (cookie copy, origin stamp, execution JWT,
 // Authority Check) do not change outcomes.
 //
-// Embedded Dry Run is the one honest difference: 0% observe does not mint an
-// execution token, so a RequireExecution origin stays locked. Edge/Proxy 0%
-// stamps the origin secret and the unaware hold continues.
+// 0% / dry-run observes at Bruiser and does not mint an execution token.
+// The origin stays locked: origin secret is path trust, not authority.
 func TestV1DeploymentAcceptance(t *testing.T) {
 	t.Parallel()
 	for _, kind := range []deployKind{kindEmbedded, kindEdge, kindProxy} {
@@ -109,7 +108,7 @@ func startDeploy(t *testing.T, kind deployKind) deployLab {
 		t.Cleanup(originSrv.Close)
 		lab.origin = originSrv.URL
 	case kindEdge:
-		origin := simtix.New(simtix.Config{HMACSecret: cfg.DevHMACSecret, OriginSecret: cfg.OriginSecret, Seats: 200})
+		origin := simtix.New(simtix.Lab(cfg.DevHMACSecret, cfg.OriginSecret, cfg.MerchantID, signer.Public, gw.URL, 200))
 		originSrv := httptest.NewServer(origin.Handler())
 		t.Cleanup(originSrv.Close)
 		p, err := edge.New(edge.Config{OriginURL: originSrv.URL, BruiserURL: gw.URL, EdgeSecret: cfg.EdgeSecret, OriginSecret: cfg.OriginSecret, MaxInFlight: 8})
@@ -121,7 +120,7 @@ func startDeploy(t *testing.T, kind deployKind) deployLab {
 		lab.front = front.URL
 		lab.origin = originSrv.URL
 	case kindProxy:
-		origin := simtix.New(simtix.Config{HMACSecret: cfg.DevHMACSecret, OriginSecret: cfg.OriginSecret, Seats: 200})
+		origin := simtix.New(simtix.Lab(cfg.DevHMACSecret, cfg.OriginSecret, cfg.MerchantID, signer.Public, gw.URL, 200))
 		originSrv := httptest.NewServer(origin.Handler())
 		t.Cleanup(originSrv.Close)
 		ph, err := api.ProxyHandler(originSrv.URL)
@@ -442,16 +441,18 @@ func proveOriginLockdown(t *testing.T, d deployLab) {
 func proveDryRun(t *testing.T, d deployLab) {
 	t.Helper()
 	d.putControls(t, `{"enforce_percent":0,"enforcement":true,"mode":"dry-run","updated_by":"deploy"}`)
-	t.Cleanup(func() { d.putControls(t, `{"enforce_percent":100,"enforcement":true,"mode":"enforce","updated_by":"deploy"}`) })
+	t.Cleanup(func() {
+		d.putControls(t, `{"enforce_percent":100,"enforcement":true,"mode":"enforce","updated_by":"deploy"}`)
+	})
 	cust := d.cust("dry")
 	if d.fronted() {
 		code, body, _ := d.holdFront(t, cust)
-		if code != http.StatusCreated {
-			t.Fatalf("0%% unaware hold must reach origin: %d %s", code, body)
+		if code == http.StatusCreated {
+			t.Fatalf("0%% must not allocate without an execution token: %d %s", code, body)
 		}
 		code, body, _ = d.holdFront(t, cust)
-		if code != http.StatusCreated {
-			t.Fatalf("0%% second agent must still reach origin: %d %s", code, body)
+		if code == http.StatusCreated {
+			t.Fatalf("0%% second agent must not allocate: %d %s", code, body)
 		}
 	} else {
 		tok := d.session(t, cust, "agent", "d1")
@@ -486,7 +487,9 @@ func proveRamp10(t *testing.T, d deployLab) {
 	t.Helper()
 	inCust, outCust := d.rampPair(10)
 	d.putControls(t, `{"enforce_percent":10,"enforcement":true,"mode":"enforce","updated_by":"deploy"}`)
-	t.Cleanup(func() { d.putControls(t, `{"enforce_percent":100,"enforcement":true,"mode":"enforce","updated_by":"deploy"}`) })
+	t.Cleanup(func() {
+		d.putControls(t, `{"enforce_percent":100,"enforcement":true,"mode":"enforce","updated_by":"deploy"}`)
+	})
 
 	if code, body := d.placementHold(t, inCust, "in-1"); code != http.StatusCreated {
 		t.Fatalf("10%% in-bucket first want 201 got %d %s", code, body)
@@ -497,12 +500,12 @@ func proveRamp10(t *testing.T, d deployLab) {
 
 	if d.fronted() {
 		code, body, _ := d.holdFront(t, outCust)
-		if code != http.StatusCreated {
-			t.Fatalf("10%% out-bucket must observe (201): %d %s", code, body)
+		if code == http.StatusCreated {
+			t.Fatalf("10%% out-bucket must not allocate without an execution token: %d %s", code, body)
 		}
 		code, body, _ = d.holdFront(t, outCust)
-		if code != http.StatusCreated {
-			t.Fatalf("10%% out-bucket second agent must still observe: %d %s", code, body)
+		if code == http.StatusCreated {
+			t.Fatalf("10%% out-bucket second agent must not allocate: %d %s", code, body)
 		}
 		return
 	}

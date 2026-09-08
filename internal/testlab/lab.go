@@ -84,6 +84,7 @@ func gatewayWithStore(t testing.TB, profile merchant.Profile, mut func(*config.C
 	}
 	t.Cleanup(store.Close)
 	cfg := config.Load()
+	cfg.Environment = "lab"
 	cfg.DatabaseURL = url
 	cfg.MerchantID = id.New("m")
 	cfg.LeaseTTL = 30 * time.Second

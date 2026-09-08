@@ -32,12 +32,8 @@ type proxyLab struct {
 
 func startProxyLabFull(t *testing.T) proxyLab {
 	t.Helper()
-	api, gw, cfg, _ := testlab.GatewayAPI(t, testlab.ArsenalProfile(t))
-	origin := simtix.New(simtix.Config{
-		HMACSecret:   cfg.DevHMACSecret,
-		OriginSecret: cfg.OriginSecret,
-		Seats:        200,
-	})
+	api, gw, cfg, signer := testlab.GatewayAPI(t, testlab.ArsenalProfile(t))
+	origin := simtix.New(simtix.Lab(cfg.DevHMACSecret, cfg.OriginSecret, cfg.MerchantID, signer.Public, gw.URL, 200))
 	originSrv := httptest.NewServer(origin.Handler())
 	t.Cleanup(originSrv.Close)
 	ph, err := api.ProxyHandler(originSrv.URL)
@@ -381,8 +377,8 @@ func TestV1AcceptancePlacementParity(t *testing.T) {
 		t.Fatal("proxy second")
 	}
 
-	gw, cfg := testlab.Gateway(t, testlab.ArsenalProfile(t))
-	origin := simtix.New(simtix.Config{HMACSecret: cfg.DevHMACSecret, OriginSecret: cfg.OriginSecret, Seats: 20})
+	_, gw, cfg, signer := testlab.GatewayAPI(t, testlab.ArsenalProfile(t))
+	origin := simtix.New(simtix.Lab(cfg.DevHMACSecret, cfg.OriginSecret, cfg.MerchantID, signer.Public, gw.URL, 20))
 	originSrv := httptest.NewServer(origin.Handler())
 	t.Cleanup(originSrv.Close)
 	p, err := edge.New(edge.Config{OriginURL: originSrv.URL, BruiserURL: gw.URL, EdgeSecret: cfg.EdgeSecret, OriginSecret: cfg.OriginSecret, MaxInFlight: 8})
@@ -405,12 +401,12 @@ func TestV1AcceptanceEmergencyZeroKeepsObservation(t *testing.T) {
 	lab := startProxyLabFull(t)
 	lab.putControls(t, `{"enforce_percent":0,"updated_by":"emergency"}`)
 	code, _, _ := lab.hold(t, "emerg-1")
-	if code != http.StatusCreated {
-		t.Fatalf("emergency 0%% must not block unaware hold: %d", code)
+	if code == http.StatusCreated {
+		t.Fatalf("emergency 0%% must not allocate without an execution token: %d", code)
 	}
 	code, _, _ = lab.hold(t, "emerg-1")
-	if code != http.StatusCreated {
-		t.Fatalf("emergency 0%% second agent must still reach origin: %d", code)
+	if code == http.StatusCreated {
+		t.Fatalf("emergency 0%% second agent must not allocate: %d", code)
 	}
 	st := lab.adminStatus(t)
 	dr, _ := st["dry_run"].(map[string]any)

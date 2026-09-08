@@ -34,6 +34,7 @@ services:
       BRUISER_CHECK_EDGE_URL: http://simtix:8091
       BRUISER_CHECK_ORIGIN_URL: http://simtix:8090
       BRUISER_ADMIN_SECRET: admin-secret-dev
+      BRUISER_ENV: lab
       BRUISER_MODE: enforce
     ports:
       - "8080:8080"
@@ -55,7 +56,9 @@ services:
       SIMTIX_BRUISER_URL: "http://gateway:8080"
       SIMTIX_ORIGIN_SECRET: origin-lock-dev
       BRUISER_EDGE_SECRET: edge-secret-dev
+      BRUISER_ORIGIN_SECRET: origin-lock-dev
       BRUISER_DEV_HMAC_SECRET: dev-secret-change-me
+      BRUISER_MERCHANT_ID: arsenal
     ports:
       - "8090:8090"
       - "8091:8091"

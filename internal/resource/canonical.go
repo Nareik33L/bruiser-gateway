@@ -1,11 +1,17 @@
 // Package resource canonicalises scarcity identifiers so string variation
 // cannot create a new execution domain.
+//
+// Scarce resource IDs are identifiers, not free-form text. After trim,
+// optional percent-decode, case fold, and trailing-slash strip, the
+// string must match a closed ASCII grammar. Everything else is rejected.
+// There is no punctuation or Unicode folding: lookalikes are different
+// strings, and different strings that fail the grammar are not IDs.
 package resource
 
 import (
 	"net/url"
+	"regexp"
 	"strings"
-	"unicode"
 )
 
 // ErrMalformed is returned when a resource identifier is empty or unsafe
@@ -16,9 +22,18 @@ type malformed string
 
 func (e malformed) Error() string { return string(e) }
 
-// Canonical folds case, whitespace, trailing slashes, duplicate separators,
-// and path/punctuation variants into one identifier. Domain keys must use
-// only this form.
+// Grammar (after trim / optional unescape / lower / trailing '/' strip):
+//
+//	type ":" ident
+//	type  = [a-z][a-z0-9]*
+//	ident = [a-z0-9]+(-[a-z0-9]+)*
+//
+// One colon. ASCII hyphen only inside the ident. No underscore, dot,
+// extra colon, Unicode dash, or trailing punctuation.
+var strictID = regexp.MustCompile(`^[a-z][a-z0-9]*:[a-z0-9]+(?:-[a-z0-9]+)*$`)
+
+// Canonical maps an accepted resource string onto exactly one
+// merchant-defined resource ID, or rejects it.
 func Canonical(raw string) (string, error) {
 	s := strings.TrimSpace(raw)
 	if s == "" {
@@ -28,36 +43,11 @@ func Canonical(raw string) (string, error) {
 		s = unesc
 	}
 	s = strings.ToLower(s)
-	var b strings.Builder
-	b.Grow(len(s))
-	prevSep := false
-	for _, r := range s {
-		switch {
-		case r == 0 || r == '?' || r == '#' || r == '\\' || unicode.IsControl(r):
-			return "", ErrMalformed
-		case unicode.IsSpace(r):
-			continue
-		case r == '/' || r == ':' || r == ';' || r == ',':
-			if prevSep {
-				continue
-			}
-			b.WriteByte(':')
-			prevSep = true
-		case r == '.' && prevSep:
-			return "", ErrMalformed
-		default:
-			if r == '.' && strings.HasSuffix(b.String(), ".") {
-				return "", ErrMalformed
-			}
-			b.WriteRune(r)
-			prevSep = false
-		}
-	}
-	out := strings.Trim(b.String(), ":")
-	if out == "" || out == "." || strings.Contains(out, "..") {
+	s = strings.TrimRight(s, "/")
+	if !strictID.MatchString(s) {
 		return "", ErrMalformed
 	}
-	return out, nil
+	return s, nil
 }
 
 // MustCanonical is Canonical that returns "" on error (caller should reject).

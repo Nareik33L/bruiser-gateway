@@ -18,12 +18,8 @@ import (
 
 func startProxyLab(t *testing.T, originSecret string) (proxyURL, originURL, gwURL, hmac string) {
 	t.Helper()
-	api, gw, cfg, _ := testlab.GatewayAPI(t, testlab.ArsenalProfile(t))
-	origin := simtix.New(simtix.Config{
-		HMACSecret:   cfg.DevHMACSecret,
-		OriginSecret: originSecret,
-		Seats:        200,
-	})
+	api, gw, cfg, signer := testlab.GatewayAPI(t, testlab.ArsenalProfile(t))
+	origin := simtix.New(simtix.Lab(cfg.DevHMACSecret, originSecret, cfg.MerchantID, signer.Public, gw.URL, 200))
 	originSrv := httptest.NewServer(origin.Handler())
 	t.Cleanup(originSrv.Close)
 	ph, err := api.ProxyHandler(originSrv.URL)

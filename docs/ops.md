@@ -177,16 +177,17 @@ Bruiser **consumes** the merchant’s authenticated customer identifier.
 It does not mint one and it does not decide who a human is.
 
 Production requires JWKS/OIDC (`BRUISER_JWKS_URL`, issuer, audience).
-`BRUISER_DEV_ASSERTIONS=1` enables HS256 for the lab only; production
-refuses to start if that flag is on. See [docs/12-production-deploy.md](12-production-deploy.md).
+`BRUISER_ENV` must be `lab` or `production` — empty is not lab.
+`BRUISER_DEV_ASSERTIONS=1` enables HS256 only with `BRUISER_ENV=lab`.
+See [docs/12-production-deploy.md](12-production-deploy.md).
 
 - Signed extractors (`cookie-jwt`, `bearer-jwt`, `oidc`, `edge-signed`)
   are the V1 demonstration. The Arsenal-like lab uses a cookie JWT.
 - `identity.extractor: header` (and the `auto` fallback to
-  `X-Customer-Id`) trusts an **unsigned** header. Accept that only from
-  a trusted, authenticated edge (mTLS, network policy, or the edge
-  secret already wrapping `/v1/authorize`). If clients can set
-  `X-Customer-Id` themselves, they pick their customer.
+  `X-Customer-Id`) trusts an **unsigned** header. Production validation
+  rejects that combination unless `identity.allow_unsigned_header: true`.
+  Accept unsigned headers only from a trusted, authenticated edge. If
+  clients can set `X-Customer-Id` themselves, they pick their customer.
 - Stronger signed-identity options can come later. Unsigned-header
   hardening is not a V1 blocker when the club uses JWT/OIDC the way the
   lab already does.
