@@ -55,6 +55,20 @@ func (s *Server) statusPayload(ctx context.Context) map[string]any {
 			"expires_at":   e.ExpiresAt.UTC().Format(time.RFC3339Nano),
 		})
 	}
+	waiters, _ := s.store.ListWaiters(ctx, s.cfg.MerchantID, "", 50)
+	queued := make([]map[string]any, 0, len(waiters))
+	for _, e := range waiters {
+		queued = append(queued, map[string]any{
+			"execution_id": e.ID,
+			"customer_id":  e.CustomerID,
+			"principal":    map[string]string{"type": e.Principal.Type, "id": e.Principal.ID},
+			"resource":     e.Resource,
+			"action":       e.Action,
+			"rule_name":    e.RuleName,
+			"expires_at":   e.ExpiresAt.UTC().Format(time.RFC3339Nano),
+		})
+	}
+	queueDepth.WithLabelValues(s.cfg.MerchantID).Set(float64(usage.QueueDepth))
 	body := map[string]any{
 		"merchant":       s.cfg.MerchantID,
 		"version":        "0.1.0-dev",
@@ -70,6 +84,7 @@ func (s *Server) statusPayload(ctx context.Context) map[string]any {
 		},
 		"usage":      usage,
 		"executions": execs,
+		"waiters":    queued,
 	}
 	if ev, err := s.store.LastAudit(ctx, s.cfg.MerchantID, "AUTHORITY_CHECK"); err == nil {
 		body["last_authority_check"] = map[string]any{
@@ -170,9 +185,11 @@ func (s *Server) adminCustomer(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, err)
 		return
 	}
+	queued, _ := s.store.ListWaiters(r.Context(), s.cfg.MerchantID, cid, 50)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"customer_id": cid,
 		"executions":  execs,
+		"waiters":     queued,
 		"audit":       audit,
 	})
 }

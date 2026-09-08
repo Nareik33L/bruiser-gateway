@@ -12,6 +12,24 @@ spec:
       labels:
         app: bruiser-gateway
     spec:
+      {{- if .Values.migrate.enabled }}
+      initContainers:
+        - name: migrate
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          args: ["migrate"]
+          env:
+            {{- range $k, $v := .Values.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- range $k, $v := .Values.secrets }}
+            - name: {{ $k }}
+              valueFrom:
+                secretKeyRef:
+                  name: bruiser-gateway
+                  key: {{ $k }}
+            {{- end }}
+      {{- end }}
       containers:
         - name: gateway
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -50,6 +68,8 @@ apiVersion: v1
 kind: Service
 metadata:
   name: bruiser-gateway
+  labels:
+    app: bruiser-gateway
 spec:
   type: {{ .Values.service.type }}
   selector:

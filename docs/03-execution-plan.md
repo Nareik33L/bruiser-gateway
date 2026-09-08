@@ -413,7 +413,9 @@ Exit criteria
 **V1.5 (protocol and ecosystem)**
 
 - Bounded waiting set (`waiting.mode: bounded`) with promotion and claim window;
-  `EXECUTION_QUEUED` semantics.
+  `EXECUTION_QUEUED` semantics. **Landed in this tree:** QUEUED + promote +
+  leave + waiter expiry; MCP `protocol/mcp/tools.json`; Go/Node/Python agent
+  clients. Claim-window tuning and a full MCP *server* remain follow-on.
 - MCP server / tool definitions so agent frameworks acquire, renew, release and
   hand off natively; reference agent using it against SimTix. These improve the
   agent's experience (watch instead of retry, clean handoff); enforcement never

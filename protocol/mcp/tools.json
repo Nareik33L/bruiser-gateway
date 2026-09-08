@@ -1,0 +1,84 @@
+{
+  "name": "bruiser",
+  "description": "Bruiser-aware agent convenience tools. Enforcement never depends on MCP; unaware clients are still subject to the same customer-level rules via Edge or Proxy.",
+  "version": "0.1-draft",
+  "tools": [
+    {
+      "name": "bruiser_session",
+      "description": "Exchange a merchant-signed customer assertion for a Bruiser session bound to this principal.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["assertion", "principal_id"],
+        "properties": {
+          "assertion": { "type": "string", "description": "Merchant customer assertion (OIDC or HS256 JWT)" },
+          "principal_type": { "type": "string", "enum": ["agent", "browser"], "default": "agent" },
+          "principal_id": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "bruiser_acquire",
+      "description": "Acquire an execution lease for a scarce resource. Returns GRANTED, ALREADY_HELD, QUEUED, or BUSY.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["session_token", "resource"],
+        "properties": {
+          "session_token": { "type": "string" },
+          "resource": { "type": "string" },
+          "action": { "type": "string", "default": "purchase" }
+        }
+      }
+    },
+    {
+      "name": "bruiser_renew",
+      "description": "Heartbeat: extend an ACTIVE lease TTL.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["session_token", "execution_id"],
+        "properties": {
+          "session_token": { "type": "string" },
+          "execution_id": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "bruiser_release",
+      "description": "Release an ACTIVE execution so another of the same customer's agents may be granted or promoted from the intra-customer queue.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["session_token", "execution_id"],
+        "properties": {
+          "session_token": { "type": "string" },
+          "execution_id": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "bruiser_watch",
+      "description": "Long-poll an execution or queued waiter until state changes.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["session_token", "execution_id"],
+        "properties": {
+          "session_token": { "type": "string" },
+          "execution_id": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "bruiser_handoff",
+      "description": "Transfer an execution to another principal of the same customer (preempt or cooperative).",
+      "inputSchema": {
+        "type": "object",
+        "required": ["session_token", "execution_id", "to_id"],
+        "properties": {
+          "session_token": { "type": "string" },
+          "execution_id": { "type": "string" },
+          "to_type": { "type": "string", "enum": ["agent", "browser"] },
+          "to_id": { "type": "string" },
+          "mode": { "type": "string", "enum": ["preempt", "cooperative"] }
+        }
+      }
+    }
+  ]
+}

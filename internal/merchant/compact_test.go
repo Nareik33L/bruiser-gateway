@@ -12,6 +12,9 @@ concurrency:
   max_active: 1
 lease:
   ttl: 60s
+waiting:
+  mode: bounded
+  max_waiters: 1
 routes:
   - match: { method: POST, path: "/api/holds" }
     resource_from: event_id
@@ -32,5 +35,12 @@ routes:
 	}
 	if p.Policy.MaxActive != 1 || p.Policy.LeaseTTL != "60s" {
 		t.Fatalf("policy %+v", p.Policy)
+	}
+	if p.Policy.Waiting.Mode != "bounded" || p.Policy.Waiting.MaxWaiters != 1 {
+		t.Fatalf("waiting %+v", p.Policy.Waiting)
+	}
+	doc := p.PolicyDocument()
+	if doc.Domains[0].Waiting.MaxWaiters != 1 {
+		t.Fatalf("policy doc waiting %+v", doc.Domains[0].Waiting)
 	}
 }

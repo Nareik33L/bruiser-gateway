@@ -11,6 +11,7 @@ type Policy struct {
 	MaxActive   int             `yaml:"max_active"`
 	LeaseTTL    string          `yaml:"lease_ttl"`
 	MaxLifetime string          `yaml:"max_lifetime"`
+	Waiting     policy.Waiting  `yaml:"waiting"`
 }
 
 func (p Profile) PolicyDocument() policy.Document {
@@ -41,6 +42,9 @@ func (p Profile) PolicyDocument() policy.Document {
 	if p.Policy.MaxLifetime != "" {
 		doc.Domains[0].MaxLifetime = p.Policy.MaxLifetime
 		doc.Defaults.MaxLifetime = p.Policy.MaxLifetime
+	}
+	if p.Policy.Waiting.Mode != "" || p.Policy.Waiting.MaxWaiters > 0 {
+		doc.Domains[0].Waiting = p.Policy.Waiting
 	}
 	return doc
 }

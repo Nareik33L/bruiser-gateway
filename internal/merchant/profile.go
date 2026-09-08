@@ -22,7 +22,7 @@ type Profile struct {
 }
 
 type Identity struct {
-	Extractor       string `yaml:"extractor"` // auto | cookie-jwt | bearer-jwt | header | introspect | edge-signed
+	Extractor       string `yaml:"extractor"` // auto | cookie-jwt | bearer-jwt | header | introspect | edge-signed | oidc
 	Source          string `yaml:"source"`    // compact alias of extractor
 	Cookie          string `yaml:"cookie"`
 	Header          string `yaml:"header"`
@@ -31,6 +31,9 @@ type Identity struct {
 	Claim           string `yaml:"claim"` // compact alias of subject_claim
 	HMACSecretEnv   string `yaml:"hmac_secret_env"`
 	IntrospectURL   string `yaml:"introspect_url"`
+	JWKSURL         string `yaml:"jwks_url"`
+	Issuer          string `yaml:"issuer"`
+	Audience        string `yaml:"audience"`
 }
 
 // Compact fields — accepted at the document root so a merchant can write
@@ -47,6 +50,10 @@ type compactRoot struct {
 		TTL       string `yaml:"ttl"`
 		Heartbeat string `yaml:"heartbeat"`
 	} `yaml:"lease"`
+	Waiting struct {
+		Mode       string `yaml:"mode"`
+		MaxWaiters int    `yaml:"max_waiters"`
+	} `yaml:"waiting"`
 }
 
 type Route struct {
@@ -92,6 +99,10 @@ func Parse(b []byte) (Profile, error) {
 	if compact.Lease.TTL != "" && p.Policy.LeaseTTL == "" {
 		p.Policy.LeaseTTL = compact.Lease.TTL
 	}
+	if compact.Waiting.Mode != "" || compact.Waiting.MaxWaiters > 0 {
+		p.Policy.Waiting.Mode = compact.Waiting.Mode
+		p.Policy.Waiting.MaxWaiters = compact.Waiting.MaxWaiters
+	}
 	if p.MerchantID == "" {
 		return p, fmt.Errorf("merchant_id required")
 	}
@@ -128,6 +139,8 @@ func mapSource(src string) string {
 		return "introspect"
 	case "edge-signed", "signed-header":
 		return "edge-signed"
+	case "oidc", "jwks":
+		return "oidc"
 	default:
 		return src
 	}

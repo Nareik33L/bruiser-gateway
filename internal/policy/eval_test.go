@@ -199,6 +199,41 @@ func TestCompileRejectsUnknownDim(t *testing.T) {
 	}
 }
 
+func TestWaitingBoundedCompiles(t *testing.T) {
+	c, err := Compile(Document{
+		Version: 1,
+		Domains: []Rule{{
+			Name:      "purchase-per-event",
+			Match:     Match{Action: []string{"purchase"}},
+			Scope:     []string{"customer", "resource"},
+			MaxActive: 1,
+			Waiting:   Waiting{Mode: "bounded", MaxWaiters: 2},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := c.Evaluate(Request{
+		MerchantID: "m", CustomerID: "alice", Resource: "event:x", Action: "purchase",
+	})
+	if d.MaxWaiters != 2 {
+		t.Fatalf("max_waiters=%d", d.MaxWaiters)
+	}
+	none, err := Compile(Document{
+		Version: 1,
+		Domains: []Rule{{
+			Name: "x", Match: Match{Action: []string{"purchase"}},
+			Scope: []string{"customer", "resource"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if none.Evaluate(Request{MerchantID: "m", CustomerID: "a", Resource: "r", Action: "purchase"}).MaxWaiters != 0 {
+		t.Fatal("default waiting should be none")
+	}
+}
+
 func TestDefaultDocumentCompiles(t *testing.T) {
 	c, err := Compile(DefaultDocument("arsenal"))
 	if err != nil {

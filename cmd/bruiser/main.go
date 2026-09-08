@@ -181,6 +181,11 @@ func sweep(store *pgstore.Store, cfg config.Config, log *slog.Logger, stop <-cha
 			} else if n > 0 {
 				log.Info("expired executions", "count", n)
 			}
+			if qn, qerr := store.ExpireWaiters(ctx, 200); qerr != nil {
+				log.Warn("waiter sweep failed", "err", qerr)
+			} else if qn > 0 {
+				log.Info("expired waiters", "count", qn)
+			}
 			if cfg.AuditRetention > 0 {
 				purged, perr := store.PurgeAudit(ctx, cfg.MerchantID, time.Now().UTC().Add(-cfg.AuditRetention))
 				if perr != nil {

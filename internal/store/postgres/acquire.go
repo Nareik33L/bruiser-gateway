@@ -70,26 +70,10 @@ func (s *Store) Acquire(ctx context.Context, req lease.AcquireRequest) (lease.Ac
 
 	if len(actives) >= req.MaxActive {
 		holder := actives[0]
-		if err := insertAudit(ctx, tx, req.MerchantID, auditRow{
-			typ: "EXECUTION_BUSY", customerID: req.CustomerID,
-			principalType: req.Principal.Type, principalID: req.Principal.ID,
-			domainKey: req.DomainKey, executionID: holder.ID, ruleName: req.RuleName,
-			reason: "max_active", requestID: req.RequestID, fence: &holder.Fence,
-		}); err != nil {
-			return lease.AcquireResult{}, wrapStore(err)
+		if req.MaxWaiters > 0 {
+			return s.enqueueWaiter(ctx, tx, req, holder)
 		}
-		if err := tx.Commit(ctx); err != nil {
-			return lease.AcquireResult{}, wrapStore(err)
-		}
-		return lease.AcquireResult{
-			Status: lease.StatusBusy,
-			Busy: &lease.BusyInfo{
-				ActiveExecutionID: holder.ID,
-				Holder:            holder.Principal,
-				ExpiresAt:         holder.ExpiresAt,
-				CanPreempt:        lease.CanPreemptRanked(req.Principal, holder.Principal, req.Precedence),
-			},
-		}, nil
+		return busyResult(ctx, tx, req, holder)
 	}
 
 	if err := tx.QueryRow(ctx, `
@@ -236,7 +220,7 @@ func (s *Store) Get(ctx context.Context, merchantID, executionID string) (lease.
 		where merchant_id = $1 and execution_id = $2`, merchantID, executionID)
 	e, err := scanExecution(row)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return lease.Execution{}, lease.ErrNotFound
+		return s.getWaiter(ctx, merchantID, executionID)
 	}
 	if err != nil {
 		return lease.Execution{}, wrapStore(err)

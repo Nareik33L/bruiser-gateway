@@ -40,6 +40,28 @@ jobs:
           BRUISER_TEST_DATABASE_URL: postgres://bruiser:bruiser@127.0.0.1:5432/bruiser_test?sslmode=disable
         run: make ci
 
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+      - name: CycloneDX SBOM
+        run: |
+          go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.9.1 mod -json -output bruiser.cdx.json
+          test -s bruiser.cdx.json
+
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
   image:
     runs-on: ubuntu-latest
     steps:

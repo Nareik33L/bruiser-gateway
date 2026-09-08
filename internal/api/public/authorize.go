@@ -161,6 +161,7 @@ func (s *Server) admit(ctx context.Context, method, path, eventID string, r *htt
 		TTL:         d.TTL,
 		MaxLifetime: d.MaxLifetime,
 		Precedence:  d.Precedence,
+		MaxWaiters:  d.MaxWaiters,
 		RequestID:   reqID,
 	})
 	if err != nil {
@@ -193,6 +194,25 @@ func (s *Server) admit(ctx context.Context, method, path, eventID string, r *htt
 				"customer_id":        cust.CustomerID,
 				"expires_at":         acq.Execution.ExpiresAt.UTC().Format(time.RFC3339Nano),
 				"heartbeat_after_ms": s.cfg.HeartbeatInterval.Milliseconds(),
+			},
+		}
+	case lease.StatusQueued:
+		s.eaf.record(resource, cust.CustomerID, "queued")
+		retry := time.Until(acq.Busy.ExpiresAt).Milliseconds()
+		if retry < 0 {
+			retry = 1000
+		}
+		h.Set("Retry-After", "2")
+		return admitResult{
+			status:  http.StatusAccepted,
+			headers: h,
+			body: map[string]any{
+				"status":              "QUEUED",
+				"execution_id":        acq.Queue.WaiterID,
+				"position":            acq.Queue.Position,
+				"active_execution_id": acq.Queue.ActiveExecutionID,
+				"expires_at":          acq.Queue.ExpiresAt.UTC().Format(time.RFC3339Nano),
+				"retry_after_ms":      retry,
 			},
 		}
 	case lease.StatusBusy:

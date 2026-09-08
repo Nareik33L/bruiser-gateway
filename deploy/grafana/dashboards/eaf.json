@@ -38,11 +38,23 @@
       "id": 3,
       "title": "Allocation attempts",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 8 },
       "targets": [
         {
           "expr": "rate(bruiser_allocation_attempts_total[1m])",
           "legendFormat": "{{resource}} {{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Intra-customer queue depth",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "targets": [
+        {
+          "expr": "bruiser_queue_depth",
+          "legendFormat": "{{merchant}}"
         }
       ]
     }

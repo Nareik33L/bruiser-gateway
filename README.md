@@ -36,7 +36,10 @@ curl -sS -X POST localhost:8080/v1/executions/acquire \
   -d '{"resource":"event:ars-che","action":"purchase"}'
 ```
 
-A second agent for the same customer and resource receives `409 BUSY`.
+A second agent for the same customer and resource receives `409 BUSY`
+(or `202 QUEUED` when the rule sets `waiting.mode: bounded`). That queue
+is intra-customer concurrency — Alice’s extra agents wait for Alice, not
+behind Bob. A second customer on the same resource is granted independently.
 
 Drop-in: copy `configs/example.yaml`, list your hold/purchase routes, point
 Edge or Proxy at the origin you already have. Unmatched traffic passes
@@ -64,8 +67,14 @@ Dev assertions default to membership `1001234` (Alice in the Arsenal-like lab):
 | [docs/07-club-profile-arsenal.md](docs/07-club-profile-arsenal.md) | Unverified Arsenal-like standing analogue |
 | [docs/08-make-authoritative.md](docs/08-make-authoritative.md) | Edge / Proxy / Embedded placement + Authority Check |
 | [docs/demo.md](docs/demo.md) | 90-second demo script + make targets |
-| [sdk/README.md](sdk/README.md) | Go / Node / Python Embedded SDKs |
+| [docs/ops.md](docs/ops.md) | Deploy, backup, Authority Check, key rotation |
+| [docs/security/threat-model.md](docs/security/threat-model.md) | Lab threat model (not an external review) |
+| [CHANGELOG.md](CHANGELOG.md) | What shipped |
+| [sdk/README.md](sdk/README.md) | Go / Node / Python Embedded SDKs + Go agent client |
 | [protocol/v0-draft.md](protocol/v0-draft.md) | Bruiser Protocol v0 draft |
+| [protocol/tokens.md](protocol/tokens.md) | Assertion, session, execution tokens |
+| [protocol/audit.md](protocol/audit.md) | Audit event catalogue |
+| [protocol/mcp/README.md](protocol/mcp/README.md) | MCP tool catalogue (convenience only) |
 | [protocol/policy.schema.json](protocol/policy.schema.json) | Policy document JSON Schema |
 
 ## Licensing (intended, pending legal review)
@@ -81,9 +90,10 @@ M0–M7 lab work is in this tree against the **unverified Arsenal-like**
 profile: Edge, Proxy, Go/Node/Python Embedded SDKs, Authority Check (persisted),
 EAF (PR CI 200×; `make eaf-nightly` 10,000×), YAML policy with cross-node
 NOTIFY, handoff/revoke plus torture I2/I4, demo swarm + `/admin` dashboard,
-audit export and 13-month purge. M8 (legal BSL/LICENSE, trademark, external
-security review, Helm production, hosted sandbox) and Stage A outbound are
-not claimed.
+audit export and 13-month purge, bounded intra-customer queue, OIDC/JWKS
+extractor, Helm HPA/PDB/NetworkPolicy/ServiceMonitor/migrate. M8 human work
+(legal BSL/LICENSE, trademark, external security review, hosted sandbox DNS,
+image signing keys) and Stage A outbound are not claimed.
 
 ## Arsenal-like lab (best guess until discovery)
 

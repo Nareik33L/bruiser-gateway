@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -61,6 +62,10 @@ var (
 		Name: "bruiser_revoke_total",
 		Help: "Customer or admin revokes.",
 	})
+	queueDepth = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "bruiser_queue_depth",
+		Help: "Live intra-customer waiters.",
+	}, []string{"merchant"})
 )
 
 type eafAcc struct {
@@ -196,6 +201,7 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
+	r.Use(requestDeadline(8 * time.Second))
 	r.Get("/healthz", s.healthz)
 	r.Get("/readyz", s.readyz)
 	r.Handle("/metrics", promhttp.Handler())
@@ -226,6 +232,7 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 			r.Post("/executions/{id}/renew", s.renew)
 			r.Post("/executions/{id}/heartbeat", s.renew)
 			r.Post("/executions/{id}/release", s.release)
+			r.Post("/executions/{id}/leave", s.release)
 			r.Post("/executions/{id}/handoff", s.handoff)
 			r.Post("/executions/{id}/revoke", s.revoke)
 			r.Get("/executions/{id}", s.get)
@@ -267,7 +274,7 @@ func (s *Server) protocol(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"protocol":     "bruiser",
 		"version":      "0.1-draft",
-		"capabilities": []string{"IDENTITY", "ACQUIRE", "RENEW", "HEARTBEAT", "RELEASE", "HANDOFF", "REVOKE", "WATCH", "AUTHORIZE", "INTROSPECT", "POLICY", "ADMIN", "AUTHORITY_CHECK"},
+		"capabilities": []string{"IDENTITY", "ACQUIRE", "RENEW", "HEARTBEAT", "RELEASE", "HANDOFF", "REVOKE", "WATCH", "QUEUE", "AUTHORIZE", "INTROSPECT", "POLICY", "ADMIN", "AUTHORITY_CHECK"},
 	})
 }
 
@@ -291,8 +298,7 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body sessionReq
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid json")
+	if !decodeJSON(w, r, &body) {
 		return
 	}
 	if body.Principal.Type == "" {
@@ -387,8 +393,7 @@ type acquireReq struct {
 func (s *Server) acquire(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r.Context())
 	var body acquireReq
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid json")
+	if !decodeJSON(w, r, &body) {
 		return
 	}
 	if body.Resource == "" {
@@ -421,6 +426,7 @@ func (s *Server) acquire(w http.ResponseWriter, r *http.Request) {
 		TTL:         d.TTL,
 		MaxLifetime: d.MaxLifetime,
 		Precedence:  d.Precedence,
+		MaxWaiters:  d.MaxWaiters,
 		RequestID:   reqID,
 	})
 	if err != nil {
@@ -433,6 +439,8 @@ func (s *Server) acquire(w http.ResponseWriter, r *http.Request) {
 		s.writeExecution(w, http.StatusCreated, res.Execution, true)
 	case lease.StatusAlreadyHeld:
 		s.writeExecution(w, http.StatusOK, res.Execution, true)
+	case lease.StatusQueued:
+		s.writeQueued(w, d.DomainKey, d.RuleName, res)
 	case lease.StatusBusy:
 		retry := time.Until(res.Busy.ExpiresAt)
 		if retry < 0 {
@@ -492,7 +500,7 @@ func (s *Server) handoff(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r.Context())
 	var body handoffReq
 	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
 	}
 	exeID := chi.URLParam(r, "id")
 	var prec []string
@@ -525,7 +533,7 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r.Context())
 	var body revokeReq
 	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
 	}
 	e, err := s.leases.Revoke(r.Context(), sess.MerchantID, chi.URLParam(r, "id"), sess.SessionID, requestID(r), body.Reason)
 	if err != nil {
@@ -607,6 +615,9 @@ func (s *Server) writeExecution(w http.ResponseWriter, status int, e *lease.Exec
 	if e.State == lease.StateActive {
 		body["heartbeat_after_ms"] = s.cfg.HeartbeatInterval.Milliseconds()
 	}
+	if e.State == lease.StateQueued && e.QueuePosition > 0 {
+		body["position"] = e.QueuePosition
+	}
 	if e.EndReason != "" {
 		body["end_reason"] = e.EndReason
 	}
@@ -620,6 +631,28 @@ func (s *Server) writeExecution(w http.ResponseWriter, status int, e *lease.Exec
 		}
 	}
 	writeJSON(w, status, body)
+}
+
+func (s *Server) writeQueued(w http.ResponseWriter, domain, rule string, res lease.AcquireResult) {
+	retry := time.Until(res.Busy.ExpiresAt)
+	if retry < 0 {
+		retry = time.Second
+	}
+	body := map[string]any{
+		"status":              "QUEUED",
+		"domain":              domain,
+		"rule_name":           rule,
+		"execution_id":        res.Queue.WaiterID,
+		"position":            res.Queue.Position,
+		"active_execution_id": res.Queue.ActiveExecutionID,
+		"expires_at":          res.Queue.ExpiresAt.UTC().Format(time.RFC3339Nano),
+		"retry_after_ms":      retry.Milliseconds(),
+		"watch":               "/v1/executions/" + res.Queue.WaiterID + "/watch",
+	}
+	if res.Busy != nil {
+		body["holder"] = map[string]string{"type": res.Busy.Holder.Type, "id": res.Busy.Holder.ID}
+	}
+	writeJSON(w, http.StatusAccepted, body)
 }
 
 func (s *Server) mutationError(w http.ResponseWriter, err error) {
@@ -672,6 +705,29 @@ func requestID(r *http.Request) string {
 		return v
 	}
 	return id.Request()
+}
+
+func requestDeadline(d time.Duration) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/watch") || strings.HasSuffix(r.URL.Path, "/stream") {
+				next.ServeHTTP(w, r)
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), d)
+			defer cancel()
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json")
+		return false
+	}
+	return true
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

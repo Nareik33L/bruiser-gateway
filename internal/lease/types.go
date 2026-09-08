@@ -17,7 +17,10 @@ const (
 	StatusGranted     = "GRANTED"
 	StatusAlreadyHeld = "ALREADY_HELD"
 	StatusBusy        = "BUSY"
+	StatusQueued      = "QUEUED"
 	StatusDenied      = "DENIED"
+
+	StateQueued = "QUEUED"
 
 	ReasonExpired   = "EXPIRED"
 	ReasonRevoked   = "REVOKED"
@@ -74,6 +77,7 @@ type Execution struct {
 	EndedAt       *time.Time
 	EndReason     string
 	SuccessorID   string
+	QueuePosition int
 }
 
 func (e Execution) IsActive(now time.Time) bool {
@@ -93,7 +97,15 @@ type AcquireRequest struct {
 	TTL         time.Duration
 	MaxLifetime time.Duration
 	Precedence  []string
+	MaxWaiters  int
 	RequestID   string
+}
+
+type QueueInfo struct {
+	WaiterID          string
+	Position          int
+	ActiveExecutionID string
+	ExpiresAt         time.Time
 }
 
 type BusyInfo struct {
@@ -107,6 +119,7 @@ type AcquireResult struct {
 	Status    string
 	Execution *Execution
 	Busy      *BusyInfo
+	Queue     *QueueInfo
 	Reason    string
 }
 
