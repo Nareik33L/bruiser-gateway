@@ -60,12 +60,13 @@ broken and are closed in this slice:
 - EAF headline hard-coded downstream = 1; resume counted as forwarded.
 - Lab admin secret aliased the edge secret; `?secret=` leaked on `/admin`.
 
-This revision: `make test-race`, `make sdk-test`, and `make v1-accept`
-(including `TestV1DeploymentAcceptance` and `TestV1AdversarialOneCustomer`)
-are green. `make eaf-nightly` (1×10,000, origin `held=1`) was green on
-an earlier revision of this branch. Emergency `revoke-all` now resets
-the in-process busy cache on that replica (spurious BUSY only; it could
-not double-grant).
+This revision: `make soak` (10,000 agents, 30 minutes) stayed at
+**ACTIVE=1** through replica kill + replacement: 3.94M requests, 0
+errors, p50 ≈ 30ms / p99 ≈ 60ms, heap 14–34MB, goroutines ~340 then 34
+at stop. `TestSoakChurnSmoke` is the CI harness proof. The soak
+harness session-token slice is mutex-protected so reconnect cannot
+race acquire under `-race`. `make test-race` and `make v1-accept` are
+re-run on this revision.
 
 ## 3. WARN — limitations that do not block V1
 
@@ -75,7 +76,7 @@ not double-grant).
 | Admin cookie is not `Secure` | Lab HTTP. Terminate TLS at the ingress and do not expose `/admin` publicly without a network policy. |
 | Prometheus EAF gauges are process-local | Do not sum `bruiser_observed_eaf` or `bruiser_downstream_eaf` across replicas. Cluster EAF is `sum(allocation_attempts_total) / sum(executions_forwarded_total)`. See `docs/ops.md` and `deploy/prometheus/eaf.rules.yaml`. |
 | Busy cache is in-process | Correctness is the store. A replica restart rebuilds the cache. |
-| 10,000-agent proof is nightly | Default CI uses 200 + 3×250. `make eaf-nightly` is the 1×10,000 command. |
+| 10,000-agent burst is nightly | Default CI uses 200 + 3×250. `make eaf-nightly` is the 1×10,000 burst. `make soak` is the 30-minute 10k churn. |
 | `fail_closed=false` and `enforcement=false` | Operator-chosen fail-open. Default is fail-closed on allocation. |
 | Header-extractor identity | Bruiser trusts the merchant’s authenticated identity boundary. Unsigned headers must only be accepted from a trusted edge. JWT/OIDC/edge-signed is the V1 demonstration. Not a V1 blocker. |
 | P1 items | Full MCP server, OTel, admin SSO, Testcontainers, published k6, Helm ZDT, protocol v1 — not required for Stage A. |

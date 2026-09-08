@@ -39,7 +39,7 @@
 - V1 freeze: process-local EAF gauges documented (do not sum);
   `bruiser:observed_eaf:ratio` recording rule from additive counters;
   unsigned identity-header trust boundary documented; `make soak` long
-  churn (10k agents, 30m).
+  churn (10k agents, 30m; harness session tokens mutex-protected).
 
 ### Changed
 

@@ -181,6 +181,7 @@ func runSoak(t *testing.T, dur time.Duration, agents int, sampleEvery time.Durat
 
 	var (
 		reqs, errs, created, busy, queued, renewOK, released atomic.Int64
+		tokMu                                                sync.Mutex
 		latMu                                                sync.Mutex
 		latencies                                            []time.Duration
 		holderTok, holderID                                  atomic.Value
@@ -263,7 +264,9 @@ func runSoak(t *testing.T, dur time.Duration, agents int, sampleEvery time.Durat
 				if i < 0 {
 					i = wid % agents
 				}
+				tokMu.Lock()
 				tok := tokens[i]
+				tokMu.Unlock()
 				kind := i % 20
 				switch {
 				case kind < 12:
@@ -301,7 +304,10 @@ func runSoak(t *testing.T, dur time.Duration, agents int, sampleEvery time.Durat
 					}
 				case kind < 18:
 					if srv := pickNode(); srv != nil {
-						tokens[i] = mustSession(t, srv, cfg, "alice", principals[i])
+						next := mustSession(t, srv, cfg, "alice", principals[i])
+						tokMu.Lock()
+						tokens[i] = next
+						tokMu.Unlock()
 					}
 				default:
 					hid, _ := holderID.Load().(string)
