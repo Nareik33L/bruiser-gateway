@@ -68,7 +68,7 @@ soak:
 	BRUISER_TEST_DATABASE_URL="$(TEST_DATABASE_URL)" \
 	BRUISER_SOAK_DURATION="$${BRUISER_SOAK_DURATION:-30m}" \
 	BRUISER_SOAK_AGENTS="$${BRUISER_SOAK_AGENTS:-10000}" \
-		$(GO) test ./internal/torture -count=1 -timeout 90m -run TestSoakChurn -v
+		$(GO) test ./internal/torture -count=1 -timeout 90m -run '^TestSoakChurn$' -v
 
 v1-accept:
 	BRUISER_TEST_DATABASE_URL="$(TEST_DATABASE_URL)" $(GO) test ./internal/check ./internal/api/public ./internal/store/postgres ./internal/ops ./internal/simtix \
