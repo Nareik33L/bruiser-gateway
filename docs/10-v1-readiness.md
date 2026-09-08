@@ -55,7 +55,8 @@ broken and are closed in this slice:
 - EAF headline hard-coded downstream = 1; resume counted as forwarded.
 - Lab admin secret aliased the edge secret; `?secret=` leaked on `/admin`.
 
-If a later run of `make test-race` or `make eaf-nightly` fails, treat that failure as a production blocker.
+This revision: `make test-race`, `make sdk-test`, `make v1-accept`, and
+`make eaf-nightly` (1×10,000, origin `held=1`) are green.
 
 ## 3. WARN — limitations that do not block V1
 
@@ -109,7 +110,9 @@ Engineering blockers for a **supported** deployment (Proxy or Edge in
 front of every allocation route, origin lockdown on, distinct secrets,
 Postgres reachable):
 
-- None identified in this pass, pending a green `make test-race`.
+- None identified for a supported deployment (Proxy or Edge on every
+  allocation route, origin lockdown on, distinct secrets, Postgres up).
+  `make test-race` and `make eaf-nightly` passed on this revision.
 
 Still **human-owned** (not software gaps):
 
