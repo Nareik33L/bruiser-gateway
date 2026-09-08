@@ -466,3 +466,36 @@ execution id so watch/GET keep working. Overflow is still BUSY.
 product decision, not a technical one) or durable wait longer than
 `max_lifetime`.
 
+## ADR-030 — Post-core ops: dry-run, doctor, emergency controls
+
+**Decision.** Transparent dry-run, `bruiser doctor` / `config validate`,
+expanded `/readyz`, and auditable emergency controls are **supporting**
+capabilities. They must not change the product (one customer remains one
+customer) or delay outbound. Dry-run uses the **same** production path and
+the **same** policies as enforce. It never blocks, queues, or revokes.
+Hypothetical occupancy lives in `dry_run_holds` so Alice’s second agent is
+`WOULD_QUEUE` while Bob on the same resource is `WOULD_ALLOW`. The
+intra-customer queue invariant (ADR-029) holds in dry-run.
+
+Enforcement OFF is fail-open pass-through (`X-Bruiser-Control: bypass`).
+Allocation still **fails closed** on store unavailability unless the
+operator explicitly sets `fail_closed: false` — an unhealthy node must not
+create uncontrolled concurrent allocation by accident. Every control change
+is `CONTROL_CHANGED`.
+
+Install → Dry Run → Observe → Tune → Enforce. Same placement (Embedded /
+Edge / Proxy). No merchant architecture change between modes.
+
+**Why.** Clubs will not flip enforcement on without seeing what Bruiser
+would have done on real traffic, and operators need a kill switch that is
+faster than a redeploy.
+
+**Consequences.** New tables (`runtime_controls`, `dry_run_holds`,
+`dry_run_events`). Admin: `GET/PUT /v1/admin/controls`, drain, revoke-all,
+`GET /v1/admin/dry-run`. Doctor is PASS/WARN/FAIL. Upgrade/rollback and
+backup/restore stay merchant-Postgres procedures ([ops.md](ops.md)).
+
+**Revisit when.** A merchant needs shadow decisions written into the real
+lease table (rejected: pollutes enforcement) or a hosted dry-run SaaS
+(rejected: contradicts self-hosted).
+

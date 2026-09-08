@@ -9,12 +9,14 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Nareik33L/bruiser-gateway/internal/id"
 	"github.com/Nareik33L/bruiser-gateway/internal/identity"
 	"github.com/Nareik33L/bruiser-gateway/internal/lease"
 	"github.com/Nareik33L/bruiser-gateway/internal/merchant"
+	"github.com/Nareik33L/bruiser-gateway/internal/policy"
 	pgstore "github.com/Nareik33L/bruiser-gateway/internal/store/postgres"
 )
 
@@ -115,6 +117,7 @@ func (s *Server) admit(ctx context.Context, method, path, eventID string, r *htt
 	}
 
 	d := s.evaluate(s.cfg.MerchantID, cust.CustomerID, "agent", resource, route.Action, cust.Anchors)
+	d, ctl := s.applyControls(d, route.Action)
 	if d.ControlNone {
 		h.Set("X-Bruiser-Control", "none")
 		return admitResult{status: http.StatusOK, allow: true, headers: h, body: map[string]string{"status": "ALLOW", "action": route.Action, "rule_name": d.RuleName}}
@@ -126,6 +129,15 @@ func (s *Server) admit(ctx context.Context, method, path, eventID string, r *htt
 			reason = "denied"
 		}
 		return admitResult{status: http.StatusForbidden, body: map[string]any{"error": "DENIED", "reason": reason, "rule_name": d.RuleName}}
+	}
+
+	if ctl.PassThrough() {
+		h.Set("X-Bruiser-Control", "bypass")
+		s.eaf.record(resource, cust.CustomerID, "bypass")
+		return admitResult{status: http.StatusOK, allow: true, headers: h, body: map[string]any{"status": "ALLOW", "action": route.Action, "control": "bypass", "rule_name": d.RuleName}}
+	}
+	if ctl.DryRun() {
+		return s.admitDryRun(ctx, h, cust.CustomerID, cust.PrincipalID, resource, route.Action, d, reqID)
 	}
 
 	principalID := cust.PrincipalID
@@ -239,7 +251,44 @@ func (s *Server) admit(ctx context.Context, method, path, eventID string, r *htt
 	}
 }
 
+func (s *Server) admitDryRun(ctx context.Context, h http.Header, customerID, principalID, resource, action string, d policy.Decision, reqID string) admitResult {
+	if principalID == "" {
+		principalID = id.New("p")
+	}
+	principalID = "unaware:" + principalID
+	ev, err := s.store.ShadowDecide(ctx, s.cfg.MerchantID, d.DomainKey, customerID, principalID, resource, action, d.RuleName, d.MaxActive, d.MaxWaiters, d.TTL, reqID)
+	would, reason := "WOULD_UNKNOWN", "store_unavailable"
+	if err == nil {
+		would, reason = "WOULD_"+ev.Would, ev.Reason
+	}
+	s.eaf.record(resource, customerID, "would_"+strings.ToLower(strings.TrimPrefix(would, "WOULD_")))
+	if h == nil {
+		h = make(http.Header)
+	}
+	h.Set("X-Bruiser-Control", "dry-run")
+	h.Set("X-Bruiser-Dry-Run", would)
+	h.Set("X-Bruiser-Dry-Run-Reason", reason)
+	return admitResult{
+		status:  http.StatusOK,
+		allow:   true,
+		headers: h,
+		body: map[string]any{
+			"status":      "ALLOW",
+			"would":       would,
+			"reason":      reason,
+			"action":      action,
+			"customer_id": customerID,
+			"rule_name":   d.RuleName,
+		},
+	}
+}
+
 func (s *Server) admitStoreError(err error) admitResult {
+	if s.failOpen() {
+		h := make(http.Header)
+		h.Set("X-Bruiser-Control", "fail-open")
+		return admitResult{status: http.StatusOK, allow: true, headers: h, body: map[string]any{"status": "ALLOW", "control": "fail-open"}}
+	}
 	switch {
 	case err == nil:
 		return admitResult{status: http.StatusInternalServerError, body: map[string]string{"error": "internal error"}}

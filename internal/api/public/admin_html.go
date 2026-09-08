@@ -48,9 +48,42 @@ a{color:var(--gold)}
 <header>
   <h1>Observed EAF</h1>
   <div class="eaf" id="eaf">—</div>
-  <div class="sub">Downstream <strong id="down">—</strong> · attempts <span id="att">0</span> · forwarded <span id="fwd">0</span> · policy v<span id="pol">0</span></div>
+  <div class="sub">Downstream <strong id="down">—</strong> · attempts <span id="att">0</span> · forwarded <span id="fwd">0</span> · policy v<span id="pol">0</span> · mode <strong id="mode">—</strong></div>
 </header>
 <main>
+  <section>
+    <h2>Emergency controls</h2>
+    <p class="sub">Audited kill switch. Allocation still fails closed on an unhealthy store unless you open fail-closed.</p>
+    <table>
+      <tr><td>Mode</td><td id="ctl-mode">—</td></tr>
+      <tr><td>Enforcement</td><td id="ctl-enf">—</td></tr>
+      <tr><td>Queue</td><td id="ctl-q">—</td></tr>
+      <tr><td>Fail closed</td><td id="ctl-fc">—</td></tr>
+    </table>
+    <div class="row" style="margin-top:.6rem">
+      <button id="to-dry">Dry run</button>
+      <button id="to-enf">Enforce</button>
+      <button id="enf-off">Enforcement off</button>
+      <button id="q-off">Queue off</button>
+      <button id="drain">Drain waiters</button>
+      <button id="rev-all">Revoke all</button>
+    </div>
+  </section>
+  <section>
+    <h2>What Bruiser would have stopped</h2>
+    <p class="sub">Dry-run last 24h — same path, never blocks. Intra-customer only.</p>
+    <table>
+      <tr><td>Requests observed</td><td id="dr-obs">0</td></tr>
+      <tr><td>Unique customers</td><td id="dr-cust">0</td></tr>
+      <tr><td>Would allow</td><td id="dr-allow">0</td></tr>
+      <tr><td>Would queue</td><td id="dr-queue">0</td></tr>
+      <tr><td>Would reject</td><td id="dr-rej">0</td></tr>
+      <tr><td>Customers affected</td><td id="dr-aff">0</td></tr>
+      <tr><td>Requests absorbed</td><td id="dr-abs">0</td></tr>
+      <tr><td>Execution Amplification Factor</td><td id="dr-eaf">—</td></tr>
+    </table>
+    <pre id="dr-recent"></pre>
+  </section>
   <section>
     <h2>Authority Check</h2>
     <div id="check-overall" class="sub">No run recorded</div>
@@ -102,6 +135,23 @@ function paint(d){
   document.getElementById('att').textContent = e.attempts||0;
   document.getElementById('fwd').textContent = e.forwarded||0;
   document.getElementById('pol').textContent = d.policy_version||0;
+  const ctl=d.controls||{};
+  document.getElementById('mode').textContent = ctl.mode||'enforce';
+  document.getElementById('ctl-mode').textContent = ctl.mode||'enforce';
+  document.getElementById('ctl-enf').textContent = ctl.enforcement===false?'OFF':'ON';
+  document.getElementById('ctl-q').textContent = ctl.queue_enabled===false?'OFF':'ON';
+  document.getElementById('ctl-fc').textContent = ctl.fail_closed===false?'open':'closed';
+  const dr=d.dry_run||{};
+  document.getElementById('dr-obs').textContent = dr.requests_observed||0;
+  document.getElementById('dr-cust').textContent = dr.unique_customers||0;
+  document.getElementById('dr-allow').textContent = dr.would_allow||0;
+  document.getElementById('dr-queue').textContent = dr.would_queue||0;
+  document.getElementById('dr-rej').textContent = dr.would_reject||0;
+  document.getElementById('dr-aff').textContent = dr.customers_affected||0;
+  document.getElementById('dr-abs').textContent = dr.requests_potentially_absorbed||0;
+  document.getElementById('dr-eaf').textContent = (dr.execution_amplification_factor||0).toFixed(2)+'×';
+  const rec=(dr.recent||[]).slice(0,8).map(x=>'WOULD '+x.would+'  customer '+x.customer_id+'  '+x.reason).join('\n');
+  document.getElementById('dr-recent').textContent = rec;
   const u=d.usage||{};
   document.getElementById('u-active').textContent = u.active_executions||0;
   document.getElementById('u-queue').textContent = u.queue_depth||0;
@@ -164,6 +214,22 @@ document.body.addEventListener('click',async e=>{
   await fetch(qs('/v1/admin/executions/'+id+'/revoke'),{method:'POST',headers:Object.assign({'Content-Type':'application/json'},headers()),body:JSON.stringify({reason:'admin'})});
   refresh();
 });
+async function putCtl(body){
+  await fetch(qs('/v1/admin/controls'),{method:'PUT',headers:Object.assign({'Content-Type':'application/json'},headers()),body:JSON.stringify(body)});
+  refresh();
+}
+document.getElementById('to-dry').onclick=()=>putCtl({mode:'dry-run',updated_by:'admin-ui'});
+document.getElementById('to-enf').onclick=()=>putCtl({mode:'enforce',enforcement:true,updated_by:'admin-ui'});
+document.getElementById('enf-off').onclick=()=>putCtl({enforcement:false,updated_by:'admin-ui'});
+document.getElementById('q-off').onclick=()=>putCtl({queue_enabled:false,updated_by:'admin-ui'});
+document.getElementById('drain').onclick=async()=>{
+  await fetch(qs('/v1/admin/controls/drain'),{method:'POST',headers:headers()});
+  refresh();
+};
+document.getElementById('rev-all').onclick=async()=>{
+  await fetch(qs('/v1/admin/controls/revoke-all'),{method:'POST',headers:headers()});
+  refresh();
+};
 document.getElementById('export').href=qs('/v1/admin/export');
 refresh();
 try{

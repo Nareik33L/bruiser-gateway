@@ -26,11 +26,21 @@ func cmdProfile() error {
 		if _, err := policy.Compile(doc); err != nil {
 			return err
 		}
+		fails := 0
+		for _, i := range p.ValidateIssues() {
+			fmt.Printf("%s  %s: %s\n", i.Level, i.Field, i.Message)
+			if i.Level == "FAIL" {
+				fails++
+			}
+		}
 		n := 0
 		for _, r := range p.Routes {
 			if r.Controlled() {
 				n++
 			}
+		}
+		if fails > 0 {
+			return fmt.Errorf("profile validate: %d error(s)", fails)
 		}
 		fmt.Printf("ok merchant=%s extractor=%s unmatched=%s allocation_routes=%d\n",
 			p.MerchantID, p.Identity.Extractor, p.Unmatched, n)

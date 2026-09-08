@@ -36,6 +36,9 @@ type Config struct {
 	Telemetry         bool
 	IntrospectURL     string
 	Burst             int
+	Mode              string
+	Enforcement       bool
+	QueueEnabled      bool
 }
 
 func Load() Config {
@@ -67,6 +70,9 @@ func Load() Config {
 		Telemetry:         env("BRUISER_TELEMETRY", "") == "1" || strings.EqualFold(env("BRUISER_TELEMETRY", ""), "true"),
 		IntrospectURL:     env("BRUISER_INTROSPECT_URL", ""),
 		Burst:             envInt("BRUISER_BURST", 10),
+		Mode:              env("BRUISER_MODE", "enforce"),
+		Enforcement:       envBool("BRUISER_ENFORCEMENT", true),
+		QueueEnabled:      envBool("BRUISER_QUEUE", true),
 	}
 	if c.AdminSecret == "" {
 		c.AdminSecret = c.EdgeSecret
@@ -83,6 +89,20 @@ func (c Config) Validate() error {
 	}
 	if c.MaxActive < 1 {
 		return fmt.Errorf("BRUISER_MAX_ACTIVE must be >= 1")
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Mode)) {
+	case "", "enforce", "dry-run":
+	default:
+		return fmt.Errorf("BRUISER_MODE must be enforce or dry-run")
+	}
+	if c.HeartbeatInterval > 0 && c.LeaseTTL > 0 && c.LeaseTTL < c.HeartbeatInterval {
+		return fmt.Errorf("BRUISER_LEASE_TTL (%s) must be >= BRUISER_HEARTBEAT_INTERVAL (%s)", c.LeaseTTL, c.HeartbeatInterval)
+	}
+	if c.MaxLifetime > 0 && c.LeaseTTL > 0 && c.MaxLifetime < c.LeaseTTL {
+		return fmt.Errorf("BRUISER_MAX_LIFETIME must be >= BRUISER_LEASE_TTL")
+	}
+	if c.ProxyAddr != "" && c.OriginURL == "" {
+		return fmt.Errorf("BRUISER_ORIGIN_URL is required when BRUISER_PROXY_ADDR is set")
 	}
 	return nil
 }
@@ -122,4 +142,19 @@ func envFloat(key string, def float64) float64 {
 		}
 	}
 	return def
+}
+
+func envBool(key string, def bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return def
+	}
 }

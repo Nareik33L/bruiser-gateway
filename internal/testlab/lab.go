@@ -46,6 +46,10 @@ func Gateway(t testing.TB, profile merchant.Profile) (*httptest.Server, config.C
 }
 
 func GatewayAPI(t testing.TB, profile merchant.Profile) (*publicapi.Server, *httptest.Server, config.Config, auth.Signer) {
+	return GatewayWith(t, profile, nil)
+}
+
+func GatewayWith(t testing.TB, profile merchant.Profile, mut func(*config.Config)) (*publicapi.Server, *httptest.Server, config.Config, auth.Signer) {
 	t.Helper()
 	url := os.Getenv("BRUISER_TEST_DATABASE_URL")
 	if url == "" {
@@ -69,6 +73,9 @@ func GatewayAPI(t testing.TB, profile merchant.Profile) (*publicapi.Server, *htt
 	cfg.OriginSecret = "origin-lock-dev"
 	cfg.MaxInFlight = 8
 	cfg.RatePerSec = 100
+	if mut != nil {
+		mut(&cfg)
+	}
 	if profile.MerchantID == "" {
 		profile = merchant.Empty(cfg.MerchantID)
 	}

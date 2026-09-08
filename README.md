@@ -51,7 +51,14 @@ Dev assertions default to membership `1001234` (Alice in the Arsenal-like lab):
 ./bin/bruiser assertion 1001234
 ```
 
-`GET /healthz` liveness, `GET /readyz` store readiness, `GET /metrics` Prometheus.
+`GET /healthz` liveness, `GET /readyz` store + signing key + mode, `GET /metrics` Prometheus.
+
+```bash
+./bin/bruiser config validate configs/example.yaml
+./bin/bruiser doctor --profile configs/example.yaml --skip-store
+# Production path, observe only:
+BRUISER_MODE=dry-run make serve
+```
 
 ## Documents
 
@@ -66,8 +73,9 @@ Dev assertions default to membership `1001234` (Alice in the Arsenal-like lab):
 | [docs/06-integration-discovery.md](docs/06-integration-discovery.md) | Stage A discovery questionnaire |
 | [docs/07-club-profile-arsenal.md](docs/07-club-profile-arsenal.md) | Unverified Arsenal-like standing analogue |
 | [docs/08-make-authoritative.md](docs/08-make-authoritative.md) | Edge / Proxy / Embedded placement + Authority Check |
+| [docs/09-post-core-capabilities.md](docs/09-post-core-capabilities.md) | Dry-run, doctor, emergency controls (non-blocking) |
 | [docs/demo.md](docs/demo.md) | 90-second demo script + make targets |
-| [docs/ops.md](docs/ops.md) | Deploy, backup, Authority Check, key rotation |
+| [docs/ops.md](docs/ops.md) | Deploy, upgrade/rollback, backup/restore, emergency controls |
 | [docs/security/threat-model.md](docs/security/threat-model.md) | Lab threat model (not an external review) |
 | [CHANGELOG.md](CHANGELOG.md) | What shipped |
 | [sdk/README.md](sdk/README.md) | Go / Node / Python Embedded SDKs + Go agent client |
@@ -91,7 +99,8 @@ profile: Edge, Proxy, Go/Node/Python Embedded SDKs, Authority Check (persisted),
 EAF (PR CI 200×; `make eaf-nightly` 10,000×), YAML policy with cross-node
 NOTIFY, handoff/revoke plus torture I2/I4, demo swarm + `/admin` dashboard,
 audit export and 13-month purge, bounded intra-customer queue, OIDC/JWKS
-extractor, Helm HPA/PDB/NetworkPolicy/ServiceMonitor/migrate. M8 human work
+extractor, Helm HPA/PDB/NetworkPolicy/ServiceMonitor/migrate, dry-run,
+doctor / config validate, emergency controls. M8 human work
 (legal BSL/LICENSE, trademark, external security review, hosted sandbox DNS,
 image signing keys) and Stage A outbound are not claimed.
 

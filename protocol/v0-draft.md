@@ -26,6 +26,8 @@ The Go gateway is one implementation of this protocol.
 | AUTHORITY_CHECK | `POST/GET /v1/authority-check` | yes (audit `AUTHORITY_CHECK`) |
 | QUEUE | acquire returns `202 QUEUED` when `waiting.mode: bounded` | yes — same customer only; not a waiting room |
 | LEAVE | `POST /v1/executions/{id}/leave` | yes (alias of release on a waiter) |
+| DRY_RUN | `BRUISER_MODE=dry-run`; `GET /v1/admin/dry-run` | yes — same path, never blocks; `WOULD_*` |
+| CONTROLS | `GET/PUT /v1/admin/controls` | yes — auditable emergency kill switch |
 
 ## Identity
 

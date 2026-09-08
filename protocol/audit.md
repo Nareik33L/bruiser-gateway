@@ -19,6 +19,9 @@ Default retention **13 months** (`BRUISER_AUDIT_RETENTION`). Export:
 | `AUTHORITY_CHECK` | Last go-live gate report |
 | `AUDIT_PURGED` | Retention job |
 | `POLICY_ACTIVATED` | `PUT /v1/policy` |
+| `CONTROL_CHANGED` | Emergency / mode change (`PUT /v1/admin/controls`) |
+| `EMERGENCY_DRAIN` | Operator drained intra-customer waiters |
+| `EMERGENCY_REVOKE` | Operator revoked active executions |
 
 Every row is tenant-scoped (`merchant_id`). Events answer who (customer +
 principal), which execution, which rule, fence, and request id. No PII
