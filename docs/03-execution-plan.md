@@ -206,9 +206,10 @@ with optional origin lockdown and optional Embedded token verify; Go Edge
 analogue plus NGINX `auth_request` and Envoy `ext_authz` references; **Proxy**
 on `BRUISER_PROXY_ADDR`; `bruiser authority-check` (Edge and Proxy); unaware
 BUSY vs ALREADY_HELD; EAF counters plus `bruiser eaf-demo`; `sdk/go` Protect
-with fence tracking. Still open: Node/Python SDKs, 1×10,000 as a nightly (CI
-proves 200× on Proxy; CLI defaults to 2,000), `AUTHORITY_CHECK` audit
-persistence.
+with fence tracking; `sdk/node` and `sdk/python` (EdDSA + fence) in CI;
+`AUTHORITY_CHECK` persisted on `bruiser authority-check` and
+`POST /v1/authority-check`; 1×10,000 as `make eaf-nightly` / nightly workflow
+(PR CI remains 200× on Proxy; CLI default 2,000).
 
 ---
 
@@ -242,8 +243,9 @@ dimensions `customer`, `resource`, `resource_pool`, `principal_type`,
 versioned policies; `GET/PUT /v1/policy` (admin/edge secret); live `max_active`
 change without restart; household-cap BUSY with `rule_name`;
 `bruiser policy validate`; `protocol/policy.schema.json`. Precedence lists on
-the matched rule replace the ADR-024 hard-code when present. NOTIFY fan-out of
-policy to other nodes remains (PUT resets this process's busy cache).
+the matched rule replace the ADR-024 hard-code when present. `NOTIFY
+bruiser_policy` plus a one-second poll reloads other nodes and resets their
+busy cache (ADR-026).
 
 ---
 
@@ -275,8 +277,9 @@ default precedence browser > agent (ADR-024); `can_preempt` on BUSY; customer
 revoke subject to precedence; renew after handoff is 410 with `successor_id`;
 introspect returns `active: false`; SimTix rejects a stale fence after the
 successor token is seen. CI scenario: agent holds → browser takes control →
-agent renew 410 → stale purchase 403 → browser purchases. Torture handoff ops
-remain.
+agent renew 410 → stale purchase 403 → browser purchases. Torture adds
+`TestHandoffRevokeInvariants` (I2 fence rise, I4 no zombie renew, still one
+ACTIVE, revoke then zero ACTIVE).
 
 ---
 
@@ -316,6 +319,13 @@ Exit criteria
 - Someone outside the team can run the demo from the README without help, and a
   prospect can watch it run at the hosted URL.
 
+**Landed in this tree (lab demo, not hosted sandbox).** `cmd/swarm` and
+`bruiser swarm` profiles `1xN` / `NxK` / `unaware` / `bypass` / `handoff`;
+`GET /admin` dashboard with SSE EAF headline and last Authority Check;
+`make demo-*` plus `make demo-up` (Compose `--profile demo` with Grafana);
+`docs/demo.md`; `TestDemoAssertion` so the demo cannot silently regress.
+Hosted `sandbox.bruiser-gateway.com` remains M8.
+
 ---
 
 ## M7 — Admin interface and observability (M)
@@ -346,6 +356,15 @@ Exit criteria
 - Grafana dashboard renders all headline metrics during the demo, EAF first.
 - Retention job purges (or archives) events older than the configured window in a
   test with a shortened window; the purge is itself audited.
+
+**Landed in this tree (operator surface).** `GET /admin` (htmx-style page +
+SSE); EAF headline, usage figures, active executions with admin revoke, audit
+search and JSONL export; last Authority Check plus `[Run check]`;
+`BRUISER_AUDIT_RETENTION` default 13 months with `AUDIT_PURGED`; Grafana
+dashboard provisioned under the demo Compose profile (Prometheus scrape of
+`/metrics`). V1 admin auth is the admin/edge secret (`BRUISER_ADMIN_SECRET`),
+not a full API-key RBAC table. OpenTelemetry traces remain a follow-on; the
+scrape path is Prometheus.
 
 ---
 

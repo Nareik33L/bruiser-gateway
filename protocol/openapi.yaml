@@ -148,6 +148,28 @@ paths:
         "200": { description: compiled and active }
         "400": { description: invalid policy }
         "401": { description: bad admin secret }
+  /v1/authority-check:
+    get:
+      summary: Last Authority Check report
+      responses:
+        "200": { description: last AUTHORITY_CHECK audit }
+        "401": { description: bad admin secret }
+    post:
+      summary: Run Authority Check and persist AUTHORITY_CHECK
+      responses:
+        "200": { description: PASS }
+        "409": { description: FAIL }
+        "401": { description: bad admin secret }
+  /v1/admin/status:
+    get:
+      summary: Operator status (EAF, usage, executions, last check)
+      responses:
+        "200": { description: status }
+  /v1/admin/export:
+    get:
+      summary: Audit export as JSONL
+      responses:
+        "200": { description: ndjson }
   /v1/introspect:
     post:
       summary: Verify an execution token (Embedded)

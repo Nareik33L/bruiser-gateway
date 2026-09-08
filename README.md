@@ -58,6 +58,8 @@ Dev assertions default to membership `1001234` (Alice in the Arsenal-like lab):
 | [docs/06-integration-discovery.md](docs/06-integration-discovery.md) | Stage A discovery questionnaire |
 | [docs/07-club-profile-arsenal.md](docs/07-club-profile-arsenal.md) | Unverified Arsenal-like standing analogue |
 | [docs/08-make-authoritative.md](docs/08-make-authoritative.md) | Edge / Proxy / Embedded placement + Authority Check |
+| [docs/demo.md](docs/demo.md) | 90-second demo script + make targets |
+| [sdk/README.md](sdk/README.md) | Go / Node / Python Embedded SDKs |
 | [protocol/v0-draft.md](protocol/v0-draft.md) | Bruiser Protocol v0 draft |
 | [protocol/policy.schema.json](protocol/policy.schema.json) | Policy document JSON Schema |
 
@@ -68,10 +70,13 @@ No licence files are committed until the OSS/Core boundary is formally decided.
 
 ## Status
 
-M0–M2 are in this tree. M3 against the **unverified Arsenal-like** profile
-covers Edge, Proxy, Go Embedded SDK, Authority Check, and EAF. M4 is a YAML
-policy engine (`bruiser policy validate`, `PUT /v1/policy`). M5 handoff/revoke
-are in. Node/Python SDKs remain. Stage A commercial discovery runs in parallel.
+M0–M7 lab work is in this tree against the **unverified Arsenal-like**
+profile: Edge, Proxy, Go/Node/Python Embedded SDKs, Authority Check (persisted),
+EAF (PR CI 200×; `make eaf-nightly` 10,000×), YAML policy with cross-node
+NOTIFY, handoff/revoke plus torture I2/I4, demo swarm + `/admin` dashboard,
+audit export and 13-month purge. M8 (legal BSL/LICENSE, trademark, external
+security review, Helm production, hosted sandbox) and Stage A outbound are
+not claimed.
 
 ## Arsenal-like lab (best guess until discovery)
 
@@ -84,8 +89,9 @@ platform origin Bruiser sits in front of (Edge), not club-owned checkout
 export BRUISER_DATABASE_URL=postgres://bruiser:bruiser@127.0.0.1:5432/bruiser?sslmode=disable
 make serve            # :8080 control plane; BRUISER_PROXY_ADDR=:8081 for Proxy
 make simtix           # :8090 origin (lockdown) + :8091 Edge analogue
-make authority-check  # Overall Result PASS
+make authority-check  # Overall Result PASS; writes AUTHORITY_CHECK
 make eaf-demo         # unaware swarm; observed EAF ~N×, downstream 1×
+# Dashboard: http://127.0.0.1:8080/admin  (admin/edge secret)
 ```
 
 Two logins of membership `1001234` against `POST /api/events/ars-che/holds`

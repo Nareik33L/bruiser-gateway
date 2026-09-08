@@ -21,7 +21,9 @@ The Go gateway is one implementation of this protocol.
 | HANDOFF | `POST /v1/executions/{id}/handoff` | yes |
 | AUTHORIZE | `POST /v1/authorize` | yes (Edge) |
 | INTROSPECT | `POST /v1/introspect` | yes |
-| POLICY | `GET/PUT /v1/policy` | yes |
+| POLICY | `GET/PUT /v1/policy` | yes (NOTIFY + poll reload) |
+| ADMIN | `GET /admin`, `/v1/admin/*` | yes |
+| AUTHORITY_CHECK | `POST/GET /v1/authority-check` | yes (audit `AUTHORITY_CHECK`) |
 
 ## Identity
 

@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/Nareik33L/bruiser-gateway/internal/lease"
 	"github.com/Nareik33L/bruiser-gateway/internal/policy"
@@ -20,11 +21,71 @@ func (s *Server) loadPolicy() {
 		if row, err := s.store.ActivePolicy(context.Background(), s.cfg.MerchantID); err == nil {
 			if loaded, err := policy.CompileYAML([]byte(row.YAML)); err == nil {
 				c = loaded
-				s.policyVer = row.Version
+				s.policyVer.Store(int64(row.Version))
 			}
 		}
 	}
 	s.compiled.Store(&c)
+}
+
+func (s *Server) applyStorePolicy() {
+	if s.store == nil {
+		return
+	}
+	row, err := s.store.ActivePolicy(context.Background(), s.cfg.MerchantID)
+	if err != nil {
+		return
+	}
+	if row.Version == int(s.policyVer.Load()) {
+		return
+	}
+	loaded, err := policy.CompileYAML([]byte(row.YAML))
+	if err != nil {
+		return
+	}
+	s.compiled.Store(&loaded)
+	s.policyVer.Store(int64(row.Version))
+	if cache, ok := s.leases.(*lease.BusyCache); ok {
+		cache.Reset()
+	}
+}
+
+func (s *Server) Start(ctx context.Context) {
+	if s == nil || s.store == nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	s.stopWatch = cancel
+	go s.store.ListenPolicyLoop(ctx, func(merchantID string) {
+		if merchantID != "" && merchantID != s.cfg.MerchantID {
+			return
+		}
+		s.applyStorePolicy()
+	})
+	go s.pollPolicy(ctx)
+}
+
+func (s *Server) Close() {
+	if s != nil && s.stopWatch != nil {
+		s.stopWatch()
+	}
+}
+
+func (s *Server) pollPolicy(ctx context.Context) {
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			s.applyStorePolicy()
+		}
+	}
+}
+
+func (s *Server) PolicyVersion() int {
+	return int(s.policyVer.Load())
 }
 
 func (s *Server) getCompiled() policy.Compiled {
@@ -47,14 +108,29 @@ func (s *Server) evaluate(merchantID, customerID, ptype, resource, action string
 	})
 }
 
+func (s *Server) adminSecret() string {
+	if s.cfg.AdminSecret != "" {
+		return s.cfg.AdminSecret
+	}
+	return s.cfg.EdgeSecret
+}
+
 func (s *Server) adminOK(r *http.Request) bool {
-	secret := s.cfg.EdgeSecret
+	secret := s.adminSecret()
 	if secret == "" {
 		return true
 	}
 	got := r.Header.Get("X-Bruiser-Admin-Secret")
 	if got == "" {
 		got = r.Header.Get("X-Bruiser-Edge-Secret")
+	}
+	if got == "" {
+		if c, err := r.Cookie("bruiser_admin"); err == nil {
+			got = c.Value
+		}
+	}
+	if got == "" {
+		got = r.URL.Query().Get("secret")
 	}
 	return subtle.ConstantTimeCompare([]byte(got), []byte(secret)) == 1
 }
@@ -70,7 +146,7 @@ func (s *Server) getPolicy(w http.ResponseWriter, r *http.Request) {
 		rules = append(rules, d.Name)
 	}
 	body := map[string]any{
-		"version":    s.policyVer,
+		"version":    s.PolicyVersion(),
 		"merchant":   s.cfg.MerchantID,
 		"rule_names": rules,
 		"fallback":   c.Doc.Fallback,
@@ -105,7 +181,7 @@ func (s *Server) putPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.compiled.Store(&c)
-	s.policyVer = row.Version
+	s.policyVer.Store(int64(row.Version))
 	if cache, ok := s.leases.(*lease.BusyCache); ok {
 		cache.Reset()
 	}

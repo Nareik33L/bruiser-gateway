@@ -1,12 +1,12 @@
-name: ci
+name: nightly
 
 on:
-  push:
-    branches: [main, "cursor/**"]
-  pull_request:
+  schedule:
+    - cron: "20 3 * * *"
+  workflow_dispatch:
 
 jobs:
-  test:
+  eaf-10000:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -27,22 +27,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25.x"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Python SDK deps
-        run: pip install cryptography
-      - name: Test
+      - name: 1×10000 EAF
         env:
           BRUISER_TEST_DATABASE_URL: postgres://bruiser:bruiser@127.0.0.1:5432/bruiser_test?sslmode=disable
-        run: make ci
-
-  image:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build container
-        run: docker build -t bruiser-gateway:ci .
+          BRUISER_EAF_N: "10000"
+        run: make eaf-nightly

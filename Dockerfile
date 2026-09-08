@@ -16,7 +16,7 @@ FROM gcr.io/distroless/static-debian12:nonroot AS gateway
 COPY --from=build /out/bruiser /bruiser
 COPY --from=build /src/configs /configs
 USER nonroot:nonroot
-EXPOSE 8080
+EXPOSE 8080 8081
 ENV BRUISER_PROFILE=/configs/arsenal.yaml
 ENTRYPOINT ["/bruiser"]
 CMD ["serve"]

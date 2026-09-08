@@ -28,10 +28,14 @@ type Config struct {
 	OriginURL         string
 	MaxInFlight       int
 	RatePerSec        float64
+	AuditRetention    time.Duration
+	CheckEdgeURL      string
+	CheckOriginURL    string
+	AdminSecret       string
 }
 
 func Load() Config {
-	return Config{
+	c := Config{
 		HTTPAddr:          env("BRUISER_HTTP_ADDR", ":8080"),
 		DatabaseURL:       env("BRUISER_DATABASE_URL", "postgres://bruiser:bruiser@127.0.0.1:5432/bruiser?sslmode=disable"),
 		DevHMACSecret:     env("BRUISER_DEV_HMAC_SECRET", "dev-secret-change-me"),
@@ -52,7 +56,15 @@ func Load() Config {
 		OriginURL:         env("BRUISER_ORIGIN_URL", ""),
 		MaxInFlight:       envInt("BRUISER_MAX_IN_FLIGHT", 2),
 		RatePerSec:        envFloat("BRUISER_RATE_PER_SEC", 5),
+		AuditRetention:    envDuration("BRUISER_AUDIT_RETENTION", 13*30*24*time.Hour),
+		CheckEdgeURL:      env("BRUISER_CHECK_EDGE_URL", "http://127.0.0.1:8091"),
+		CheckOriginURL:    env("BRUISER_CHECK_ORIGIN_URL", "http://127.0.0.1:8090"),
+		AdminSecret:       env("BRUISER_ADMIN_SECRET", ""),
 	}
+	if c.AdminSecret == "" {
+		c.AdminSecret = c.EdgeSecret
+	}
+	return c
 }
 
 func (c Config) Validate() error {

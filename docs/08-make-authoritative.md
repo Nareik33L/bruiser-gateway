@@ -36,3 +36,6 @@ bruiser eaf-demo --front http://edge-or-proxy --n 2000
 ```
 
 `observed_eaf` should sit near N×; `downstream_eaf` at 1× under `max_active: 1`.
+
+Embedded samples: `sdk/go`, `sdk/node`, `sdk/python`. Operator dashboard:
+`GET /admin`. Full walkthrough: [docs/demo.md](demo.md).
