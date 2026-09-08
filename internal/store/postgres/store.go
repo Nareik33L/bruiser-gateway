@@ -152,7 +152,7 @@ func wrapStore(err error) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, lease.ErrNotFound) || errors.Is(err, lease.ErrNotHolder) || errors.Is(err, lease.ErrGone) || errors.Is(err, lease.ErrInvalidInput) {
+	if errors.Is(err, lease.ErrNotFound) || errors.Is(err, lease.ErrNotHolder) || errors.Is(err, lease.ErrGone) || errors.Is(err, lease.ErrInvalidInput) || errors.Is(err, lease.ErrPrecedence) || errors.Is(err, lease.ErrForbidden) {
 		return err
 	}
 	var gone *lease.GoneError

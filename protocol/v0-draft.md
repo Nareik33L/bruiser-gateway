@@ -17,8 +17,8 @@ The Go gateway is one implementation of this protocol.
 | RELEASE | `POST /v1/executions/{id}/release` | yes |
 | WATCH | `GET /v1/executions/{id}/watch` | yes (long-poll) |
 | GET | `GET /v1/executions/{id}` | yes |
-| REVOKE | `POST /v1/executions/{id}/revoke` | M5 |
-| HANDOFF | `POST /v1/executions/{id}/handoff` | M5 |
+| REVOKE | `POST /v1/executions/{id}/revoke` | yes |
+| HANDOFF | `POST /v1/executions/{id}/handoff` | yes |
 | AUTHORIZE | `POST /v1/authorize` | yes (Edge) |
 | INTROSPECT | `POST /v1/introspect` | yes |
 
@@ -55,6 +55,21 @@ acquired according to merchant policy.
 
 On Edge AUTHORIZE, the same merchant cookie presenting again is the heartbeat;
 unaware clients do not call RENEW.
+
+## Handoff and revoke
+
+Default precedence: `browser` outranks `agent`. Equal ranks cannot preempt.
+
+- Preemptive handoff: a higher-rank principal (typically a browser) calls
+  `POST /v1/executions/{id}/handoff` with `mode=preempt`. The holder's execution
+  becomes `HANDED_OFF` with `successor_id`; a new ACTIVE execution is granted
+  with `fence+1` to the caller. The old holder's next renew is `410 Gone`.
+- Cooperative handoff: the holder calls handoff with `to: {type, id}`.
+- BUSY responses set `can_preempt: true` when the caller outranks the holder.
+- Revoke: `POST /v1/executions/{id}/revoke` by the holder or a higher-rank
+  principal of the same customer. Introspection of a revoked or handed-off token
+  returns `active: false`. Downstream fence checks reject the preempted token
+  once a higher fence has been seen.
 
 ## Concurrency semantics
 

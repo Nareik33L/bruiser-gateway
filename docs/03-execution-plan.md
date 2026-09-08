@@ -260,6 +260,15 @@ Exit criteria
   410 → agent's stale purchase is rejected by SimTix → browser purchases. Runs in CI.
 - Torture run with handoff enabled: zero violations.
 
+**Landed in this tree (store + public API + SimTix scenario).** Cooperative and
+preemptive handoff as one transaction (`HANDED_OFF` + successor `fence+1`);
+default precedence browser > agent (ADR-024); `can_preempt` on BUSY; customer
+revoke subject to precedence; renew after handoff is 410 with `successor_id`;
+introspect returns `active: false`; SimTix rejects a stale fence after the
+successor token is seen. CI scenario: agent holds → browser takes control →
+agent renew 410 → stale purchase 403 → browser purchases. Torture handoff ops
+remain.
+
 ---
 
 ## M6 — Demonstration (M)

@@ -332,3 +332,24 @@ execution responses. `BRUISER_HEARTBEAT_INTERVAL` (default 25 s) is independent 
 longer basket hold) or wants heartbeats tied to inventory-hold keepalives rather
 than the execution lease.
 
+## ADR-024 — Default precedence is browser over agent
+
+**Decision.** Until the M4 policy engine exposes a per-rule `precedence` list,
+handoff and customer-revoke use a fixed rank: `browser` outranks `agent`. A
+higher rank may preempt (take control) or revoke. Equal ranks cannot preempt;
+they need a cooperative handoff (holder → named principal). Agents cannot take
+control from a browser.
+
+**Why.** The product guarantee is that the execution belongs to the customer.
+"Alice clicks Take control" must work without waiting for YAML policy. The
+default matches the brief (§7) and keeps fencing meaningful: the successor is a
+new grant with `fence+1`, so the agent's still-unexpired token is stale
+downstream.
+
+**Consequences.** BUSY includes `can_preempt` from this rank function.
+`POST /v1/executions/{id}/handoff` and `/revoke` are in protocol v0. Custom
+precedence lists remain M4.
+
+**Revisit when.** M4 ships; merchants who need agent-to-agent preemption or
+membership-tier ranks configure them in policy.
+

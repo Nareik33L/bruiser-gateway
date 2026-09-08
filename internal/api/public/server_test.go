@@ -57,12 +57,16 @@ func startServer(t *testing.T) (*httptest.Server, config.Config) {
 }
 
 func session(t *testing.T, srv *httptest.Server, cfg config.Config, customer, principal string) string {
+	return sessionAs(t, srv, cfg, customer, "agent", principal)
+}
+
+func sessionAs(t *testing.T, srv *httptest.Server, cfg config.Config, customer, ptype, principal string) string {
 	t.Helper()
 	assertion, err := auth.IssueDevAssertion(cfg.DevHMACSecret, customer, time.Hour, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := fmt.Sprintf(`{"principal":{"type":"agent","id":%q}}`, principal)
+	body := fmt.Sprintf(`{"principal":{"type":%q,"id":%q}}`, ptype, principal)
 	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/sessions", bytes.NewBufferString(body))
 	req.Header.Set("Authorization", "Bearer "+assertion)
 	req.Header.Set("Content-Type", "application/json")

@@ -102,6 +102,7 @@ func (c *BusyCache) Acquire(ctx context.Context, req AcquireRequest) (AcquireRes
 						ActiveExecutionID: it.exeID,
 						Holder:            it.holder,
 						ExpiresAt:         it.expiresAt,
+						CanPreempt:        CanPreempt(req.Principal, it.holder),
 					},
 				}, nil
 			}
@@ -138,12 +139,20 @@ func (c *BusyCache) Release(ctx context.Context, merchantID, executionID, sessio
 	return e, err
 }
 
-func (c *BusyCache) Revoke(ctx context.Context, merchantID, executionID, requestID, reason string) (Execution, error) {
-	e, err := c.inner.Revoke(ctx, merchantID, executionID, requestID, reason)
+func (c *BusyCache) Revoke(ctx context.Context, merchantID, executionID, sessionID, requestID, reason string) (Execution, error) {
+	e, err := c.inner.Revoke(ctx, merchantID, executionID, sessionID, requestID, reason)
 	if err == nil {
 		c.forget(merchantID, e.DomainKey)
 	}
 	return e, err
+}
+
+func (c *BusyCache) Handoff(ctx context.Context, req HandoffRequest) (HandoffResult, error) {
+	res, err := c.inner.Handoff(ctx, req)
+	if err == nil {
+		c.remember(req.MerchantID, res.Successor.DomainKey, &res.Successor)
+	}
+	return res, err
 }
 
 func (c *BusyCache) Get(ctx context.Context, merchantID, executionID string) (Execution, error) {
@@ -156,7 +165,7 @@ func (c *BusyCache) ExpireDue(ctx context.Context, limit int) (int, error) {
 
 func (c *BusyCache) Ping(ctx context.Context) error { return c.inner.Ping(ctx) }
 
-func (c *BusyCache) Hits() uint64 { return c.hits.Load() }
+func (c *BusyCache) Hits() uint64   { return c.hits.Load() }
 func (c *BusyCache) Misses() uint64 { return c.miss.Load() }
 
 var _ Store = (*BusyCache)(nil)

@@ -360,3 +360,187 @@ func TestConcurrentAcquireExactlyOne(t *testing.T) {
 	}
 	_ = grantedID
 }
+
+func insertSess(t *testing.T, s *pgstore.Store, merchant, sessID, customer, ptype, pid string) {
+	t.Helper()
+	if err := s.InsertSession(context.Background(), pgstore.SessionRow{
+		ID: sessID, MerchantID: merchant, CustomerID: customer,
+		PrincipalType: ptype, PrincipalID: pid,
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPreemptiveHandoffAndRenewGone(t *testing.T) {
+	s := connect(t)
+	ctx := context.Background()
+	m := id.New("m")
+	if err := s.EnsureMerchant(ctx, m, "test", "secret"); err != nil {
+		t.Fatal(err)
+	}
+	agent := acquireReq(m, "alice", "agent-1", "event:ars-che")
+	insertSess(t, s, m, agent.SessionID, "alice", "agent", "agent-1")
+	r1, err := s.Acquire(ctx, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	browserSess := id.Session()
+	insertSess(t, s, m, browserSess, "alice", "browser", "alice-tab")
+	res, err := s.Handoff(ctx, lease.HandoffRequest{
+		MerchantID:  m,
+		ExecutionID: r1.Execution.ID,
+		SessionID:   browserSess,
+		Mode:        lease.ModePreempt,
+		TTL:         5 * time.Second,
+		RequestID:   id.Request(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Mode != lease.ModePreempt {
+		t.Fatalf("mode=%s", res.Mode)
+	}
+	if res.Successor.Fence <= r1.Execution.Fence {
+		t.Fatalf("fence did not increase: %d → %d", r1.Execution.Fence, res.Successor.Fence)
+	}
+	if res.Successor.Principal.Type != "browser" {
+		t.Fatalf("successor principal %v", res.Successor.Principal)
+	}
+
+	_, err = s.Renew(ctx, m, r1.Execution.ID, agent.SessionID, id.Request(), 5*time.Second)
+	var gone *lease.GoneError
+	if !errors.As(err, &gone) || gone.Reason != lease.StateHandedOff {
+		t.Fatalf("renew after handoff err=%v", err)
+	}
+	if gone.SuccessorID != res.Successor.ID {
+		t.Fatalf("successor_id=%s want %s", gone.SuccessorID, res.Successor.ID)
+	}
+
+	got, err := s.Get(ctx, m, r1.Execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != lease.StateHandedOff {
+		t.Fatalf("state=%s", got.State)
+	}
+}
+
+func TestCooperativeHandoffRequiresHolder(t *testing.T) {
+	s := connect(t)
+	ctx := context.Background()
+	m := id.New("m")
+	_ = s.EnsureMerchant(ctx, m, "test", "secret")
+	agent := acquireReq(m, "alice", "agent-1", "event:ars-che")
+	insertSess(t, s, m, agent.SessionID, "alice", "agent", "agent-1")
+	r1, err := s.Acquire(ctx, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	other := id.Session()
+	insertSess(t, s, m, other, "alice", "agent", "agent-2")
+	_, err = s.Handoff(ctx, lease.HandoffRequest{
+		MerchantID:  m,
+		ExecutionID: r1.Execution.ID,
+		SessionID:   other,
+		To:          lease.Principal{Type: "browser", ID: "tab"},
+		Mode:        lease.ModeCooperative,
+		TTL:         time.Second,
+		RequestID:   id.Request(),
+	})
+	if !errors.Is(err, lease.ErrNotHolder) {
+		t.Fatalf("err=%v want ErrNotHolder", err)
+	}
+
+	res, err := s.Handoff(ctx, lease.HandoffRequest{
+		MerchantID:  m,
+		ExecutionID: r1.Execution.ID,
+		SessionID:   agent.SessionID,
+		To:          lease.Principal{Type: "browser", ID: "tab"},
+		Mode:        lease.ModeCooperative,
+		TTL:         time.Second,
+		RequestID:   id.Request(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Successor.Principal.ID != "tab" {
+		t.Fatalf("to=%v", res.Successor.Principal)
+	}
+}
+
+func TestAgentCannotPreemptBrowser(t *testing.T) {
+	s := connect(t)
+	ctx := context.Background()
+	m := id.New("m")
+	_ = s.EnsureMerchant(ctx, m, "test", "secret")
+	browser := acquireReq(m, "alice", "tab", "event:ars-che")
+	browser.Principal = lease.Principal{Type: "browser", ID: "tab"}
+	insertSess(t, s, m, browser.SessionID, "alice", "browser", "tab")
+	r1, err := s.Acquire(ctx, browser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentSess := id.Session()
+	insertSess(t, s, m, agentSess, "alice", "agent", "bot")
+	_, err = s.Handoff(ctx, lease.HandoffRequest{
+		MerchantID:  m,
+		ExecutionID: r1.Execution.ID,
+		SessionID:   agentSess,
+		Mode:        lease.ModePreempt,
+		TTL:         time.Second,
+		RequestID:   id.Request(),
+	})
+	if !errors.Is(err, lease.ErrPrecedence) {
+		t.Fatalf("err=%v want ErrPrecedence", err)
+	}
+}
+
+func TestBusyCanPreemptAndCustomerRevoke(t *testing.T) {
+	s := connect(t)
+	ctx := context.Background()
+	m := id.New("m")
+	_ = s.EnsureMerchant(ctx, m, "test", "secret")
+	agent := acquireReq(m, "alice", "agent-1", "event:ars-che")
+	insertSess(t, s, m, agent.SessionID, "alice", "agent", "agent-1")
+	r1, err := s.Acquire(ctx, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	browser := acquireReq(m, "alice", "tab", "event:ars-che")
+	browser.Principal = lease.Principal{Type: "browser", ID: "tab"}
+	insertSess(t, s, m, browser.SessionID, "alice", "browser", "tab")
+	busy, err := s.Acquire(ctx, browser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if busy.Status != lease.StatusBusy || !busy.Busy.CanPreempt {
+		t.Fatalf("browser busy can_preempt=%v status=%s", busy.Busy, busy.Status)
+	}
+
+	e, err := s.Revoke(ctx, m, r1.Execution.ID, browser.SessionID, id.Request(), "take_back")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.State != lease.StateRevoked {
+		t.Fatalf("state=%s", e.State)
+	}
+
+	r2, err := s.Acquire(ctx, browser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r2.Status != lease.StatusGranted {
+		t.Fatalf("after revoke status=%s", r2.Status)
+	}
+
+	agent2 := id.Session()
+	insertSess(t, s, m, agent2, "alice", "agent", "agent-2")
+	_, err = s.Revoke(ctx, m, r2.Execution.ID, agent2, id.Request(), "nope")
+	if !errors.Is(err, lease.ErrPrecedence) {
+		t.Fatalf("agent revoke browser err=%v want ErrPrecedence", err)
+	}
+}
