@@ -165,7 +165,10 @@ func TestKillSwitchPassThrough(t *testing.T) {
 	}
 
 	code, body, ctl := authorize(cookie2)
-	if code != http.StatusOK || body["status"] != "ALLOW" || ctl != "bypass" {
-		t.Fatalf("kill switch should pass through: %d ctl=%s %v", code, ctl, body)
+	if code != http.StatusOK || body["status"] != "ALLOW" || ctl != "observe" {
+		t.Fatalf("kill switch should observe-only (dry-run): %d ctl=%s %v", code, ctl, body)
+	}
+	if body["enforced"] == true {
+		t.Fatalf("0%% must not enforce: %v", body)
 	}
 }

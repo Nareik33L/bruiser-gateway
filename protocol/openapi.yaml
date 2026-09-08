@@ -196,6 +196,11 @@ paths:
       summary: What Bruiser would have stopped (24h WOULD_* + EAF)
       responses:
         "200": { description: dry-run report }
+  /v1/admin/ramp:
+    get:
+      summary: Progressive enforcement report (observed vs enforced)
+      responses:
+        "200": { description: ramp report }
   /v1/introspect:
     post:
       summary: Verify an execution token (Embedded)

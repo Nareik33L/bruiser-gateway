@@ -39,6 +39,8 @@ type Config struct {
 	Mode              string
 	Enforcement       bool
 	QueueEnabled      bool
+	EnforcePercent    int
+	Environment       string
 }
 
 func Load() Config {
@@ -73,6 +75,8 @@ func Load() Config {
 		Mode:              env("BRUISER_MODE", "enforce"),
 		Enforcement:       envBool("BRUISER_ENFORCEMENT", true),
 		QueueEnabled:      envBool("BRUISER_QUEUE", true),
+		EnforcePercent:    envInt("BRUISER_ENFORCE_PERCENT", -1),
+		Environment:       env("BRUISER_ENV", env("BRUISER_ENVIRONMENT", "")),
 	}
 	if c.AdminSecret == "" {
 		c.AdminSecret = c.EdgeSecret
@@ -103,6 +107,9 @@ func (c Config) Validate() error {
 	}
 	if c.ProxyAddr != "" && c.OriginURL == "" {
 		return fmt.Errorf("BRUISER_ORIGIN_URL is required when BRUISER_PROXY_ADDR is set")
+	}
+	if c.EnforcePercent > 100 {
+		return fmt.Errorf("BRUISER_ENFORCE_PERCENT must be 0–100")
 	}
 	return nil
 }

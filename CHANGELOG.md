@@ -4,6 +4,11 @@
 
 ### Added
 
+- Progressive enforcement ramp (`enforce_percent` 0–100, default 100).
+  Observation/evaluation/recording stay at 100%. Assignment is a stable
+  customer hash. Scope: event, route, pool, cohort, environment, policy.
+  Admin presets 0 / 10 / 25 / 50 / 75 / 100. Emergency 0% is dry-run.
+  “Don’t trust us. Start at 10%.”
 - Transparent dry-run (`BRUISER_MODE=dry-run` or admin controls): same path
   and policies, never blocks, records `WOULD_ALLOW` / `WOULD_QUEUE` /
   `WOULD_REJECT` / `WOULD_EXPIRE`. Admin **What Bruiser would have stopped**

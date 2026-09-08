@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -232,6 +233,7 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 		r.Post("/admin/controls/drain", s.adminDrain)
 		r.Post("/admin/controls/revoke-all", s.adminRevokeAll)
 		r.Get("/admin/dry-run", s.adminDryRun)
+		r.Get("/admin/ramp", s.adminDryRun)
 		r.Post("/authority-check", s.adminRunCheck)
 		r.Get("/authority-check", s.adminLastCheck)
 		r.Group(func(r chi.Router) {
@@ -268,12 +270,13 @@ func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	ctl := s.currentControls()
 	body := map[string]any{
-		"status":      "ready",
-		"store":       "ok",
-		"mode":        ctl.Mode,
-		"enforcement": ctl.Enforcement,
-		"signing_key": "unknown",
-		"upstream":    "skipped",
+		"status":           "ready",
+		"store":            "ok",
+		"mode":             ctl.Mode,
+		"enforcement":      ctl.Enforcement,
+		"enforce_percent":  ctl.EffectivePercent(),
+		"signing_key":      "unknown",
+		"upstream":         "skipped",
 	}
 	if err := s.store.Ping(ctx); err != nil {
 		storeUnavailable.Inc()
@@ -315,7 +318,7 @@ func (s *Server) protocol(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"protocol":     "bruiser",
 		"version":      "0.1-draft",
-		"capabilities": []string{"IDENTITY", "ACQUIRE", "RENEW", "HEARTBEAT", "RELEASE", "HANDOFF", "REVOKE", "WATCH", "QUEUE", "AUTHORIZE", "INTROSPECT", "POLICY", "ADMIN", "AUTHORITY_CHECK", "DRY_RUN", "CONTROLS"},
+		"capabilities": []string{"IDENTITY", "ACQUIRE", "RENEW", "HEARTBEAT", "RELEASE", "HANDOFF", "REVOKE", "WATCH", "QUEUE", "AUTHORIZE", "INTROSPECT", "POLICY", "ADMIN", "AUTHORITY_CHECK", "DRY_RUN", "RAMP", "CONTROLS"},
 	})
 }
 
@@ -454,12 +457,9 @@ func (s *Server) acquire(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": "DENIED", "reason": reason, "rule_name": d.RuleName})
 		return
 	}
-	if ctl.PassThrough() {
-		writeJSON(w, http.StatusOK, map[string]any{"status": "ALLOW", "control": "bypass", "rule_name": d.RuleName})
-		return
-	}
-	if ctl.DryRun() {
-		s.writeAcquireDryRun(w, r, sess, body, d)
+	ramp := s.rampInput(sess.CustomerID, body.Resource, body.Action, d.RuleName, "", "", sess.Anchors)
+	if !ctl.ShouldEnforce(ramp) {
+		s.writeAcquireDryRun(w, r, sess, body, d, ctl.EffectivePercent())
 		return
 	}
 	reqID := requestID(r)
@@ -488,6 +488,9 @@ func (s *Server) acquire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	acquireTotal.WithLabelValues(res.Status, d.RuleName).Inc()
+	s.recordAcquire(r.Context(), true, sess.CustomerID, sess.PrincipalID, body.Resource, body.Action, d.RuleName, res, reqID)
+	w.Header().Set("X-Bruiser-Enforced", "1")
+	w.Header().Set("X-Bruiser-Ramp", strconv.Itoa(ctl.EffectivePercent()))
 	switch res.Status {
 	case lease.StatusGranted:
 		s.writeExecution(w, http.StatusCreated, res.Execution, true)
@@ -516,22 +519,26 @@ func (s *Server) acquire(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) writeAcquireDryRun(w http.ResponseWriter, r *http.Request, sess auth.SessionClaims, body acquireReq, d policy.Decision) {
+func (s *Server) writeAcquireDryRun(w http.ResponseWriter, r *http.Request, sess auth.SessionClaims, body acquireReq, d policy.Decision, percent int) {
 	ev, err := s.store.ShadowDecide(r.Context(), sess.MerchantID, d.DomainKey, sess.CustomerID, sess.PrincipalID, body.Resource, body.Action, d.RuleName, d.MaxActive, d.MaxWaiters, d.TTL, requestID(r))
 	would, reason := "WOULD_UNKNOWN", "store_unavailable"
 	if err == nil {
 		would, reason = "WOULD_"+ev.Would, ev.Reason
 	}
 	s.eaf.record(body.Resource, sess.CustomerID, "would_"+strings.ToLower(strings.TrimPrefix(would, "WOULD_")))
-	w.Header().Set("X-Bruiser-Control", "dry-run")
+	w.Header().Set("X-Bruiser-Control", "observe")
 	w.Header().Set("X-Bruiser-Dry-Run", would)
 	w.Header().Set("X-Bruiser-Dry-Run-Reason", reason)
+	w.Header().Set("X-Bruiser-Enforced", "0")
+	w.Header().Set("X-Bruiser-Ramp", strconv.Itoa(percent))
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":      "ALLOW",
-		"would":       would,
-		"reason":      reason,
-		"rule_name":   d.RuleName,
-		"customer_id": sess.CustomerID,
+		"status":          "ALLOW",
+		"would":           would,
+		"reason":          reason,
+		"rule_name":       d.RuleName,
+		"customer_id":     sess.CustomerID,
+		"enforced":        false,
+		"enforce_percent": percent,
 	})
 }
 
@@ -804,7 +811,7 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 }
 
 func (s *Server) initControls() {
-	c := ops.FromEnv(s.cfg.Mode, s.cfg.Enforcement, s.cfg.QueueEnabled)
+	c := ops.FromEnv(s.cfg.Mode, s.cfg.Enforcement, s.cfg.QueueEnabled, s.cfg.EnforcePercent)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if db, found, err := s.store.GetControls(ctx, s.cfg.MerchantID); err == nil && found {
@@ -817,7 +824,7 @@ func (s *Server) currentControls() ops.Controls {
 	if p := s.controls.Load(); p != nil {
 		return *p
 	}
-	return ops.FromEnv(s.cfg.Mode, s.cfg.Enforcement, s.cfg.QueueEnabled)
+	return ops.FromEnv(s.cfg.Mode, s.cfg.Enforcement, s.cfg.QueueEnabled, s.cfg.EnforcePercent)
 }
 
 func (s *Server) applyControls(d policy.Decision, action string) (policy.Decision, ops.Controls) {
@@ -835,6 +842,56 @@ func (s *Server) applyControls(d policy.Decision, action string) (policy.Decisio
 func (s *Server) failOpen() bool {
 	c := s.currentControls()
 	return !c.FailClosed || c.PassThrough()
+}
+
+func (s *Server) rampInput(customer, resource, action, rule, event, path string, anchors map[string]string) ops.RampInput {
+	in := ops.RampInput{
+		CustomerID: customer,
+		Resource:   resource,
+		Action:     action,
+		RuleName:   rule,
+		EventID:    event,
+		Path:       path,
+		Env:        s.cfg.Environment,
+	}
+	if anchors != nil {
+		in.Pool = anchors["pool"]
+		in.Cohort = anchors["cohort"]
+	}
+	if in.EventID == "" {
+		if i := strings.LastIndex(resource, ":"); i >= 0 && i+1 < len(resource) {
+			in.EventID = resource[i+1:]
+		}
+	}
+	return in
+}
+
+func (s *Server) recordDecision(ctx context.Context, enforced bool, customer, principal, resource, action, rule, would, reason, reqID, errText string) {
+	_ = s.store.RecordDecision(ctx, s.cfg.MerchantID, pgstore.DryRunEvent{
+		Would:       would,
+		Reason:      reason,
+		CustomerID:  customer,
+		PrincipalID: principal,
+		Resource:    resource,
+		Action:      action,
+		RuleName:    rule,
+		RequestID:   reqID,
+		Enforced:    enforced,
+		Error:       errText,
+	})
+}
+
+func (s *Server) recordAcquire(ctx context.Context, enforced bool, customer, principal, resource, action, rule string, acq lease.AcquireResult, reqID string) {
+	would, reason := "REJECT", acq.Reason
+	switch acq.Status {
+	case lease.StatusGranted, lease.StatusAlreadyHeld:
+		would, reason = "ALLOW", acq.Status
+	case lease.StatusQueued:
+		would, reason = "QUEUE", "queued"
+	case lease.StatusBusy:
+		would, reason = "REJECT", "busy"
+	}
+	s.recordDecision(ctx, enforced, customer, principal, resource, action, rule, would, reason, reqID, "")
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

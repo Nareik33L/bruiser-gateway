@@ -499,3 +499,28 @@ backup/restore stay merchant-Postgres procedures ([ops.md](ops.md)).
 lease table (rejected: pollutes enforcement) or a hosted dry-run SaaS
 (rejected: contradicts self-hosted).
 
+## ADR-031 — Progressive enforcement is a percent of the same path
+
+**Decision.** Active enforcement is a merchant-configured **0–100%** of
+eligible customers. Observation, evaluation and recording stay at **100%**
+at every level. 0% is dry-run. Assignment is a stable hash of
+`customer_id` (plus optional salt) so a customer’s agents do not flip
+between enforced and unenforced behaviour. Scope (event, route, pool,
+cohort, environment, policy) limits who is eligible; everyone else is
+still observed.
+
+The same admit/acquire path and policy engine run for every request.
+Unenforced customers get `ShadowDecide` + `WOULD_*`. Enforced customers
+get a real lease and an `enforced=true` decision row. Emergency 0% is
+the kill switch for *active* enforcement, not a silent bypass.
+
+**Why.** “Don’t trust us. Start at 10%.” Clubs will not hand Bruiser 100%
+authority on day one. A separate simulator would diverge from production.
+
+**Consequences.** `enforce_percent` / `scope` on `runtime_controls` (admin
+`PUT`, no redeploy). Dashboard splits observed / evaluated / enforced /
+hypothetical. `CONTROL_CHANGED` includes the percent.
+
+**Revisit when.** A merchant needs request-level (not customer-level)
+bucketing — that would violate the customer-as-unit invariant.
+

@@ -35,9 +35,12 @@ bruiser doctor --profile configs/example.yaml --http http://127.0.0.1:8080
 bruiser doctor --front http://edge --origin http://origin
 ```
 
-`BRUISER_MODE=dry-run` (or profile `mode: dry-run`, or admin **Dry run**)
-places Bruiser in the real request path without blocking. Flip to enforce
-without changing Edge / Proxy / Embedded placement.
+`BRUISER_MODE=dry-run` or admin **0%** places Bruiser in the real request
+path without blocking. Then raise `enforce_percent` (10 / 25 / 50 / 75 /
+100) on `PUT /v1/admin/controls` — no redeploy. `BRUISER_ENFORCE_PERCENT`
+sets the boot default. Scope (`events`, `routes`, `pools`, `cohorts`,
+`environments`, `policies`) limits who is eligible; everyone else is still
+observed. Emergency **0%** is dry-run again.
 
 ## Upgrade and rollback
 
@@ -141,8 +144,10 @@ when policy `waiting.mode` is `bounded`.
 
 | Control | Effect |
 |---------|--------|
-| `mode=dry-run` | Same path, never blocks; records `WOULD_*` |
-| `enforcement=false` | Pass-through (`X-Bruiser-Control: bypass`) |
+| `mode=dry-run` / `enforce_percent=0` | 100% observe, 0% enforce; records `WOULD_*` |
+| `enforce_percent` | Active enforcement share (customer-stable hash) |
+| `scope` | Limit ramp to event / route / pool / cohort / env / policy |
+| `enforcement=false` | Kill switch: effective 0% (still observes) |
 | `queue_enabled=false` | Intra-customer queue off (BUSY / WOULD_REJECT) |
 | `max_waiters` | Override policy waiter cap |
 | `lease_ttl_seconds` | Override lease TTL |

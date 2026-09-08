@@ -56,6 +56,7 @@ func TestControlsAudit(t *testing.T) {
 	}
 	c := ops.Default()
 	c.Mode = ops.ModeDryRun
+	c.EnforcePercent = 10
 	c.UpdatedBy = "test"
 	if _, err := s.PutControls(ctx, m, c); err != nil {
 		t.Fatal(err)
@@ -63,6 +64,9 @@ func TestControlsAudit(t *testing.T) {
 	got, found, err := s.GetControls(ctx, m)
 	if err != nil || !found || got.Mode != ops.ModeDryRun {
 		t.Fatalf("get %+v found=%v err=%v", got, found, err)
+	}
+	if got.EnforcePercent != 0 {
+		t.Fatalf("dry-run should persist as 0%%, got %d", got.EnforcePercent)
 	}
 	ev, err := s.LastAudit(ctx, m, "CONTROL_CHANGED")
 	if err != nil || ev.Type != "CONTROL_CHANGED" {

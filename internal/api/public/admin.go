@@ -299,14 +299,17 @@ func (s *Server) adminGetControls(w http.ResponseWriter, r *http.Request) {
 }
 
 type controlsPatch struct {
-	Mode            *string  `json:"mode"`
-	Enforcement     *bool    `json:"enforcement"`
-	QueueEnabled    *bool    `json:"queue_enabled"`
-	MaxWaiters      *int     `json:"max_waiters"`
-	LeaseTTLSeconds *int     `json:"lease_ttl_seconds"`
-	FailClosed      *bool    `json:"fail_closed"`
-	DisabledActions *[]string `json:"disabled_actions"`
-	UpdatedBy       string   `json:"updated_by"`
+	Mode            *string       `json:"mode"`
+	Enforcement     *bool         `json:"enforcement"`
+	EnforcePercent  *int          `json:"enforce_percent"`
+	RampSalt        *string       `json:"ramp_salt"`
+	Scope           *ops.RampScope `json:"scope"`
+	QueueEnabled    *bool         `json:"queue_enabled"`
+	MaxWaiters      *int          `json:"max_waiters"`
+	LeaseTTLSeconds *int          `json:"lease_ttl_seconds"`
+	FailClosed      *bool         `json:"fail_closed"`
+	DisabledActions *[]string     `json:"disabled_actions"`
+	UpdatedBy       string        `json:"updated_by"`
 }
 
 func (s *Server) adminPutControls(w http.ResponseWriter, r *http.Request) {
@@ -324,6 +327,21 @@ func (s *Server) adminPutControls(w http.ResponseWriter, r *http.Request) {
 	}
 	if patch.Enforcement != nil {
 		c.Enforcement = *patch.Enforcement
+	}
+	if patch.EnforcePercent != nil {
+		c.EnforcePercent = *patch.EnforcePercent
+		if *patch.EnforcePercent == 0 {
+			c.Mode = ops.ModeDryRun
+		} else if c.Mode == ops.ModeDryRun {
+			c.Mode = ops.ModeEnforce
+			c.Enforcement = true
+		}
+	}
+	if patch.RampSalt != nil {
+		c.RampSalt = *patch.RampSalt
+	}
+	if patch.Scope != nil {
+		c.Scope = *patch.Scope
 	}
 	if patch.QueueEnabled != nil {
 		c.QueueEnabled = *patch.QueueEnabled

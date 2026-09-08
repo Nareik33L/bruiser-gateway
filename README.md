@@ -56,8 +56,9 @@ Dev assertions default to membership `1001234` (Alice in the Arsenal-like lab):
 ```bash
 ./bin/bruiser config validate configs/example.yaml
 ./bin/bruiser doctor --profile configs/example.yaml --skip-store
-# Production path, observe only:
+# Production path, observe only, then ramp without redeploy:
 BRUISER_MODE=dry-run make serve
+# PUT /v1/admin/controls {"enforce_percent":10}
 ```
 
 ## Documents
