@@ -109,6 +109,20 @@ func (s *Server) admit(ctx context.Context, method, path, eventID, cookie, beare
 		return admitResult{status: http.StatusBadRequest, body: map[string]string{"error": "could not derive resource"}}
 	}
 
+	d := s.evaluate(s.cfg.MerchantID, assertion.CustomerID, "agent", resource, route.Action, assertion.Anchors)
+	if d.ControlNone {
+		h.Set("X-Bruiser-Control", "none")
+		return admitResult{status: http.StatusOK, allow: true, headers: h, body: map[string]string{"status": "ALLOW", "action": route.Action, "rule_name": d.RuleName}}
+	}
+	if d.Denied {
+		s.eaf.record(resource, assertion.CustomerID, "denied")
+		reason := d.Reason
+		if reason == "" {
+			reason = "denied"
+		}
+		return admitResult{status: http.StatusForbidden, body: map[string]any{"error": "DENIED", "reason": reason, "rule_name": d.RuleName}}
+	}
+
 	principalID := assertion.JTI
 	if principalID == "" {
 		principalID = assertion.CustomerID
@@ -128,27 +142,20 @@ func (s *Server) admit(ctx context.Context, method, path, eventID, cookie, beare
 		return s.admitStoreError(err)
 	}
 
-	rule := s.profile.Policy.RuleName
-	if rule == "" {
-		rule = lease.DefaultRuleName()
-	}
-	maxActive := s.cfg.MaxActive
-	if s.profile.Policy.MaxActive > 0 {
-		maxActive = s.profile.Policy.MaxActive
-	}
-	domain := lease.DomainKey(s.cfg.MerchantID, rule, assertion.CustomerID, resource)
+	rule := d.RuleName
 	acq, err := s.leases.Acquire(ctx, lease.AcquireRequest{
 		MerchantID:  s.cfg.MerchantID,
-		DomainKey:   domain,
+		DomainKey:   d.DomainKey,
 		CustomerID:  assertion.CustomerID,
 		Principal:   lease.Principal{Type: "agent", ID: principalID},
 		SessionID:   sessID,
 		Resource:    resource,
 		Action:      route.Action,
 		RuleName:    rule,
-		MaxActive:   maxActive,
-		TTL:         s.cfg.LeaseTTL,
-		MaxLifetime: s.cfg.MaxLifetime,
+		MaxActive:   d.MaxActive,
+		TTL:         d.TTL,
+		MaxLifetime: d.MaxLifetime,
+		Precedence:  d.Precedence,
 		RequestID:   reqID,
 	})
 	if err != nil {

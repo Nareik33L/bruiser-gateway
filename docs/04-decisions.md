@@ -353,3 +353,27 @@ precedence lists remain M4.
 **Revisit when.** M4 ships; merchants who need agent-to-agent preemption or
 membership-tier ranks configure them in policy.
 
+## ADR-025 — V1 policy is first-match YAML, compiled, versioned
+
+**Decision.** Scarcity domains are a YAML document (design §7). The compiler
+produces an immutable snapshot; evaluation is first-match, top-down. Scope
+dimensions are `customer`, `resource`, `resource_pool`, `principal_type`, and
+`anchor:<name>`. Missing anchors deny or fall through per rule. `control: none`
+skips the lease. Fallback is `deny` or `allow-uncontrolled`. Policy versions
+live in Postgres; `PUT /v1/policy` activates a new version for *new* acquires
+only. `bruiser policy validate` checks a file against the compiler (JSON Schema
+in `protocol/policy.schema.json` is documentation of the same shape).
+
+**Why.** The M1 hard-coded `customer+resource` / `max_active: 1` rule cannot
+express household caps or live `max_active` changes. First-match keeps "why was
+this denied?" a single `rule_name`. Existing executions keep the domain key and
+terms they were granted under.
+
+**Consequences.** Acquire, authorize, handoff and BUSY `can_preempt` read the
+active compiled snapshot. A busy-cache occupancy count allows `max_active > 1`
+without treating the domain as full after the first grant. Cross-node NOTIFY
+reload is still M4 leftover; a PUT on one process updates that process immediately.
+
+**Revisit when.** A design partner needs overlapping rules (V2) or must push
+policy to every gateway in under a second.
+

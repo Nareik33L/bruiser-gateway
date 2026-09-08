@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -23,6 +24,7 @@ import (
 	"github.com/Nareik33L/bruiser-gateway/internal/lease"
 	"github.com/Nareik33L/bruiser-gateway/internal/limit"
 	"github.com/Nareik33L/bruiser-gateway/internal/merchant"
+	"github.com/Nareik33L/bruiser-gateway/internal/policy"
 	pgstore "github.com/Nareik33L/bruiser-gateway/internal/store/postgres"
 )
 
@@ -115,15 +117,17 @@ func (a *eafAcc) snapshot(resource string) (attempts, forwarded, customers float
 }
 
 type Server struct {
-	cfg     config.Config
-	store   *pgstore.Store
-	leases  lease.Store
-	signer  auth.Signer
-	log     *slog.Logger
-	profile merchant.Profile
-	eaf     *eafAcc
-	mux     http.Handler
-	limit   *limit.PerExecution
+	cfg       config.Config
+	store     *pgstore.Store
+	leases    lease.Store
+	signer    auth.Signer
+	log       *slog.Logger
+	profile   merchant.Profile
+	eaf       *eafAcc
+	mux       http.Handler
+	limit     *limit.PerExecution
+	compiled  atomic.Pointer[policy.Compiled]
+	policyVer int
 }
 
 func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.Logger, profile merchant.Profile) *Server {
@@ -137,6 +141,7 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 		eaf:     newEAFAcc(),
 		limit:   limit.New(cfg.MaxInFlight, cfg.RatePerSec),
 	}
+	s.loadPolicy()
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -150,6 +155,9 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 		r.Post("/sessions", s.createSession)
 		r.Post("/authorize", s.authorize)
 		r.Post("/introspect", s.introspect)
+		r.Get("/policy", s.getPolicy)
+		r.Put("/policy", s.putPolicy)
+		r.Get("/policy/history", s.policyHistory)
 		r.Group(func(r chi.Router) {
 			r.Use(s.sessionAuth)
 			r.Post("/executions/acquire", s.acquire)
@@ -197,7 +205,7 @@ func (s *Server) protocol(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"protocol":     "bruiser",
 		"version":      "0.1-draft",
-		"capabilities": []string{"IDENTITY", "ACQUIRE", "RENEW", "HEARTBEAT", "RELEASE", "HANDOFF", "REVOKE", "WATCH", "AUTHORIZE", "INTROSPECT"},
+		"capabilities": []string{"IDENTITY", "ACQUIRE", "RENEW", "HEARTBEAT", "RELEASE", "HANDOFF", "REVOKE", "WATCH", "AUTHORIZE", "INTROSPECT", "POLICY"},
 	})
 }
 
@@ -328,28 +336,36 @@ func (s *Server) acquire(w http.ResponseWriter, r *http.Request) {
 	if body.Action == "" {
 		body.Action = "purchase"
 	}
-	rule := lease.DefaultRuleName()
-	domain := lease.DomainKey(sess.MerchantID, rule, sess.CustomerID, body.Resource)
+	d := s.evaluate(sess.MerchantID, sess.CustomerID, sess.PrincipalType, body.Resource, body.Action, sess.Anchors)
+	if d.Denied || d.ControlNone {
+		reason := d.Reason
+		if reason == "" {
+			reason = "denied"
+		}
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "DENIED", "reason": reason, "rule_name": d.RuleName})
+		return
+	}
 	reqID := requestID(r)
 	res, err := s.leases.Acquire(r.Context(), lease.AcquireRequest{
 		MerchantID:  sess.MerchantID,
-		DomainKey:   domain,
+		DomainKey:   d.DomainKey,
 		CustomerID:  sess.CustomerID,
 		Principal:   lease.Principal{Type: sess.PrincipalType, ID: sess.PrincipalID},
 		SessionID:   sess.SessionID,
 		Resource:    body.Resource,
 		Action:      body.Action,
-		RuleName:    rule,
-		MaxActive:   s.cfg.MaxActive,
-		TTL:         s.cfg.LeaseTTL,
-		MaxLifetime: s.cfg.MaxLifetime,
+		RuleName:    d.RuleName,
+		MaxActive:   d.MaxActive,
+		TTL:         d.TTL,
+		MaxLifetime: d.MaxLifetime,
+		Precedence:  d.Precedence,
 		RequestID:   reqID,
 	})
 	if err != nil {
 		s.storeError(w, err)
 		return
 	}
-	acquireTotal.WithLabelValues(res.Status, rule).Inc()
+	acquireTotal.WithLabelValues(res.Status, d.RuleName).Inc()
 	switch res.Status {
 	case lease.StatusGranted:
 		s.writeExecution(w, http.StatusCreated, res.Execution, true)
@@ -362,7 +378,8 @@ func (s *Server) acquire(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"status":              "BUSY",
-			"domain":              domain,
+			"domain":              d.DomainKey,
+			"rule_name":           d.RuleName,
 			"active_execution_id": res.Busy.ActiveExecutionID,
 			"holder":              map[string]string{"type": res.Busy.Holder.Type, "id": res.Busy.Holder.ID},
 			"expires_at":          res.Busy.ExpiresAt.UTC().Format(time.RFC3339Nano),
@@ -415,13 +432,19 @@ func (s *Server) handoff(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 	}
+	exeID := chi.URLParam(r, "id")
+	var prec []string
+	if e, err := s.leases.Get(r.Context(), sess.MerchantID, exeID); err == nil {
+		prec = s.getCompiled().Precedence(e.RuleName)
+	}
 	res, err := s.leases.Handoff(r.Context(), lease.HandoffRequest{
 		MerchantID:  sess.MerchantID,
-		ExecutionID: chi.URLParam(r, "id"),
+		ExecutionID: exeID,
 		SessionID:   sess.SessionID,
 		To:          lease.Principal{Type: body.To.Type, ID: body.To.ID},
 		Mode:        body.Mode,
 		TTL:         s.cfg.LeaseTTL,
+		Precedence:  prec,
 		RequestID:   requestID(r),
 	})
 	if err != nil {

@@ -61,8 +61,12 @@ func session(t *testing.T, srv *httptest.Server, cfg config.Config, customer, pr
 }
 
 func sessionAs(t *testing.T, srv *httptest.Server, cfg config.Config, customer, ptype, principal string) string {
+	return sessionAnchored(t, srv, cfg, customer, ptype, principal, nil)
+}
+
+func sessionAnchored(t *testing.T, srv *httptest.Server, cfg config.Config, customer, ptype, principal string, anchors map[string]string) string {
 	t.Helper()
-	assertion, err := auth.IssueDevAssertion(cfg.DevHMACSecret, customer, time.Hour, nil)
+	assertion, err := auth.IssueDevAssertion(cfg.DevHMACSecret, customer, time.Hour, anchors)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -27,7 +27,19 @@ routes:
     action: purchase
 
 policy:
-  rule_name: purchase-per-event
-  max_active: 1
-  lease_ttl: 60s
-  max_lifetime: 15m
+  version: 1
+  defaults:
+    lease_ttl: 60s
+    max_lifetime: 15m
+  domains:
+    - name: purchase-per-event
+      match: { action: [purchase, hold] }
+      scope: [customer, resource]
+      max_active: 1
+      lease_ttl: 60s
+      max_lifetime: 15m
+      precedence: [browser, agent]
+    - name: discovery
+      match: { action: [search] }
+      control: none
+  fallback: deny

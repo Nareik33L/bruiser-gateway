@@ -136,6 +136,18 @@ paths:
         "403": { description: unrouted or DENIED }
         "409": { description: BUSY }
         "503": { description: store unavailable }
+  /v1/policy:
+    get:
+      summary: Active policy (admin)
+      responses:
+        "200": { description: version and yaml }
+        "401": { description: bad admin secret }
+    put:
+      summary: Activate a new policy version
+      responses:
+        "200": { description: compiled and active }
+        "400": { description: invalid policy }
+        "401": { description: bad admin secret }
   /v1/introspect:
     post:
       summary: Verify an execution token (Embedded)

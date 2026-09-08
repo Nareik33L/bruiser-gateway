@@ -236,6 +236,15 @@ Exit criteria
 - A household-scoped rule blocks a second account in the same household, audited
   with `rule_name` and reason.
 
+**Landed in this tree.** First-match YAML compiler (`internal/policy`); scope
+dimensions `customer`, `resource`, `resource_pool`, `principal_type`,
+`anchor:*`; `on_missing_anchor` deny/fallthrough; `control: none`; Postgres
+versioned policies; `GET/PUT /v1/policy` (admin/edge secret); live `max_active`
+change without restart; household-cap BUSY with `rule_name`;
+`bruiser policy validate`; `protocol/policy.schema.json`. Precedence lists on
+the matched rule replace the ADR-024 hard-code when present. NOTIFY fan-out of
+policy to other nodes remains (PUT resets this process's busy cache).
+
 ---
 
 ## M5 — Handoff and revoke (M)

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/Nareik33L/bruiser-gateway/internal/auth"
 	"github.com/Nareik33L/bruiser-gateway/internal/config"
 	"github.com/Nareik33L/bruiser-gateway/internal/merchant"
+	"github.com/Nareik33L/bruiser-gateway/internal/policy"
 	pgstore "github.com/Nareik33L/bruiser-gateway/internal/store/postgres"
 )
 
@@ -36,6 +38,8 @@ func main() {
 		err = cmdAuthorityCheck()
 	case "eaf-demo":
 		err = cmdEAFDemo()
+	case "policy":
+		err = cmdPolicy()
 	default:
 		usage()
 		os.Exit(2)
@@ -47,7 +51,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: bruiser <serve|migrate|assertion|authority-check|eaf-demo>\n")
+	fmt.Fprintf(os.Stderr, "usage: bruiser <serve|migrate|assertion|authority-check|eaf-demo|policy validate>\n")
 }
 
 func cmdMigrate(cfg config.Config, log *slog.Logger) error {
@@ -185,6 +189,28 @@ func cmdAssertion(cfg config.Config) error {
 		return err
 	}
 	fmt.Println(tok)
+	return nil
+}
+
+func cmdPolicy() error {
+	if len(os.Args) < 3 || os.Args[2] != "validate" {
+		return fmt.Errorf("usage: bruiser policy validate [file.yaml]")
+	}
+	var raw []byte
+	var err error
+	if len(os.Args) > 3 {
+		raw, err = os.ReadFile(os.Args[3])
+	} else {
+		raw, err = io.ReadAll(os.Stdin)
+	}
+	if err != nil {
+		return err
+	}
+	c, err := policy.CompileYAML(raw)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("ok version=%d rules=%d fallback=%s\n", c.Doc.Version, len(c.Doc.Domains), c.Doc.Fallback)
 	return nil
 }
 

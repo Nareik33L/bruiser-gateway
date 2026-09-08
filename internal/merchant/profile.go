@@ -38,13 +38,6 @@ type Match struct {
 	Path   string `yaml:"path"`
 }
 
-type Policy struct {
-	RuleName    string `yaml:"rule_name"`
-	MaxActive   int    `yaml:"max_active"`
-	LeaseTTL    string `yaml:"lease_ttl"`
-	MaxLifetime string `yaml:"max_lifetime"`
-}
-
 func LoadFile(path string) (Profile, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
