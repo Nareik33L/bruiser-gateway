@@ -21,16 +21,16 @@ func composeSite(gw http.Handler, lab *attacklab.Lab) http.Handler {
 	site.Mount(r)
 	r.Mount("/lab", lab.API())
 	front := lab.Storefront()
-	r.Handle("/s/{storeID}", front)
-	r.Handle("/s/{storeID}/*", front)
-
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		p := req.URL.Path
-		if p == "/" || p == "/attack-lab" || strings.HasPrefix(p, "/assets/") || strings.HasPrefix(p, "/lab/") || strings.HasPrefix(p, "/s/") {
+		switch {
+		case p == "/" || p == "/attack-lab" || strings.HasPrefix(p, "/assets/") || strings.HasPrefix(p, "/lab/"):
 			r.ServeHTTP(w, req)
-			return
+		case strings.HasPrefix(p, "/s/"):
+			front.ServeHTTP(w, req)
+		default:
+			gw.ServeHTTP(w, req)
 		}
-		gw.ServeHTTP(w, req)
 	})
 }
 
