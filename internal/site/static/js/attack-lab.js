@@ -109,6 +109,7 @@
       i.checked = i.value === "enforce";
       i.closest(".mode").classList.toggle("on", i.value === "enforce");
     });
+    $("mode-copy").textContent = "Bruiser will now actively enforce its decisions.";
     await fetch(`/lab/stores/${state.store.id}/mode`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
