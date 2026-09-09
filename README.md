@@ -46,6 +46,15 @@ Dev assertions default to membership `1001234` (Alice in the Arsenal-like lab):
 
 `GET /healthz` liveness, `GET /readyz` store readiness, `GET /metrics` Prometheus.
 
+## Attack Lab
+
+`make serve` also hosts the main Bruiser site and the interactive Attack Lab demo:
+
+- [http://127.0.0.1:8080/](http://127.0.0.1:8080/) — product site
+- [http://127.0.0.1:8080/attack-lab](http://127.0.0.1:8080/attack-lab) — sandbox store + agent swarm
+
+The lab creates a temporary drop store inside Bruiser, runs simulated shoppers through the real `/v1/authorize` path (Dry Run, then Enforce), and never accepts a target URL. Swarm size is capped at 100; demo stores expire automatically.
+
 ## Documents
 
 | Document | Purpose |
