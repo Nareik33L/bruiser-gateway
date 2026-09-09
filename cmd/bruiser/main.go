@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Nareik33L/bruiser-gateway/internal/api/public"
+	"github.com/Nareik33L/bruiser-gateway/internal/attacklab"
 	"github.com/Nareik33L/bruiser-gateway/internal/auth"
 	"github.com/Nareik33L/bruiser-gateway/internal/config"
 	"github.com/Nareik33L/bruiser-gateway/internal/merchant"
@@ -91,19 +92,33 @@ func cmdServe(cfg config.Config, log *slog.Logger) error {
 	sweeperStop := make(chan struct{})
 	go sweep(store, cfg.SweepInterval, log, sweeperStop)
 
-	handler := publicapi.New(cfg, store, signer, log, loadProfile(cfg, log))
+	profile := withAttackLabRoutes(loadProfile(cfg, log))
+	gw := publicapi.New(cfg, store, signer, log, profile)
+	lab, err := attacklab.New(attacklab.Config{
+		HMACSecret:   cfg.DevHMACSecret,
+		EdgeSecret:   cfg.EdgeSecret,
+		OriginSecret: cfg.OriginSecret,
+		Gateway:      gw,
+		Log:          log,
+	})
+	if err != nil {
+		return fmt.Errorf("attack lab: %w", err)
+	}
+	go sweepLab(lab, 30*time.Second, sweeperStop)
+
+	handler := composeSite(gw, lab)
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      35 * time.Second,
-		IdleTimeout:       60 * time.Second,
+		WriteTimeout:      0,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info("listening", "addr", cfg.HTTPAddr, "merchant", cfg.MerchantID)
+		log.Info("listening", "addr", cfg.HTTPAddr, "merchant", cfg.MerchantID, "site", "/")
 		errCh <- srv.ListenAndServe()
 	}()
 
