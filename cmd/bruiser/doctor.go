@@ -28,6 +28,7 @@ func cmdDoctor() error {
 	if err != nil {
 		return fmt.Errorf("profile: %w", err)
 	}
+	cfg.ProfilePath = *profile
 	cfg.OverlayProfile(p.Identity.JWKSURL, p.Identity.Issuer, p.Identity.Audience, p.MerchantID, p.Name)
 	httpURL := *httpBase
 	if httpURL == "" && *front != "" {
@@ -57,6 +58,7 @@ func cmdConfig() error {
 	if len(os.Args) > 3 {
 		path = os.Args[3]
 	}
+	cfg.ProfilePath = path
 	fails := 0
 	p, err := merchant.LoadFile(path)
 	if err != nil {
