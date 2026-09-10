@@ -67,6 +67,7 @@ The lab creates a temporary drop store inside Bruiser, runs simulated shoppers t
 | [docs/06-integration-discovery.md](docs/06-integration-discovery.md) | Stage A discovery questionnaire |
 | [docs/07-club-profile-arsenal.md](docs/07-club-profile-arsenal.md) | Unverified Arsenal-like standing analogue |
 | [docs/08-harchester-demo-scope.md](docs/08-harchester-demo-scope.md) | Harchester United demo environment: scope and execution plan |
+| [docs/09-harchester-cloudflare.md](docs/09-harchester-cloudflare.md) | Hosting notes: VM origin, Cloudflare DNS/proxy (not a Worker rewrite) |
 | [README-demo.md](README-demo.md) | How to run the Harchester demonstration |
 | [protocol/v0-draft.md](protocol/v0-draft.md) | Bruiser Protocol v0 draft |
 

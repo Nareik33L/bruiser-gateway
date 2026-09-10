@@ -612,17 +612,21 @@ headline numbers.
 
 ## 9. Hosting and "Cloudflare-ready"
 
-- One VM (4 vCPU / 8 GB is ample) running the demo compose; Cloudflare DNS
-  proxied records for the three public hostnames; Cloudflare origin certificate
-  or Caddy ACME on the origin; **Cloudflare Access** policy on the admin hostname
-  in addition to the console password; the gateway and load-lab have no DNS
-  records and no published ports.
-- All three applications are server-rendered with static assets under
-  `/assets/*` and long cache headers, so Cloudflare caches them at the edge and
-  the Worker edge (D6 stretch) is a drop-in: the same `/v1/authorize` contract
-  from a Worker in front of `tickets.*` instead of the Go edge container.
-- Nightly `Reset demo` via cron on the VM so the hosted environment is always in
-  Scenario 1 state.
+Hosted form is **the Compose demo on a VM**, with Cloudflare as DNS and proxy
+in front of that origin — not a Worker rewrite of the applications. Details:
+[09-harchester-cloudflare.md](09-harchester-cloudflare.md).
+
+- One VM running `deploy/compose/docker-compose.demo.yml` (or `make demo-up-local`).
+- Cloudflare DNS proxied records for the three public hostnames; origin
+  certificate or Caddy ACME on the VM.
+- **Optional Cloudflare Access** on the admin hostname, in addition to the
+  console password.
+- Gateway and load-lab have no DNS records and no published ports.
+- Stretch only: a Worker Edge in `deploy/edge/cloudflare-worker/` calling
+  `POST /v1/authorize` in front of `tickets.*`, same contract as the Go Edge.
+
+Nightly `Reset demo` via cron on the VM so the hosted environment is always in
+Scenario 1 state.
 
 ---
 

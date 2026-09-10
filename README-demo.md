@@ -8,6 +8,7 @@ would deploy it.
 
 Full scope: [docs/08-harchester-demo-scope.md](docs/08-harchester-demo-scope.md).
 Runbook: [docs/demo-runbook.md](docs/demo-runbook.md).
+Hosting (VM origin; Cloudflare DNS/proxy only): [docs/09-harchester-cloudflare.md](docs/09-harchester-cloudflare.md).
 
 ## DEMO ONLY — plaintext passwords
 

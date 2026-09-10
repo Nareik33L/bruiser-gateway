@@ -5,7 +5,7 @@ SIMTIX    := bin/simtix
 DATABASE_URL ?= postgres://bruiser:bruiser@127.0.0.1:5432/bruiser?sslmode=disable
 TEST_DATABASE_URL ?= postgres://bruiser:bruiser@127.0.0.1:5432/bruiser_test?sslmode=disable
 
-.PHONY: all build test test-race lint fmt vet serve migrate tidy ci torture simtix authority-check check-demo-boundary demo-build demo-up-local demo-down-local demo-reset demo-check demo-nuke
+.PHONY: all build test test-race lint fmt vet serve migrate tidy ci torture simtix authority-check check-demo-boundary demo-build demo-up-local demo-down-local demo-reset demo-check demo-nuke demo-e2e
 
 all: build
 
@@ -67,6 +67,9 @@ demo-reset:
 
 demo-up-local: demo-build
 	bash scripts/demo-up-local.sh
+
+demo-e2e:
+	DEMO_E2E=1 BRUISER_TEST_DATABASE_URL="$(TEST_DATABASE_URL)" $(GO) test ./demos/e2e -count=1 -timeout 60s
 
 demo-down-local:
 	bash scripts/demo-down-local.sh
