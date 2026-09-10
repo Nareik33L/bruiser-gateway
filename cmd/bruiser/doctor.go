@@ -28,9 +28,7 @@ func cmdDoctor() error {
 	if err != nil {
 		return fmt.Errorf("profile: %w", err)
 	}
-	if p.MerchantID != "" && os.Getenv("BRUISER_MERCHANT_ID") == "" {
-		cfg.MerchantID = p.MerchantID
-	}
+	cfg.OverlayProfile(p.Identity.JWKSURL, p.Identity.Issuer, p.Identity.Audience, p.MerchantID, p.Name)
 	httpURL := *httpBase
 	if httpURL == "" && *front != "" {
 		httpURL = env("BRUISER_CHECK_CONTROL_URL", "http://127.0.0.1:8080")
@@ -60,6 +58,12 @@ func cmdConfig() error {
 		path = os.Args[3]
 	}
 	fails := 0
+	p, err := merchant.LoadFile(path)
+	if err != nil {
+		fmt.Printf("FAIL  profile: %s\n", err)
+		return err
+	}
+	cfg.OverlayProfile(p.Identity.JWKSURL, p.Identity.Issuer, p.Identity.Audience, p.MerchantID, p.Name)
 	if err := cfg.Validate(); err != nil {
 		fmt.Printf("FAIL  environment: %s\n", err)
 		fails++
@@ -72,11 +76,9 @@ func cmdConfig() error {
 		for _, w := range cfg.UnsafeModeWarnings() {
 			fmt.Printf("WARN  unsafe: %s\n", w)
 		}
-	}
-	p, err := merchant.LoadFile(path)
-	if err != nil {
-		fmt.Printf("FAIL  profile: %s\n", err)
-		return err
+		for _, w := range cfg.ProductionWarnings() {
+			fmt.Printf("WARN  production: %s\n", w)
+		}
 	}
 	issues := append(p.ValidateIssues(), p.SafetyIssues(merchant.SafetyOpts{
 		OriginSecret: cfg.OriginSecret,

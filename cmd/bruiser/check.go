@@ -29,6 +29,8 @@ func cmdAuthorityCheck() error {
 	outFile := fs.String("out", "", "write JSON report to this path")
 	requireCert := fs.Bool("require-certificate", false, "exit non-zero unless a production certificate is issued")
 	commit := fs.String("commit", env("BRUISER_COMMIT_SHA", ""), "commit SHA to embed (default: VCS stamp)")
+	identityTok := fs.String("identity-token", env("BRUISER_IDENTITY_TOKEN", ""), "merchant-minted OIDC JWT for staging/production probes (never commit)")
+	cookieName := fs.String("cookie-name", env("BRUISER_IDENTITY_COOKIE", ""), "cookie name for --identity-token (default boxoffice_session)")
 	if err := fs.Parse(os.Args[2:]); err != nil {
 		return err
 	}
@@ -46,15 +48,17 @@ func cmdAuthorityCheck() error {
 		*adminURL = env("BRUISER_CHECK_ADMIN_URL", "http://127.0.0.1:8082")
 	}
 	rep, err := check.Run(check.Config{
-		EdgeURL:      front,
-		OriginURL:    *originURL,
-		ControlURL:   *controlURL,
-		AdminURL:     *adminURL,
-		HMACSecret:   *secret,
-		Membership:   *membership,
-		EventID:      *eventID,
-		StoreDownURL: *storeDown,
-		CommitSHA:    *commit,
+		EdgeURL:       front,
+		OriginURL:     *originURL,
+		ControlURL:    *controlURL,
+		AdminURL:      *adminURL,
+		HMACSecret:    *secret,
+		Membership:    *membership,
+		EventID:       *eventID,
+		StoreDownURL:  *storeDown,
+		CommitSHA:     *commit,
+		IdentityToken: *identityTok,
+		CookieName:    *cookieName,
 	})
 	if err != nil {
 		return err

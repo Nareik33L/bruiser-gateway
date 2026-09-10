@@ -35,6 +35,9 @@ func prodSecrets(c *Config) {
 	c.Issuer = "https://idp.example"
 	c.Audience = "bruiser"
 	c.DevAssertions = false
+	c.DatabaseURL = "postgres://bruiser_app:unique-db-password@db.example.internal:5432/bruiser?sslmode=require"
+	c.MerchantID = "merchant-placeholder"
+	c.ProfilePath = "configs/production.example.yaml"
 }
 
 func TestProductionLoadDoesNotInventSecrets(t *testing.T) {
@@ -174,12 +177,10 @@ func TestProductionRampAndFailOpenRequireAcknowledgement(t *testing.T) {
 func TestProductionIdentityUnconfigured(t *testing.T) {
 	c := labConfig()
 	c.Environment = "production"
-	c.DevAssertions = false
-	c.AdminSecret = "prod-admin-unique"
-	c.OperatorSecret = "prod-operator-unique"
-	c.EdgeSecret = "prod-edge-unique"
-	c.OriginSecret = "prod-origin-unique"
-	c.DevHMACSecret = "prod-hmac-unique"
+	prodSecrets(&c)
+	c.JWKSURL = ""
+	c.Issuer = ""
+	c.Audience = ""
 	err := c.Validate()
 	if err == nil {
 		t.Fatal("production without JWKS/issuer/audience must refuse")
@@ -299,6 +300,71 @@ func TestProductionRequiresAdminAddrAndDistinctOperator(t *testing.T) {
 	c.OperatorSecret = "operator-secret-dev"
 	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "BRUISER_OPERATOR_SECRET") {
 		t.Fatalf("lab operator secret: %v", err)
+	}
+}
+
+func TestProductionRefusesLabDatabaseURL(t *testing.T) {
+	c := labConfig()
+	c.Environment = "production"
+	prodSecrets(&c)
+	c.DatabaseURL = "postgres://bruiser:bruiser@127.0.0.1:5432/bruiser?sslmode=disable"
+	err := c.Validate()
+	if err == nil || !strings.Contains(err.Error(), "BRUISER_DATABASE_URL") {
+		t.Fatalf("lab DSN must fail production: %v", err)
+	}
+}
+
+func TestProductionAllowsEmptyHMAC(t *testing.T) {
+	c := labConfig()
+	c.Environment = "production"
+	prodSecrets(&c)
+	c.DevHMACSecret = ""
+	if err := c.Validate(); err != nil {
+		t.Fatalf("production does not use HMAC assertions: %v", err)
+	}
+}
+
+func TestProductionPlaceholderHMACStillRefused(t *testing.T) {
+	c := labConfig()
+	c.Environment = "production"
+	prodSecrets(&c)
+	c.DevHMACSecret = "change-me"
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "BRUISER_DEV_HMAC_SECRET") {
+		t.Fatalf("placeholder HMAC must still fail: %v", err)
+	}
+}
+
+func TestOverlayProfileFillsIdentity(t *testing.T) {
+	t.Setenv("BRUISER_MERCHANT_ID", "")
+	t.Setenv("BRUISER_MERCHANT_NAME", "")
+	c := Config{MerchantID: "arsenal", MerchantName: "Arsenal FC"}
+	c.OverlayProfile("https://idp.example/jwks", "https://idp.example", "bruiser", "merchant-placeholder", "Example merchant")
+	if c.JWKSURL != "https://idp.example/jwks" || c.Issuer != "https://idp.example" || c.Audience != "bruiser" {
+		t.Fatalf("overlay identity: %+v", c)
+	}
+	if c.MerchantID != "merchant-placeholder" {
+		t.Fatalf("overlay merchant: %s", c.MerchantID)
+	}
+	c.JWKSURL = "https://env.example/jwks"
+	c.OverlayProfile("https://idp.example/jwks", "", "", "", "")
+	if c.JWKSURL != "https://env.example/jwks" {
+		t.Fatal("environment JWKS must win")
+	}
+}
+
+func TestProductionWarnings(t *testing.T) {
+	c := labConfig()
+	c.Environment = "production"
+	prodSecrets(&c)
+	c.DatabaseURL = "postgres://bruiser_app:unique-db-password@db.example.internal:5432/bruiser?sslmode=disable"
+	c.ProfilePath = "configs/arsenal.yaml"
+	c.MerchantID = "arsenal"
+	warns := c.ProductionWarnings()
+	blob := strings.Join(warns, "; ")
+	for _, need := range []string{"sslmode=disable", "arsenal.yaml", "arsenal", "BRUISER_DEV_HMAC_SECRET"} {
+		if !strings.Contains(blob, need) {
+			t.Fatalf("warnings missing %q: %v", need, warns)
+		}
 	}
 }
 

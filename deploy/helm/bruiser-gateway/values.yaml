@@ -12,18 +12,24 @@ env:
   BRUISER_HTTP_ADDR: ":8080"
   BRUISER_ADMIN_ADDR: ":8082"
   BRUISER_PROXY_ADDR: ":8081"
-  BRUISER_PROFILE: /configs/example.yaml
+  BRUISER_PROFILE: /configs/production.example.yaml
   BRUISER_TELEMETRY: "0"
   BRUISER_HEARTBEAT_INTERVAL: 20s
   BRUISER_LEASE_TTL: 60s
   BRUISER_MODE: enforce
   BRUISER_ENV: production
   BRUISER_ENFORCE_PERCENT: "100"
+  BRUISER_FAIL_CLOSED: "true"
+  # Replace with the merchant IdP. These are placeholders, not credentials.
+  BRUISER_JWKS_URL: "https://idp.example/.well-known/jwks.json"
+  BRUISER_ISSUER: "https://idp.example"
+  BRUISER_AUDIENCE: "bruiser"
 # Placeholders fail production ValidateSecrets. Set via --set, SealedSecret,
 # or an external Secret — never commit real values.
+# BRUISER_DEV_HMAC_SECRET is unused in production (HMAC assertions are refused).
+# Omit it, or override with a unique unused value. "change-me" fails boot.
 secrets:
   BRUISER_DATABASE_URL: change-me
-  BRUISER_DEV_HMAC_SECRET: change-me
   BRUISER_EDGE_SECRET: change-me
   BRUISER_ORIGIN_SECRET: change-me
   BRUISER_ADMIN_SECRET: change-me

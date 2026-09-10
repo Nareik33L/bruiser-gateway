@@ -1,0 +1,14 @@
+# Example closed resource catalogue (placeholders only).
+#
+# Merge the `resources:` list into the merchant profile. When the list is
+# non-empty, Bruiser folds inbound identifiers then rejects anything that
+# does not resolve to a registered ID (ErrUnknownResource).
+#
+# Do not list real customer SKUs, fixture codes, or club-specific names
+# in the repository. Replace these before deploying.
+
+resources:
+  - event:fixture-1
+  - event:fixture-2
+  - ticket:home-opener
+  - ticket:away-stand

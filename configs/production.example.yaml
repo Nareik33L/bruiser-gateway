@@ -1,0 +1,62 @@
+# Production drop-in profile (placeholders only).
+#
+# Copy this file, replace every placeholder, and point BRUISER_PROFILE at
+# the copy. Never commit real customer identifiers, IdP URLs that reveal
+# a private tenant, or secrets.
+#
+#   BRUISER_ENV=production bruiser config validate configs/production.example.yaml
+#
+# That command FAILs until origin/edge/admin/operator secrets and a
+# non-lab Postgres DSN are supplied in the environment. JWKS/issuer/
+# audience below satisfy the identity boot gate once OverlayProfile runs.
+
+merchant_id: merchant-placeholder
+name: Example merchant (replace)
+unmatched: deny
+
+# Closed catalogue: inbound IDs fold, then must match one of these.
+# Grammar is type:ident after canonicalisation. See docs/ops/resource-catalogue.md.
+resources:
+  - event:fixture-1
+  - ticket:home-opener
+
+identity:
+  extractor: oidc
+  jwks_url: https://idp.example/.well-known/jwks.json
+  issuer: https://idp.example
+  audience: bruiser
+  subject_claim: sub
+  cookie: session
+  # Unsigned customer headers are refused in production unless
+  # allow_unsigned_header is explicitly true (not recommended).
+
+routes:
+  - match: { method: GET, path: "/healthz" }
+    action: health
+  - match: { method: GET, path: "/api/catalog" }
+    action: search
+  - match: { method: POST, path: "/api/holds" }
+    resource_from: event_id
+    resource_prefix: "event:"
+    action: hold
+  - match: { method: POST, path: "/api/checkout" }
+    resource_from: event_id
+    resource_prefix: "event:"
+    action: purchase
+
+policy:
+  version: 1
+  defaults:
+    lease_ttl: 60s
+    max_lifetime: 15m
+  domains:
+    - name: one-execution-per-customer
+      match: { action: [purchase, hold] }
+      scope: [customer, resource]
+      max_active: 1
+      precedence: [browser, agent]
+      budget: { max_ops: 1 }
+    - name: discovery
+      match: { action: [search] }
+      control: none
+  fallback: deny

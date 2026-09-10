@@ -62,6 +62,10 @@ Production refuses empty values and the well-known lab placeholders
 origin secrets. Never commit them. CI (`scripts/check-secrets.sh` + gitleaks)
 fails if the lab values reappear outside allowlisted lab sources.
 
+See [docs/13-production-readiness.md](docs/13-production-readiness.md) for the
+staging/production operator gate (config validate → readiness → Authority
+Check certificate → Dry Run → ramp).
+
 ## Branch protection
 
 `main` must not accept direct pushes. Merges require:

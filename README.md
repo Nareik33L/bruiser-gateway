@@ -84,6 +84,8 @@ The lab creates a temporary drop store inside Bruiser, runs simulated shoppers t
 | [docs/08-make-authoritative.md](docs/08-make-authoritative.md) | Edge / Proxy / Embedded placement + Authority Check |
 | [docs/09-post-core-capabilities.md](docs/09-post-core-capabilities.md) | Dry-run, doctor, emergency controls (non-blocking) |
 | [docs/demo.md](docs/demo.md) | 90-second demo script + make targets |
+| [docs/12-production-deploy.md](docs/12-production-deploy.md) | Short RC1 deploy notes → operator pack |
+| [docs/13-production-readiness.md](docs/13-production-readiness.md) | Production/staging operator pack (config, IdP, catalogue, certificate, runbook, licensing) |
 | [docs/ops.md](docs/ops.md) | Deploy, upgrade/rollback, backup/restore, emergency controls |
 | [docs/security/threat-model.md](docs/security/threat-model.md) | Lab threat model (not an external review) |
 | [CHANGELOG.md](CHANGELOG.md) | What shipped |
@@ -103,10 +105,11 @@ Vendor telemetry is **off** unless `BRUISER_TELEMETRY=1`.
 
 ## Status
 
-**V1 is frozen. RC1 is the production candidate.** No new product
-features. Remaining work is human-owned
-(LICENSE/counsel, trademark, hosted sandbox DNS, image signing keys,
-Stage A outbound). See [docs/11-rc1.md](docs/11-rc1.md).
+**V1 is frozen.** Independent security retest: production candidate
+(0 Critical, 0 High). Remaining work is **operational and human-owned**
+(staging IdP evidence, merchant secrets/catalogue, Authority certificate
+on the live origin, Dry Run then ramp, LICENSE/counsel, trademark,
+signing-key custody). See [docs/13-production-readiness.md](docs/13-production-readiness.md).
 
 The tree has Edge, Proxy, Go/Node/Python Embedded SDKs, Authority Check,
 EAF (`make eaf-nightly` 10,000× burst; `make soak` 30-minute 10k churn),

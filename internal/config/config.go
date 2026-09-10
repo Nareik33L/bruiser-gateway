@@ -168,8 +168,8 @@ func (c Config) Validate() error {
 	if c.DatabaseURL == "" {
 		return fmt.Errorf("BRUISER_DATABASE_URL is required")
 	}
-	if c.DevHMACSecret == "" {
-		return fmt.Errorf("BRUISER_DEV_HMAC_SECRET is required")
+	if c.DevHMACSecret == "" && c.Lab() {
+		return fmt.Errorf("BRUISER_DEV_HMAC_SECRET is required in lab (development HMAC assertions)")
 	}
 	if c.MaxActive < 1 {
 		return fmt.Errorf("BRUISER_MAX_ACTIVE must be >= 1")
@@ -274,6 +274,9 @@ func (c Config) ValidateSecrets() error {
 		if hits := c.labSecretHits(); len(hits) > 0 {
 			problems = append(problems, "production refuses lab/placeholder secrets: "+strings.Join(hits, ", "))
 		}
+		if isLabDatabaseURL(c.DatabaseURL) {
+			problems = append(problems, "production refuses the lab database URL (bruiser:bruiser@…); set BRUISER_DATABASE_URL to the merchant Postgres DSN")
+		}
 		if strings.TrimSpace(c.OriginSecret) == "" {
 			problems = append(problems, "BRUISER_ORIGIN_SECRET is required in production (origin lockdown)")
 		}
@@ -355,11 +358,69 @@ func (c Config) labSecretHits() []string {
 		{"BRUISER_ORIGIN_SECRET", c.OriginSecret},
 		{"BRUISER_DEV_HMAC_SECRET", c.DevHMACSecret},
 	} {
+		if pair.name == "BRUISER_DEV_HMAC_SECRET" && strings.TrimSpace(pair.val) == "" && c.Production() {
+			// Production does not use HMAC assertions; an unset secret is not a placeholder.
+			continue
+		}
 		if isLabSecret(pair.val) {
 			names = append(names, pair.name)
 		}
 	}
 	return names
+}
+
+// OverlayProfile fills identity and merchant fields from the merchant
+// profile when the corresponding environment variables were left empty.
+// Environment values always win.
+func (c *Config) OverlayProfile(jwksURL, issuer, audience, merchantID, merchantName string) {
+	if c == nil {
+		return
+	}
+	if strings.TrimSpace(c.JWKSURL) == "" {
+		c.JWKSURL = strings.TrimSpace(jwksURL)
+	}
+	if strings.TrimSpace(c.Issuer) == "" {
+		c.Issuer = strings.TrimSpace(issuer)
+	}
+	if strings.TrimSpace(c.Audience) == "" {
+		c.Audience = strings.TrimSpace(audience)
+	}
+	if os.Getenv("BRUISER_MERCHANT_ID") == "" && strings.TrimSpace(merchantID) != "" {
+		c.MerchantID = strings.TrimSpace(merchantID)
+	}
+	if os.Getenv("BRUISER_MERCHANT_NAME") == "" && strings.TrimSpace(merchantName) != "" {
+		c.MerchantName = strings.TrimSpace(merchantName)
+	}
+}
+
+// ProductionWarnings are operator-visible production nits that do not
+// fail boot. Catalogue emptiness is reported by the profile validator.
+func (c Config) ProductionWarnings() []string {
+	if !c.Production() {
+		return nil
+	}
+	var out []string
+	if strings.Contains(strings.ToLower(c.DatabaseURL), "sslmode=disable") {
+		out = append(out, "BRUISER_DATABASE_URL uses sslmode=disable; require TLS unless the database network is otherwise isolated")
+	}
+	if strings.Contains(c.ProfilePath, "arsenal.yaml") {
+		out = append(out, "BRUISER_PROFILE points at the lab Arsenal analogue ("+c.ProfilePath+"); set the merchant production profile")
+	}
+	if strings.EqualFold(strings.TrimSpace(c.MerchantID), "arsenal") {
+		out = append(out, "merchant_id is the lab default 'arsenal'; set the merchant identifier")
+	}
+	if strings.TrimSpace(c.DevHMACSecret) != "" {
+		out = append(out, "BRUISER_DEV_HMAC_SECRET is set but production refuses HMAC assertions; omit it unless Authority Check needs a throwaway value to prove rejection")
+	}
+	return out
+}
+
+func isLabDatabaseURL(s string) bool {
+	u := strings.ToLower(strings.TrimSpace(s))
+	if u == "" {
+		return false
+	}
+	return strings.Contains(u, "bruiser:bruiser@")
 }
 
 // ValidateAdminListen refuses a missing production admin bind and

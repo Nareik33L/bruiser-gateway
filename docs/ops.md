@@ -2,6 +2,10 @@
 
 Self-hosted. The merchant owns Postgres, keys, audit, and networking.
 
+**Production/staging operator pack:** [docs/13-production-readiness.md](13-production-readiness.md)
+(configuration, IdP, catalogue, Authority certificate, runbook, rollback,
+licensing). This file keeps metrics, backup tables, and the ramp formula.
+
 ## Deploy
 
 **Compose (lab):**
@@ -15,10 +19,10 @@ docker compose -f deploy/compose/docker-compose.yml up --build
 ```bash
 helm upgrade --install bruiser deploy/helm/bruiser-gateway \
   --set secrets.BRUISER_DATABASE_URL='postgres://…' \
-  --set secrets.BRUISER_DEV_HMAC_SECRET='…' \
   --set secrets.BRUISER_EDGE_SECRET='…' \
   --set secrets.BRUISER_ORIGIN_SECRET='…' \
-  --set secrets.BRUISER_ADMIN_SECRET='…'
+  --set secrets.BRUISER_ADMIN_SECRET='…' \
+  --set secrets.BRUISER_OPERATOR_SECRET='…'
 ```
 
 The chart can run a migrate Job (`migrate.enabled`, default true), optional
