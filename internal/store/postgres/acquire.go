@@ -64,42 +64,16 @@ func (s *Store) Acquire(ctx context.Context, req lease.AcquireRequest) (lease.Ac
 	for i := range actives {
 		a := actives[i]
 		if a.Principal.Type == req.Principal.Type && a.Principal.ID == req.Principal.ID {
-			if err := insertAudit(ctx, tx, req.MerchantID, auditRow{
-				typ: "EXECUTION_REQUESTED", customerID: req.CustomerID,
-				principalType: req.Principal.Type, principalID: req.Principal.ID,
-				domainKey: req.DomainKey, executionID: a.ID, ruleName: req.RuleName,
-				reason: "already_held", requestID: req.RequestID, fence: &a.Fence,
-			}); err != nil {
-				return lease.AcquireResult{}, wrapStore(err)
-			}
-			if err := tx.Commit(ctx); err != nil {
-				return lease.AcquireResult{}, wrapStore(err)
-			}
-			return lease.AcquireResult{Status: lease.StatusAlreadyHeld, Execution: &a}, nil
+			return resumeHeld(ctx, tx, req, a)
 		}
 	}
 
 	if len(actives) >= req.MaxActive {
 		holder := actives[0]
-		if err := insertAudit(ctx, tx, req.MerchantID, auditRow{
-			typ: "EXECUTION_BUSY", customerID: req.CustomerID,
-			principalType: req.Principal.Type, principalID: req.Principal.ID,
-			domainKey: req.DomainKey, executionID: holder.ID, ruleName: req.RuleName,
-			reason: "max_active", requestID: req.RequestID, fence: &holder.Fence,
-		}); err != nil {
-			return lease.AcquireResult{}, wrapStore(err)
+		if req.MaxWaiters > 0 {
+			return s.enqueueWaiter(ctx, tx, req, holder)
 		}
-		if err := tx.Commit(ctx); err != nil {
-			return lease.AcquireResult{}, wrapStore(err)
-		}
-		return lease.AcquireResult{
-			Status: lease.StatusBusy,
-			Busy: &lease.BusyInfo{
-				ActiveExecutionID: holder.ID,
-				Holder:            holder.Principal,
-				ExpiresAt:         holder.ExpiresAt,
-			},
-		}, nil
+		return busyResult(ctx, tx, req, holder)
 	}
 
 	if err := tx.QueryRow(ctx, `
@@ -110,18 +84,18 @@ func (s *Store) Acquire(ctx context.Context, req lease.AcquireRequest) (lease.Ac
 	}
 
 	exe := lease.Execution{
-		ID:            id.Execution(),
-		MerchantID:    req.MerchantID,
-		DomainKey:     req.DomainKey,
-		CustomerID:    req.CustomerID,
-		Principal:     req.Principal,
-		SessionID:     req.SessionID,
-		Resource:      req.Resource,
-		Action:        req.Action,
-		RuleName:      req.RuleName,
-		Fence:         fence,
-		State:         lease.StateActive,
-		RenewCount:    0,
+		ID:         id.Execution(),
+		MerchantID: req.MerchantID,
+		DomainKey:  req.DomainKey,
+		CustomerID: req.CustomerID,
+		Principal:  req.Principal,
+		SessionID:  req.SessionID,
+		Resource:   req.Resource,
+		Action:     req.Action,
+		RuleName:   req.RuleName,
+		Fence:      fence,
+		State:      lease.StateActive,
+		RenewCount: 0,
 	}
 
 	if err := tx.QueryRow(ctx, `
@@ -155,6 +129,42 @@ func (s *Store) Acquire(ctx context.Context, req lease.AcquireRequest) (lease.Ac
 		return lease.AcquireResult{}, wrapStore(err)
 	}
 	return lease.AcquireResult{Status: lease.StatusGranted, Execution: &exe}, nil
+}
+
+// resumeHeld extends TTL and rebinds the session so a disconnect/reconnect
+// before expiry resumes the same execution (product brief Recovery).
+func resumeHeld(ctx context.Context, tx pgx.Tx, req lease.AcquireRequest, existing lease.Execution) (lease.AcquireResult, error) {
+	if err := tx.QueryRow(ctx, `
+		update executions
+		set expires_at = least(now() + $2::interval, max_lifetime_at),
+		    session_id = $3,
+		    renew_count = renew_count + 1
+		where execution_id = $1 and state = 'ACTIVE'
+		returning expires_at, renew_count, session_id`,
+		existing.ID, interval(req.TTL), req.SessionID,
+	).Scan(&existing.ExpiresAt, &existing.RenewCount, &existing.SessionID); err != nil {
+		return lease.AcquireResult{}, wrapStore(err)
+	}
+	if err := insertAudit(ctx, tx, req.MerchantID, auditRow{
+		typ: "EXECUTION_REQUESTED", customerID: req.CustomerID,
+		principalType: req.Principal.Type, principalID: req.Principal.ID,
+		domainKey: req.DomainKey, executionID: existing.ID, ruleName: req.RuleName,
+		reason: "already_held", requestID: req.RequestID, fence: &existing.Fence,
+	}); err != nil {
+		return lease.AcquireResult{}, wrapStore(err)
+	}
+	if err := insertAudit(ctx, tx, req.MerchantID, auditRow{
+		typ: "EXECUTION_RENEWED", customerID: req.CustomerID,
+		principalType: req.Principal.Type, principalID: req.Principal.ID,
+		domainKey: req.DomainKey, executionID: existing.ID, ruleName: req.RuleName,
+		reason: "resume", requestID: req.RequestID, fence: &existing.Fence,
+	}); err != nil {
+		return lease.AcquireResult{}, wrapStore(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return lease.AcquireResult{}, wrapStore(err)
+	}
+	return lease.AcquireResult{Status: lease.StatusAlreadyHeld, Execution: &existing}, nil
 }
 
 func interval(d time.Duration) string {
@@ -210,7 +220,7 @@ func (s *Store) Get(ctx context.Context, merchantID, executionID string) (lease.
 		where merchant_id = $1 and execution_id = $2`, merchantID, executionID)
 	e, err := scanExecution(row)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return lease.Execution{}, lease.ErrNotFound
+		return s.getWaiter(ctx, merchantID, executionID)
 	}
 	if err != nil {
 		return lease.Execution{}, wrapStore(err)

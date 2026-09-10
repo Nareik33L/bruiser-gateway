@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,8 +23,13 @@ import (
 	"github.com/Nareik33L/bruiser-gateway/internal/auth"
 	"github.com/Nareik33L/bruiser-gateway/internal/config"
 	"github.com/Nareik33L/bruiser-gateway/internal/id"
+	"github.com/Nareik33L/bruiser-gateway/internal/identity"
 	"github.com/Nareik33L/bruiser-gateway/internal/lease"
+	"github.com/Nareik33L/bruiser-gateway/internal/limit"
 	"github.com/Nareik33L/bruiser-gateway/internal/merchant"
+	"github.com/Nareik33L/bruiser-gateway/internal/ops"
+	"github.com/Nareik33L/bruiser-gateway/internal/policy"
+	"github.com/Nareik33L/bruiser-gateway/internal/resource"
 	pgstore "github.com/Nareik33L/bruiser-gateway/internal/store/postgres"
 )
 
@@ -45,12 +52,24 @@ var (
 	}, []string{"resource"})
 	observedEAF = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "bruiser_observed_eaf",
-		Help: "Incoming allocation attempts divided by authorised executions forwarded.",
+		Help: "Process-local incoming allocation attempts ÷ authorised executions forwarded. Do not sum this gauge across replicas. Cluster EAF = sum(allocation_attempts_total) / sum(executions_forwarded_total).",
 	}, []string{"resource"})
 	downstreamEAF = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "bruiser_downstream_eaf",
-		Help: "Authorised executions forwarded divided by distinct customers who attempted.",
+		Help: "Process-local authorised executions forwarded ÷ distinct customers this process saw. Do not sum across replicas.",
 	}, []string{"resource"})
+	handoffTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "bruiser_handoff_total",
+		Help: "Handoff operations by mode.",
+	}, []string{"mode"})
+	revokeTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "bruiser_revoke_total",
+		Help: "Customer or admin revokes.",
+	})
+	queueDepth = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "bruiser_queue_depth",
+		Help: "Live intra-customer waiters.",
+	}, []string{"merchant"})
 )
 
 type eafAcc struct {
@@ -103,57 +122,129 @@ func (a *eafAcc) record(resource, customer, outcome string) {
 	}
 }
 
+func (a *eafAcc) snapshot(resource string) (attempts, forwarded, customers float64) {
+	if a == nil {
+		return 0, 0, 0
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.attempts[resource], a.forwarded[resource], float64(len(a.customers[resource]))
+}
+
+func (a *eafAcc) snapshotAll() []map[string]any {
+	if a == nil {
+		return nil
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]map[string]any, 0, len(a.attempts))
+	for res, att := range a.attempts {
+		fwd := a.forwarded[res]
+		cust := float64(len(a.customers[res]))
+		obs, down := 0.0, 0.0
+		if fwd > 0 {
+			obs = att / fwd
+		}
+		if cust > 0 {
+			down = fwd / cust
+		}
+		var busy, denied, unauthorized float64
+		if oc := a.outcomes[res]; oc != nil {
+			busy = oc["busy"]
+			denied = oc["denied"]
+			unauthorized = oc["unauthorized"]
+		}
+		out = append(out, map[string]any{
+			"resource":       res,
+			"attempts":       att,
+			"forwarded":      fwd,
+			"busy":           busy,
+			"denied":         denied,
+			"unauthorized":   unauthorized,
+			"customers":      cust,
+			"observed_eaf":   obs,
+			"downstream_eaf": down,
+		})
+	}
+	return out
+}
+
+func (a *eafAcc) headline() (observed, downstream, attempts, forwarded float64) {
+	if a == nil {
+		return 0, 0, 0, 0
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for res, att := range a.attempts {
+		attempts += att
+		forwarded += a.forwarded[res]
+	}
+	seen := map[string]struct{}{}
+	if forwarded > 0 {
+		observed = attempts / forwarded
+	}
+	for res := range a.customers {
+		for c := range a.customers[res] {
+			seen[c] = struct{}{}
+		}
+	}
+	if n := float64(len(seen)); n > 0 && forwarded > 0 {
+		downstream = forwarded / n
+	}
+	return observed, downstream, attempts, forwarded
+}
+
 type Server struct {
 	cfg       config.Config
 	store     *pgstore.Store
 	leases    lease.Store
-	busyCache *lease.BusyCache
 	signer    auth.Signer
 	log       *slog.Logger
 	profile   merchant.Profile
 	eaf       *eafAcc
+	mux       http.Handler
+	admin     http.Handler
+	limit     *limit.PerExecution
+	rates     *rateGuards
+	compiled  atomic.Pointer[policy.Compiled]
+	policyVer atomic.Int64
+	stopWatch context.CancelFunc
+	controls  atomic.Pointer[ops.Controls]
 }
 
-// currentBusyCache backs the busy-cache Prometheus counters. Tests construct
-// several servers per process; the most recent one is the one reported.
-var currentBusyCache atomic.Pointer[lease.BusyCache]
-
-func init() {
-	read := func(f func(*lease.BusyCache) uint64) func() float64 {
-		return func() float64 {
-			if c := currentBusyCache.Load(); c != nil {
-				return float64(f(c))
-			}
-			return 0
-		}
-	}
-	promauto.NewCounterFunc(prometheus.CounterOpts{
-		Name: "bruiser_busy_cache_hits_total",
-		Help: "Acquire requests answered BUSY from the in-memory busy cache without touching the store.",
-	}, read((*lease.BusyCache).Hits))
-	promauto.NewCounterFunc(prometheus.CounterOpts{
-		Name: "bruiser_busy_cache_misses_total",
-		Help: "Acquire requests that consulted the store.",
-	}, read((*lease.BusyCache).Misses))
-}
-
-func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.Logger, profile merchant.Profile) http.Handler {
-	cache := lease.NewBusyCache(store, 50)
-	currentBusyCache.Store(cache)
+func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.Logger, profile merchant.Profile) *Server {
 	s := &Server{
-		cfg:       cfg,
-		store:     store,
-		leases:    cache,
-		busyCache: cache,
-		signer:    signer,
-		log:       log,
-		profile:   profile,
-		eaf:       newEAFAcc(),
+		cfg:     cfg,
+		store:   store,
+		leases:  lease.NewBusyCache(store, 50),
+		signer:  signer,
+		log:     log,
+		profile: profile,
+		eaf:     newEAFAcc(),
+		limit:   limit.New(cfg.MaxInFlight, cfg.RatePerSec),
+		rates:   (&Server{cfg: cfg}).rateGuards(),
 	}
-	r := chi.NewRouter()
+	if cfg.Burst > 0 {
+		s.limit.Burst = cfg.Burst
+	}
+	s.initControls()
+	s.loadPolicy()
+	s.mux = s.publicMux()
+	s.admin = s.adminMux()
+	return s
+}
+
+func (s *Server) withBase(r *chi.Mux) {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
+	r.Use(stripInboundBruiser)
+	r.Use(requestDeadline(8 * time.Second))
+}
+
+func (s *Server) publicMux() http.Handler {
+	r := chi.NewRouter()
+	s.withBase(r)
 	r.Get("/healthz", s.healthz)
 	r.Get("/readyz", s.readyz)
 	r.Handle("/metrics", promhttp.Handler())
@@ -161,20 +252,75 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 	r.Get("/.well-known/bruiser/protocol", s.protocol)
 	r.Route("/v1", func(r chi.Router) {
 		r.Post("/sessions", s.createSession)
+		r.Post("/sessions/logout", s.logoutSession)
+		r.Post("/sessions/revoke", s.logoutSession)
+		r.Post("/sessions/refresh", s.refreshSession)
 		r.Post("/authorize", s.authorize)
+		r.Post("/introspect", s.introspect)
 		r.Group(func(r chi.Router) {
 			r.Use(s.sessionAuth)
 			r.Post("/executions/acquire", s.acquire)
 			r.Post("/executions/{id}/renew", s.renew)
+			r.Post("/executions/{id}/heartbeat", s.renew)
 			r.Post("/executions/{id}/release", s.release)
+			r.Post("/executions/{id}/leave", s.release)
+			r.Post("/executions/{id}/handoff", s.handoff)
+			r.Post("/executions/{id}/revoke", s.revoke)
 			r.Get("/executions/{id}", s.get)
 			r.Get("/executions/{id}/watch", s.watch)
 		})
-		if cfg.OperatorSecret != "" {
+		if s.cfg.OperatorSecret != "" {
 			s.mountOperator(r)
 		}
 	})
 	return r
+}
+
+func (s *Server) adminMux() http.Handler {
+	r := chi.NewRouter()
+	s.withBase(r)
+	r.Get("/healthz", s.healthz)
+	r.Get("/admin", s.adminPage)
+	r.Post("/admin", s.adminPage)
+	r.Get("/demo", s.adminPage)
+	r.Route("/v1", func(r chi.Router) {
+		r.Get("/policy", s.getPolicy)
+		r.Put("/policy", s.putPolicy)
+		r.Get("/policy/history", s.policyHistory)
+		r.Get("/admin/status", s.adminStatus)
+		r.Get("/admin/stream", s.adminStream)
+		r.Get("/admin/audit", s.adminAudit)
+		r.Get("/admin/export", s.adminExport)
+		r.Get("/admin/customer/{id}", s.adminCustomer)
+		r.Post("/admin/authority-check", s.adminRunCheck)
+		r.Get("/admin/authority-check", s.adminLastCheck)
+		r.Post("/admin/executions/{id}/revoke", s.adminRevoke)
+		r.Get("/admin/controls", s.adminGetControls)
+		r.Put("/admin/controls", s.adminPutControls)
+		r.Post("/admin/controls/drain", s.adminDrain)
+		r.Post("/admin/controls/revoke-all", s.adminRevokeAll)
+		r.Get("/admin/dry-run", s.adminDryRun)
+		r.Get("/admin/ramp", s.adminDryRun)
+		r.Post("/admin/token", s.adminMintToken)
+		r.Post("/authority-check", s.adminRunCheck)
+		r.Get("/authority-check", s.adminLastCheck)
+	})
+	return r
+}
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mux.ServeHTTP(w, r)
+}
+
+func (s *Server) AdminHandler() http.Handler {
+	if s.admin != nil {
+		return s.admin
+	}
+	return http.NotFoundHandler()
+}
+
+func (s *Server) EAF(resource string) (attempts, forwarded, customers float64) {
+	return s.eaf.snapshot(resource)
 }
 
 func (s *Server) healthz(w http.ResponseWriter, _ *http.Request) {
@@ -184,12 +330,54 @@ func (s *Server) healthz(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), s.cfg.ReadyTimeout)
 	defer cancel()
-	if err := s.store.Ping(ctx); err != nil {
-		storeUnavailable.Inc()
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready", "error": "store_unavailable"})
+	ctl := s.currentControls()
+	body := map[string]any{
+		"status":          "ready",
+		"store":           "ok",
+		"mode":            ctl.Mode,
+		"enforcement":     ctl.Enforcement,
+		"enforce_percent": ctl.EffectivePercent(),
+		"signing_key":     "unknown",
+		"upstream":        "skipped",
+		"admin_secret":    "ok",
+	}
+	if err := s.cfg.ValidateSecrets(); err != nil {
+		body["status"] = "not_ready"
+		body["admin_secret"] = "invalid"
+		body["config"] = err.Error()
+		writeJSON(w, http.StatusServiceUnavailable, body)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+	if err := s.store.Ping(ctx); err != nil {
+		storeUnavailable.Inc()
+		body["status"] = "not_ready"
+		body["store"] = "unavailable"
+		writeJSON(w, http.StatusServiceUnavailable, body)
+		return
+	}
+	if keys, err := s.store.ActiveSigningKeys(ctx, s.cfg.MerchantID); err != nil {
+		body["signing_key"] = "error"
+	} else if len(keys) == 0 {
+		body["signing_key"] = "missing"
+		body["status"] = "not_ready"
+		writeJSON(w, http.StatusServiceUnavailable, body)
+		return
+	} else {
+		body["signing_key"] = "ok"
+	}
+	if s.cfg.OriginURL != "" {
+		u := strings.TrimRight(s.cfg.OriginURL, "/") + "/healthz"
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			body["upstream"] = "error"
+		} else if resp, err := http.DefaultClient.Do(req); err != nil {
+			body["upstream"] = "unreachable"
+		} else {
+			resp.Body.Close()
+			body["upstream"] = "ok"
+		}
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (s *Server) jwks(w http.ResponseWriter, _ *http.Request) {
@@ -200,7 +388,11 @@ func (s *Server) protocol(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"protocol":     "bruiser",
 		"version":      "0.1-draft",
-		"capabilities": []string{"IDENTITY", "ACQUIRE", "RENEW", "RELEASE", "WATCH", "AUTHORIZE"},
+		"capabilities": []string{"IDENTITY", "ACQUIRE", "RENEW", "HEARTBEAT", "RELEASE", "HANDOFF", "REVOKE", "WATCH", "QUEUE", "AUTHORIZE", "INTROSPECT", "POLICY", "ADMIN", "AUTHORITY_CHECK", "DRY_RUN", "RAMP", "CONTROLS", "SESSION_REVOKE", "REPLAY", "BUDGET"},
+		"states": map[string][]string{
+			"decision":  {"ALLOW", "BUSY", "QUEUED", "DENIED"},
+			"execution": {lease.StateActive, lease.StateReleased, lease.StateExpired, lease.StateRevoked, lease.StateHandedOff, lease.StateQueued},
+		},
 	})
 }
 
@@ -213,19 +405,24 @@ type sessionReq struct {
 }
 
 func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
-	raw := bearer(r)
-	if raw == "" {
-		writeErr(w, http.StatusUnauthorized, "missing customer assertion")
+	if s.rates != nil && !s.rates.check(w, "sessions", clientIP(r), s.rates.sessions) {
 		return
 	}
-	assertion, err := auth.ParseAssertionHS256(raw, s.cfg.DevHMACSecret, "bruiser")
-	if err != nil {
+	if s.rates != nil && !s.rates.check(w, "merchant", s.cfg.MerchantID, s.rates.merchant) {
+		return
+	}
+	if s.rates != nil && !s.rates.check(w, "ip", clientIP(r), s.rates.ip) {
+		return
+	}
+	in := s.identityInput(r, s.edgeAuthorized(r))
+	in.Identity.Extractor = "auto"
+	cust, err := identity.ExtractInput(r.Context(), in)
+	if err != nil || cust.CustomerID == "" {
 		writeErr(w, http.StatusUnauthorized, "invalid customer assertion")
 		return
 	}
 	var body sessionReq
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid json")
+	if !decodeJSON(w, r, &body) {
 		return
 	}
 	if body.Principal.Type == "" {
@@ -244,42 +441,105 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.InsertSession(r.Context(), pgstore.SessionRow{
 		ID:            sessID,
 		MerchantID:    s.cfg.MerchantID,
-		CustomerID:    assertion.CustomerID,
-		Anchors:       assertion.Anchors,
+		CustomerID:    cust.CustomerID,
+		Anchors:       cust.Anchors,
 		PrincipalType: body.Principal.Type,
 		PrincipalID:   body.Principal.ID,
 		ExpiresAt:     exp,
+		Version:       1,
 	}); err != nil {
 		s.storeError(w, err)
 		return
 	}
 	token, err := s.signer.SignSession(auth.SessionClaims{
 		MerchantID:    s.cfg.MerchantID,
-		CustomerID:    assertion.CustomerID,
+		CustomerID:    cust.CustomerID,
 		PrincipalType: body.Principal.Type,
 		PrincipalID:   body.Principal.ID,
 		SessionID:     sessID,
-		Anchors:       assertion.Anchors,
+		Version:       1,
+		Anchors:       cust.Anchors,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(exp),
 			IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
-			Subject:   assertion.CustomerID,
+			Subject:   cust.CustomerID,
 		},
 	})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "sign session")
 		return
 	}
-	anchorKeys := make([]string, 0, len(assertion.Anchors))
-	for k := range assertion.Anchors {
+	anchorKeys := make([]string, 0, len(cust.Anchors))
+	for k := range cust.Anchors {
 		anchorKeys = append(anchorKeys, k)
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"session_id":    sessID,
 		"session_token": token,
 		"expires_at":    exp.Format(time.RFC3339Nano),
-		"customer_id":   assertion.CustomerID,
+		"customer_id":   cust.CustomerID,
 		"anchors":       anchorKeys,
+	})
+}
+
+func (s *Server) logoutSession(w http.ResponseWriter, r *http.Request) {
+	raw := bearer(r)
+	if raw == "" {
+		writeErr(w, http.StatusUnauthorized, "missing session token")
+		return
+	}
+	claims, err := auth.ParseSession(raw, s.signer.Public)
+	if err != nil || claims.MerchantID != s.cfg.MerchantID {
+		writeErr(w, http.StatusUnauthorized, "invalid session token")
+		return
+	}
+	if err := s.store.RevokeSession(r.Context(), s.cfg.MerchantID, claims.SessionID); err != nil {
+		s.storeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "REVOKED", "session_id": claims.SessionID})
+}
+
+func (s *Server) refreshSession(w http.ResponseWriter, r *http.Request) {
+	raw := bearer(r)
+	if raw == "" {
+		writeErr(w, http.StatusUnauthorized, "missing session token")
+		return
+	}
+	claims, err := auth.ParseSession(raw, s.signer.Public)
+	if err != nil || claims.MerchantID != s.cfg.MerchantID {
+		writeErr(w, http.StatusUnauthorized, "invalid session token")
+		return
+	}
+	live, err := s.store.LiveSession(r.Context(), s.cfg.MerchantID, claims.SessionID)
+	if err != nil {
+		writeErr(w, http.StatusUnauthorized, "session revoked")
+		return
+	}
+	exp := time.Now().UTC().Add(s.cfg.SessionTTL)
+	token, err := s.signer.SignSession(auth.SessionClaims{
+		MerchantID:    live.MerchantID,
+		CustomerID:    live.CustomerID,
+		PrincipalType: live.PrincipalType,
+		PrincipalID:   live.PrincipalID,
+		SessionID:     live.ID,
+		Version:       live.Version,
+		Anchors:       live.Anchors,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(exp),
+			IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
+			Subject:   live.CustomerID,
+		},
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "sign session")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"session_id":    live.ID,
+		"session_token": token,
+		"expires_at":    exp.Format(time.RFC3339Nano),
+		"status":        "ALLOW",
 	})
 }
 
@@ -303,6 +563,19 @@ func (s *Server) sessionAuth(next http.Handler) http.Handler {
 			writeErr(w, http.StatusUnauthorized, "wrong merchant")
 			return
 		}
+		if claims.SessionID != "" {
+			if _, err := s.store.LiveSession(r.Context(), s.cfg.MerchantID, claims.SessionID); err != nil {
+				if errors.Is(err, lease.ErrUnavailable) {
+					if !s.failOpen() {
+						s.storeError(w, err)
+						return
+					}
+				} else {
+					writeErr(w, http.StatusUnauthorized, "session revoked")
+					return
+				}
+			}
+		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), sessionKey, claims)))
 	})
 }
@@ -319,53 +592,107 @@ type acquireReq struct {
 
 func (s *Server) acquire(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r.Context())
+	if s.rates != nil && !s.rates.check(w, "acquire", sess.CustomerID, s.rates.acquire) {
+		return
+	}
+	if s.rates != nil && !s.rates.check(w, "customer", sess.CustomerID, s.rates.customer) {
+		return
+	}
+	if s.rates != nil && !s.rates.check(w, "principal", sess.PrincipalID, s.rates.principal) {
+		return
+	}
+	if !s.claimReplay(w, r, "acquire") {
+		return
+	}
 	var body acquireReq
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid json")
+	if !decodeJSON(w, r, &body) {
 		return
 	}
 	if body.Resource == "" {
 		writeErr(w, http.StatusBadRequest, "resource required")
 		return
 	}
+	if canon, err := s.canonicalizeResource(body.Resource); err != nil {
+		if err == resource.ErrUnknownResource {
+			writeErr(w, http.StatusBadRequest, "unknown resource")
+			return
+		}
+		writeErr(w, http.StatusBadRequest, "malformed resource")
+		return
+	} else {
+		body.Resource = canon
+	}
 	if body.Action == "" {
 		body.Action = "purchase"
 	}
-	rule := lease.DefaultRuleName()
-	domain := lease.DomainKey(sess.MerchantID, rule, sess.CustomerID, body.Resource)
+	d := s.evaluate(sess.MerchantID, sess.CustomerID, sess.PrincipalType, body.Resource, body.Action, sess.Anchors)
+	d, ctl := s.applyControls(d, body.Action)
+	if d.Denied || d.ControlNone {
+		reason := d.Reason
+		if reason == "" {
+			reason = "denied"
+		}
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "DENIED", "reason": reason, "rule_name": d.RuleName})
+		return
+	}
+	ramp := s.rampInput(sess.CustomerID, body.Resource, body.Action, d.RuleName, "", "", sess.Anchors)
+	if !ctl.ShouldEnforce(ramp) {
+		s.writeAcquireDryRun(w, r, sess, body, d, ctl.EffectivePercent())
+		return
+	}
 	reqID := requestID(r)
 	res, err := s.leases.Acquire(r.Context(), lease.AcquireRequest{
 		MerchantID:  sess.MerchantID,
-		DomainKey:   domain,
+		DomainKey:   d.DomainKey,
 		CustomerID:  sess.CustomerID,
 		Principal:   lease.Principal{Type: sess.PrincipalType, ID: sess.PrincipalID},
 		SessionID:   sess.SessionID,
 		Resource:    body.Resource,
 		Action:      body.Action,
-		RuleName:    rule,
-		MaxActive:   s.cfg.MaxActive,
-		TTL:         s.cfg.LeaseTTL,
-		MaxLifetime: s.cfg.MaxLifetime,
+		RuleName:    d.RuleName,
+		MaxActive:   d.MaxActive,
+		TTL:         d.TTL,
+		MaxLifetime: d.MaxLifetime,
+		Precedence:  d.Precedence,
+		MaxWaiters:  d.MaxWaiters,
+		MaxOps:      d.MaxOps,
 		RequestID:   reqID,
 	})
 	if err != nil {
+		if s.failOpen() {
+			writeJSON(w, http.StatusOK, map[string]any{"status": "ALLOW", "control": "fail-open", "rule_name": d.RuleName})
+			return
+		}
 		s.storeError(w, err)
 		return
 	}
-	acquireTotal.WithLabelValues(res.Status, rule).Inc()
+	acquireTotal.WithLabelValues(res.Status, d.RuleName).Inc()
+	if res.Execution != nil {
+		_ = s.store.EnsureBudget(r.Context(), s.cfg.MerchantID, res.Execution.ID, d.MaxOps)
+	}
+	s.recordAcquire(r.Context(), true, sess.CustomerID, sess.PrincipalID, body.Resource, body.Action, d.RuleName, res, reqID)
+	w.Header().Set("X-Bruiser-Enforced", "1")
+	w.Header().Set("X-Bruiser-Ramp", strconv.Itoa(ctl.EffectivePercent()))
 	switch res.Status {
 	case lease.StatusGranted:
+		s.eaf.record(body.Resource, sess.CustomerID, "allow")
 		s.writeExecution(w, http.StatusCreated, res.Execution, true)
 	case lease.StatusAlreadyHeld:
+		s.eaf.record(body.Resource, sess.CustomerID, "resume")
 		s.writeExecution(w, http.StatusOK, res.Execution, true)
+	case lease.StatusQueued:
+		s.eaf.record(body.Resource, sess.CustomerID, "queued")
+		s.writeQueued(w, d.DomainKey, d.RuleName, res)
 	case lease.StatusBusy:
+		s.eaf.record(body.Resource, sess.CustomerID, "busy")
 		retry := time.Until(res.Busy.ExpiresAt)
 		if retry < 0 {
 			retry = time.Second
 		}
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"status":              "BUSY",
-			"domain":              domain,
+			"domain":              d.DomainKey,
+			"rule_name":           d.RuleName,
 			"active_execution_id": res.Busy.ActiveExecutionID,
 			"holder":              map[string]string{"type": res.Busy.Holder.Type, "id": res.Busy.Holder.ID},
 			"expires_at":          res.Busy.ExpiresAt.UTC().Format(time.RFC3339Nano),
@@ -376,6 +703,29 @@ func (s *Server) acquire(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeErr(w, http.StatusForbidden, res.Reason)
 	}
+}
+
+func (s *Server) writeAcquireDryRun(w http.ResponseWriter, r *http.Request, sess auth.SessionClaims, body acquireReq, d policy.Decision, percent int) {
+	ev, err := s.store.ShadowDecide(r.Context(), sess.MerchantID, d.DomainKey, sess.CustomerID, sess.PrincipalID, body.Resource, body.Action, d.RuleName, d.MaxActive, d.MaxWaiters, d.TTL, requestID(r))
+	would, reason := "WOULD_UNKNOWN", "store_unavailable"
+	if err == nil {
+		would, reason = "WOULD_"+ev.Would, ev.Reason
+	}
+	s.eaf.record(body.Resource, sess.CustomerID, "would_"+strings.ToLower(strings.TrimPrefix(would, "WOULD_")))
+	w.Header().Set("X-Bruiser-Control", "observe")
+	w.Header().Set("X-Bruiser-Dry-Run", would)
+	w.Header().Set("X-Bruiser-Dry-Run-Reason", reason)
+	w.Header().Set("X-Bruiser-Enforced", "0")
+	w.Header().Set("X-Bruiser-Ramp", strconv.Itoa(percent))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":          "ALLOW",
+		"would":           would,
+		"reason":          reason,
+		"rule_name":       d.RuleName,
+		"customer_id":     sess.CustomerID,
+		"enforced":        false,
+		"enforce_percent": percent,
+	})
 }
 
 func (s *Server) renew(w http.ResponseWriter, r *http.Request) {
@@ -397,6 +747,66 @@ func (s *Server) release(w http.ResponseWriter, r *http.Request) {
 		s.mutationError(w, err)
 		return
 	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"execution_id": e.ID,
+		"state":        e.State,
+		"end_reason":   e.EndReason,
+	})
+}
+
+type handoffReq struct {
+	To struct {
+		Type string `json:"type"`
+		ID   string `json:"id"`
+	} `json:"to"`
+	Mode string `json:"mode"`
+}
+
+func (s *Server) handoff(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r.Context())
+	var body handoffReq
+	if r.Body != nil {
+		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
+	}
+	exeID := chi.URLParam(r, "id")
+	var prec []string
+	if e, err := s.leases.Get(r.Context(), sess.MerchantID, exeID); err == nil {
+		prec = s.getCompiled().Precedence(e.RuleName)
+	}
+	res, err := s.leases.Handoff(r.Context(), lease.HandoffRequest{
+		MerchantID:  sess.MerchantID,
+		ExecutionID: exeID,
+		SessionID:   sess.SessionID,
+		To:          lease.Principal{Type: body.To.Type, ID: body.To.ID},
+		Mode:        body.Mode,
+		TTL:         s.cfg.LeaseTTL,
+		Precedence:  prec,
+		RequestID:   requestID(r),
+	})
+	if err != nil {
+		s.mutationError(w, err)
+		return
+	}
+	handoffTotal.WithLabelValues(res.Mode).Inc()
+	s.writeExecution(w, http.StatusCreated, &res.Successor, true)
+}
+
+type revokeReq struct {
+	Reason string `json:"reason"`
+}
+
+func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r.Context())
+	var body revokeReq
+	if r.Body != nil {
+		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
+	}
+	e, err := s.leases.Revoke(r.Context(), sess.MerchantID, chi.URLParam(r, "id"), sess.SessionID, requestID(r), body.Reason)
+	if err != nil {
+		s.mutationError(w, err)
+		return
+	}
+	revokeTotal.Inc()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"execution_id": e.ID,
 		"state":        e.State,
@@ -468,8 +878,17 @@ func (s *Server) writeExecution(w http.ResponseWriter, status int, e *lease.Exec
 		"renew_count":     e.RenewCount,
 		"rule_name":       e.RuleName,
 	}
+	if e.State == lease.StateActive {
+		body["heartbeat_after_ms"] = s.cfg.HeartbeatInterval.Milliseconds()
+	}
+	if e.State == lease.StateQueued && e.QueuePosition > 0 {
+		body["position"] = e.QueuePosition
+	}
 	if e.EndReason != "" {
 		body["end_reason"] = e.EndReason
+	}
+	if e.SuccessorID != "" {
+		body["successor_id"] = e.SuccessorID
 	}
 	if includeToken && e.State == lease.StateActive {
 		tok, err := s.signer.SignExecution(*e)
@@ -478,6 +897,28 @@ func (s *Server) writeExecution(w http.ResponseWriter, status int, e *lease.Exec
 		}
 	}
 	writeJSON(w, status, body)
+}
+
+func (s *Server) writeQueued(w http.ResponseWriter, domain, rule string, res lease.AcquireResult) {
+	retry := time.Until(res.Busy.ExpiresAt)
+	if retry < 0 {
+		retry = time.Second
+	}
+	body := map[string]any{
+		"status":              "QUEUED",
+		"domain":              domain,
+		"rule_name":           rule,
+		"execution_id":        res.Queue.WaiterID,
+		"position":            res.Queue.Position,
+		"active_execution_id": res.Queue.ActiveExecutionID,
+		"expires_at":          res.Queue.ExpiresAt.UTC().Format(time.RFC3339Nano),
+		"retry_after_ms":      retry.Milliseconds(),
+		"watch":               "/v1/executions/" + res.Queue.WaiterID + "/watch",
+	}
+	if res.Busy != nil {
+		body["holder"] = map[string]string{"type": res.Busy.Holder.Type, "id": res.Busy.Holder.ID}
+	}
+	writeJSON(w, http.StatusAccepted, body)
 }
 
 func (s *Server) mutationError(w http.ResponseWriter, err error) {
@@ -493,6 +934,10 @@ func (s *Server) mutationError(w http.ResponseWriter, err error) {
 	}
 	if errors.Is(err, lease.ErrNotHolder) {
 		writeErr(w, http.StatusForbidden, "not holder")
+		return
+	}
+	if errors.Is(err, lease.ErrPrecedence) {
+		writeErr(w, http.StatusForbidden, "cannot preempt")
 		return
 	}
 	s.storeError(w, err)
@@ -526,6 +971,116 @@ func requestID(r *http.Request) string {
 		return v
 	}
 	return id.Request()
+}
+
+func requestDeadline(d time.Duration) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/watch") || strings.HasSuffix(r.URL.Path, "/stream") {
+				next.ServeHTTP(w, r)
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), d)
+			defer cancel()
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json")
+		return false
+	}
+	return true
+}
+
+func (s *Server) initControls() {
+	c := ops.FromEnv(s.cfg.Mode, s.cfg.Enforcement, s.cfg.QueueEnabled, s.cfg.EnforcePercent)
+	c.FailClosed = s.cfg.FailClosed
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if db, found, err := s.store.GetControls(ctx, s.cfg.MerchantID); err == nil && found {
+		c = db
+	}
+	s.controls.Store(&c)
+}
+
+func (s *Server) currentControls() ops.Controls {
+	if p := s.controls.Load(); p != nil {
+		return *p
+	}
+	c := ops.FromEnv(s.cfg.Mode, s.cfg.Enforcement, s.cfg.QueueEnabled, s.cfg.EnforcePercent)
+	c.FailClosed = s.cfg.FailClosed
+	return c
+}
+
+func (s *Server) applyControls(d policy.Decision, action string) (policy.Decision, ops.Controls) {
+	c := s.currentControls()
+	d.MaxWaiters = c.EffectiveWaiters(d.MaxWaiters)
+	if c.LeaseTTLSeconds > 0 {
+		d.TTL = time.Duration(c.LeaseTTLSeconds) * time.Second
+	}
+	if c.ActionDisabled(action) {
+		d.ControlNone = true
+	}
+	return d, c
+}
+
+func (s *Server) failOpen() bool {
+	c := s.currentControls()
+	return !c.FailClosed || c.PassThrough()
+}
+
+func (s *Server) rampInput(customer, resource, action, rule, event, path string, anchors map[string]string) ops.RampInput {
+	in := ops.RampInput{
+		CustomerID: customer,
+		Resource:   resource,
+		Action:     action,
+		RuleName:   rule,
+		EventID:    event,
+		Path:       path,
+		Env:        s.cfg.Environment,
+	}
+	if anchors != nil {
+		in.Pool = anchors["pool"]
+		in.Cohort = anchors["cohort"]
+	}
+	if in.EventID == "" {
+		if i := strings.LastIndex(resource, ":"); i >= 0 && i+1 < len(resource) {
+			in.EventID = resource[i+1:]
+		}
+	}
+	return in
+}
+
+func (s *Server) recordDecision(ctx context.Context, enforced bool, customer, principal, resource, action, rule, would, reason, reqID, errText string) {
+	_ = s.store.RecordDecision(ctx, s.cfg.MerchantID, pgstore.DryRunEvent{
+		Would:       would,
+		Reason:      reason,
+		CustomerID:  customer,
+		PrincipalID: principal,
+		Resource:    resource,
+		Action:      action,
+		RuleName:    rule,
+		RequestID:   reqID,
+		Enforced:    enforced,
+		Error:       errText,
+	})
+}
+
+func (s *Server) recordAcquire(ctx context.Context, enforced bool, customer, principal, resource, action, rule string, acq lease.AcquireResult, reqID string) {
+	would, reason := "REJECT", acq.Reason
+	switch acq.Status {
+	case lease.StatusGranted, lease.StatusAlreadyHeld:
+		would, reason = "ALLOW", acq.Status
+	case lease.StatusQueued:
+		would, reason = "QUEUE", "queued"
+	case lease.StatusBusy:
+		would, reason = "REJECT", "busy"
+	}
+	s.recordDecision(ctx, enforced, customer, principal, resource, action, rule, would, reason, reqID, "")
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

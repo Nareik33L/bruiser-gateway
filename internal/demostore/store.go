@@ -3,7 +3,9 @@
 package demostore
 
 import (
+	"crypto/rand"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"html"
 	"net/http"
@@ -67,7 +69,7 @@ func (r *Registry) Create(name, product, price string, ttl time.Duration) Store 
 	}
 	now := time.Now().UTC()
 	st := Store{
-		ID:        id.New("str"),
+		ID:        newStoreID(),
 		Name:      name,
 		Product:   product,
 		Price:     price,
@@ -305,6 +307,15 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func newStoreID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic(err)
+	}
+	// Hyphenated so the sandbox resource folds under RC1 canonical IDs.
+	return "str-" + hex.EncodeToString(b[:])
 }
 
 func Sanitize(s string, fallback string, max int) string {

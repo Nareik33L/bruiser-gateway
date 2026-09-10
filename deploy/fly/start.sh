@@ -3,7 +3,7 @@
 # Caddy binds :8080 (Fly http_service). Gateway is :8081 on loopback only.
 set -euo pipefail
 
-export POSTGRES_USER="${POSTGRES_USER:-bruiser}"
+export BRUISER_ENV="${BRUISER_ENV:-lab}"
 export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-bruiser}"
 export POSTGRES_DB="${POSTGRES_DB:-bruiser}"
 export PGDATA="${PGDATA:-/var/lib/postgresql/data}"

@@ -16,35 +16,35 @@ import (
 	"github.com/Nareik33L/bruiser-gateway/internal/testlab"
 )
 
-func startLab(t *testing.T, originSecret string) (edgeURL, originURL string, hmac string) {
+func startLab(t *testing.T, originSecret string) (edgeURL, originURL, gwURL, hmac, adminURL string) {
 	t.Helper()
-	gw, cfg := testlab.Gateway(t, testlab.ArsenalProfile(t))
-	origin := simtix.New(simtix.Config{
-		HMACSecret:   cfg.DevHMACSecret,
-		OriginSecret: originSecret,
-		Seats:        20,
-	})
+	lab := testlab.Start(t, testlab.ArsenalProfile(t), nil)
+	gw, cfg, signer := lab.Server, lab.Cfg, lab.Signer
+	origin := simtix.New(simtix.Lab(cfg.DevHMACSecret, originSecret, cfg.MerchantID, signer.Public, gw.URL, 20))
 	originSrv := httptest.NewServer(origin.Handler())
 	t.Cleanup(originSrv.Close)
 	p, err := edge.New(edge.Config{
-		OriginURL:   originSrv.URL,
-		BruiserURL:  gw.URL,
-		EdgeSecret:  cfg.EdgeSecret,
-		MaxInFlight: 8,
+		OriginURL:    originSrv.URL,
+		BruiserURL:   gw.URL,
+		EdgeSecret:   cfg.EdgeSecret,
+		OriginSecret: originSecret,
+		MaxInFlight:  8,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	edgeSrv := httptest.NewServer(p.Handler())
 	t.Cleanup(edgeSrv.Close)
-	return edgeSrv.URL, originSrv.URL, cfg.DevHMACSecret
+	return edgeSrv.URL, originSrv.URL, gw.URL, cfg.DevHMACSecret, lab.Admin.URL
 }
 
 func TestAuthorityCheckLockdownOnPass(t *testing.T) {
-	edgeURL, originURL, hmac := startLab(t, "origin-lock-dev")
+	edgeURL, originURL, gwURL, hmac, adminURL := startLab(t, "origin-lock-dev")
 	rep, err := check.Run(check.Config{
 		EdgeURL:    edgeURL,
 		OriginURL:  originURL,
+		ControlURL: gwURL,
+		AdminURL:   adminURL,
 		HMACSecret: hmac,
 		Membership: "1001234",
 		EventID:    "ars-che",
@@ -61,10 +61,12 @@ func TestAuthorityCheckLockdownOnPass(t *testing.T) {
 }
 
 func TestAuthorityCheckLockdownOffFail(t *testing.T) {
-	edgeURL, originURL, hmac := startLab(t, "")
+	edgeURL, originURL, gwURL, hmac, adminURL := startLab(t, "")
 	rep, err := check.Run(check.Config{
 		EdgeURL:    edgeURL,
 		OriginURL:  originURL,
+		ControlURL: gwURL,
+		AdminURL:   adminURL,
 		HMACSecret: hmac,
 		Membership: "1001234",
 		EventID:    "ars-che",
@@ -75,19 +77,19 @@ func TestAuthorityCheckLockdownOffFail(t *testing.T) {
 	if rep.Passed() {
 		t.Fatalf("lockdown off must FAIL\n%s", rep.String())
 	}
-	var bypass check.Probe
+	var pathTrust check.Probe
 	for _, p := range rep.Probes {
-		if p.Name == "Direct allocation bypass blocked" {
-			bypass = p
+		if p.Name == "Origin secret required with a valid execution" {
+			pathTrust = p
 		}
 	}
-	if bypass.Pass {
-		t.Fatalf("bypass probe should fail when lockdown is off: %+v", bypass)
+	if pathTrust.Pass {
+		t.Fatalf("path-trust probe should fail when lockdown is off: %+v", pathTrust)
 	}
 }
 
 func TestUnawareSwarmOneHold(t *testing.T) {
-	edgeURL, _, hmac := startLab(t, "origin-lock-dev")
+	edgeURL, _, _, hmac, _ := startLab(t, "origin-lock-dev")
 	c1, err := auth.IssueBoxOfficeSession(hmac, "1001234", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -120,8 +122,52 @@ func TestUnawareSwarmOneHold(t *testing.T) {
 	}
 }
 
+func TestAuthorityCheckMissingOriginFails(t *testing.T) {
+	edgeURL, _, gwURL, hmac, adminURL := startLab(t, "origin-lock-dev")
+	rep, err := check.Run(check.Config{
+		EdgeURL:    edgeURL,
+		ControlURL: gwURL,
+		AdminURL:   adminURL,
+		HMACSecret: hmac,
+		Membership: "1001234",
+		EventID:    "ars-che",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Passed() || rep.Overall != "FAIL" {
+		t.Fatalf("missing --origin must FAIL, not WARN/PASS\n%s", rep.String())
+	}
+	var originProbe check.Probe
+	for _, p := range rep.Probes {
+		if p.Name == "Origin lockdown proven" {
+			originProbe = p
+		}
+	}
+	if originProbe.Status != "FAIL" {
+		t.Fatalf("origin required probe: %+v\n%s", originProbe, rep.String())
+	}
+}
+
+func TestAuthorityCheckMissingControlFails(t *testing.T) {
+	edgeURL, originURL, _, hmac, _ := startLab(t, "origin-lock-dev")
+	rep, err := check.Run(check.Config{
+		EdgeURL:    edgeURL,
+		OriginURL:  originURL,
+		HMACSecret: hmac,
+		Membership: "1001234",
+		EventID:    "ars-che",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Passed() {
+		t.Fatalf("missing --control must FAIL\n%s", rep.String())
+	}
+}
+
 func TestSearchOpenViaEdge(t *testing.T) {
-	edgeURL, _, _ := startLab(t, "origin-lock-dev")
+	edgeURL, _, _, _, _ := startLab(t, "origin-lock-dev")
 	resp, err := http.Get(edgeURL + "/api/events")
 	if err != nil {
 		t.Fatal(err)

@@ -73,7 +73,11 @@ Scope
 - `internal/lease`: state machine, `Store` interface, Postgres implementation of
   acquire/renew/release with domain row locking, store-clock expiry, fence
   increment.
-- Idempotent re-acquire by the same principal; BUSY response shape.
+- Idempotent re-acquire by the same principal (ALREADY_HELD); BUSY response shape.
+- Heartbeat renewal: `POST .../renew` and `POST .../heartbeat` extend TTL;
+  `heartbeat_after_ms` on ACTIVE responses (default interval 20 s, lease TTL 60 s).
+- Recovery: reconnect before expiry resumes the same execution (TTL extended,
+  session rebound); after expiry a new execution may be acquired.
 - Expiry as derived state plus a sweeper that materialises `EXPIRED` and emits audit.
 - Sessions with dev-mode HMAC customer assertions; principal binding.
 - Execution tokens (PASETO v4.public), JWKS endpoint, key generation CLI.
@@ -89,6 +93,8 @@ Exit criteria
   moment, verified by a test that inspects the DB at random points while load runs.
 - Lease expires without any renew; renew past `max_lifetime` is refused; a released
   domain is re-acquirable immediately.
+- Recovery: disconnect and reconnect before expiry returns the same execution id
+  with a later `expires_at`; after expiry a new GRANT is allowed.
 - Every state transition present in `audit_events`, checked by test.
 
 ---
@@ -195,13 +201,15 @@ Exit criteria
 - A Node and a Python sample app verify tokens using the SDKs, in CI.
 
 **Landed against the Arsenal-like analogue (this tree).** `POST /v1/authorize`
-with cookie-JWT extraction; `configs/arsenal.yaml` route rules; SimTix origin
-with optional origin lockdown; Go Edge analogue (`internal/edge`) plus NGINX
-`auth_request` reference; `bruiser authority-check` in the product-feature
-PASS/FAIL format; unaware two-login BUSY vs same-cookie ALREADY_HELD; EAF
-counters/gauges on the authorize path. Still open: Embedded SDKs, Proxy
-method, per-execution rate limit (in-flight is in the Edge analogue), 1×10,000
-EAF demo, Node/Python SDKs, `AUTHORITY_CHECK` audit persistence.
+and `POST /v1/introspect`; `configs/arsenal.yaml` route rules; SimTix origin
+with optional origin lockdown and optional Embedded token verify; Go Edge
+analogue plus NGINX `auth_request` and Envoy `ext_authz` references; **Proxy**
+on `BRUISER_PROXY_ADDR`; `bruiser authority-check` (Edge and Proxy); unaware
+BUSY vs ALREADY_HELD; EAF counters plus `bruiser eaf-demo`; `sdk/go` Protect
+with fence tracking; `sdk/node` and `sdk/python` (EdDSA + fence) in CI;
+`AUTHORITY_CHECK` persisted on `bruiser authority-check` and
+`POST /v1/authority-check`; 1×10,000 as `make eaf-nightly` / nightly workflow
+(PR CI remains 200× on Proxy; CLI default 2,000).
 
 ---
 
@@ -229,6 +237,16 @@ Exit criteria
 - A household-scoped rule blocks a second account in the same household, audited
   with `rule_name` and reason.
 
+**Landed in this tree.** First-match YAML compiler (`internal/policy`); scope
+dimensions `customer`, `resource`, `resource_pool`, `principal_type`,
+`anchor:*`; `on_missing_anchor` deny/fallthrough; `control: none`; Postgres
+versioned policies; `GET/PUT /v1/policy` (admin/edge secret); live `max_active`
+change without restart; household-cap BUSY with `rule_name`;
+`bruiser policy validate`; `protocol/policy.schema.json`. Precedence lists on
+the matched rule replace the ADR-024 hard-code when present. `NOTIFY
+bruiser_policy` plus a one-second poll reloads other nodes and resets their
+busy cache (ADR-026).
+
 ---
 
 ## M5 — Handoff and revoke (M)
@@ -252,6 +270,16 @@ Exit criteria
 - Scripted scenario: agent holds → browser takes control → agent's next renew is
   410 → agent's stale purchase is rejected by SimTix → browser purchases. Runs in CI.
 - Torture run with handoff enabled: zero violations.
+
+**Landed in this tree (store + public API + SimTix scenario).** Cooperative and
+preemptive handoff as one transaction (`HANDED_OFF` + successor `fence+1`);
+default precedence browser > agent (ADR-024); `can_preempt` on BUSY; customer
+revoke subject to precedence; renew after handoff is 410 with `successor_id`;
+introspect returns `active: false`; SimTix rejects a stale fence after the
+successor token is seen. CI scenario: agent holds → browser takes control →
+agent renew 410 → stale purchase 403 → browser purchases. Torture adds
+`TestHandoffRevokeInvariants` (I2 fence rise, I4 no zombie renew, still one
+ACTIVE, revoke then zero ACTIVE).
 
 ---
 
@@ -291,6 +319,13 @@ Exit criteria
 - Someone outside the team can run the demo from the README without help, and a
   prospect can watch it run at the hosted URL.
 
+**Landed in this tree (lab demo, not hosted sandbox).** `cmd/swarm` and
+`bruiser swarm` profiles `1xN` / `NxK` / `unaware` / `bypass` / `handoff`;
+`GET /admin` dashboard with SSE EAF headline and last Authority Check;
+`make demo-*` plus `make demo-up` (Compose `--profile demo` with Grafana);
+`docs/demo.md`; `TestDemoAssertion` so the demo cannot silently regress.
+Hosted `sandbox.bruiser-gateway.com` remains M8.
+
 ---
 
 ## M7 — Admin interface and observability (M)
@@ -321,6 +356,15 @@ Exit criteria
 - Grafana dashboard renders all headline metrics during the demo, EAF first.
 - Retention job purges (or archives) events older than the configured window in a
   test with a shortened window; the purge is itself audited.
+
+**Landed in this tree (operator surface).** `GET /admin` (htmx-style page +
+SSE); EAF headline, usage figures, active executions with admin revoke, audit
+search and JSONL export; last Authority Check plus `[Run check]`;
+`BRUISER_AUDIT_RETENTION` default 13 months with `AUDIT_PURGED`; Grafana
+dashboard provisioned under the demo Compose profile (Prometheus scrape of
+`/metrics`). V1 admin auth is the admin/edge secret (`BRUISER_ADMIN_SECRET`),
+not a full API-key RBAC table. OpenTelemetry traces remain a follow-on; the
+scrape path is Prometheus.
 
 ---
 
@@ -369,7 +413,9 @@ Exit criteria
 **V1.5 (protocol and ecosystem)**
 
 - Bounded waiting set (`waiting.mode: bounded`) with promotion and claim window;
-  `EXECUTION_QUEUED` semantics.
+  `EXECUTION_QUEUED` semantics. **Landed in this tree:** QUEUED + promote +
+  leave + waiter expiry; MCP `protocol/mcp/tools.json`; Go/Node/Python agent
+  clients. Claim-window tuning and a full MCP *server* remain follow-on.
 - MCP server / tool definitions so agent frameworks acquire, renew, release and
   hand off natively; reference agent using it against SimTix. These improve the
   agent's experience (watch instead of retry, clean handoff); enforcement never

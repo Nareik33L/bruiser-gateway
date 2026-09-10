@@ -14,7 +14,7 @@ import (
 )
 
 func TestOperatorAbsentWhenUnset(t *testing.T) {
-	srv, _ := testlab.GatewayWith(t, testlab.ArsenalProfile(t), func(cfg *config.Config) {
+	_, srv, _, _ := testlab.GatewayWith(t, testlab.ArsenalProfile(t), func(cfg *config.Config) {
 		cfg.OperatorSecret = ""
 	})
 	resp, err := http.Get(srv.URL + "/v1/operator/stats")

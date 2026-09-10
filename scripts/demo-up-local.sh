@@ -3,8 +3,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PIDDIR="$ROOT/.demo-pids"
 mkdir -p "$PIDDIR" "$ROOT/bin"
+export BRUISER_ENV=lab
 export BRUISER_DATABASE_URL="${BRUISER_DATABASE_URL:-postgres://bruiser:bruiser@127.0.0.1:5432/bruiser?sslmode=disable}"
 export BRUISER_DEV_HMAC_SECRET="${BRUISER_DEV_HMAC_SECRET:-dev-secret-change-me}"
+export BRUISER_ADMIN_SECRET="${BRUISER_ADMIN_SECRET:-admin-secret-dev}"
+export BRUISER_ADMIN_ADDR="${BRUISER_ADMIN_ADDR:-127.0.0.1:8082}"
 export BRUISER_MERCHANT_ID=harchester
 export BRUISER_MERCHANT_NAME="Harchester United FC"
 export BRUISER_PROFILE="$ROOT/configs/harchester.yaml"

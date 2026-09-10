@@ -27,6 +27,8 @@ import (
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	cfg := config.Load()
+	cfg.Environment = "lab"
+	cfg.DevAssertions = true
 	if v := os.Getenv("BRUISER_TEST_DATABASE_URL"); v != "" {
 		cfg.DatabaseURL = v
 	}

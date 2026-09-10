@@ -42,43 +42,6 @@ func (s *Server) mountOperator(r chi.Router) {
 	})
 }
 
-type eafSnapshot struct {
-	Resource      string  `json:"resource"`
-	Attempts      float64 `json:"attempts"`
-	Forwarded     float64 `json:"forwarded"`
-	Busy          float64 `json:"busy"`
-	Denied        float64 `json:"denied"`
-	Unauthorized  float64 `json:"unauthorized"`
-	Customers     int     `json:"customers"`
-	ObservedEAF   float64 `json:"observed_eaf"`
-	DownstreamEAF float64 `json:"downstream_eaf"`
-}
-
-func (a *eafAcc) snapshot() []eafSnapshot {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	out := make([]eafSnapshot, 0, len(a.attempts))
-	for res, att := range a.attempts {
-		s := eafSnapshot{
-			Resource:     res,
-			Attempts:     att,
-			Forwarded:    a.forwarded[res],
-			Busy:         a.outcomes[res]["busy"],
-			Denied:       a.outcomes[res]["denied"],
-			Unauthorized: a.outcomes[res]["unauthorized"],
-			Customers:    len(a.customers[res]),
-		}
-		if s.Forwarded > 0 {
-			s.ObservedEAF = s.Attempts / s.Forwarded
-		}
-		if s.Customers > 0 {
-			s.DownstreamEAF = s.Forwarded / float64(s.Customers)
-		}
-		out = append(out, s)
-	}
-	return out
-}
-
 func (a *eafAcc) reset() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -101,12 +64,12 @@ func (s *Server) operatorStats(w http.ResponseWriter, r *http.Request) {
 	body := map[string]any{
 		"merchant_id":       s.cfg.MerchantID,
 		"active_executions": active,
-		"eaf":               s.eaf.snapshot(),
+		"eaf":               s.eaf.snapshotAll(),
 	}
-	if s.busyCache != nil {
+	if cache, ok := s.leases.(*lease.BusyCache); ok && cache != nil {
 		body["busy_cache"] = map[string]uint64{
-			"hits":   s.busyCache.Hits(),
-			"misses": s.busyCache.Misses(),
+			"hits":   cache.Hits(),
+			"misses": cache.Misses(),
 		}
 	}
 	writeJSON(w, http.StatusOK, body)
@@ -114,7 +77,7 @@ func (s *Server) operatorStats(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) operatorExecutions(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	list, err := s.store.ListActive(r.Context(), s.cfg.MerchantID, limit)
+	list, err := s.store.ListActive(r.Context(), s.cfg.MerchantID, "", limit)
 	if err != nil {
 		s.storeError(w, err)
 		return
@@ -154,14 +117,14 @@ func (s *Server) operatorAudit(w http.ResponseWriter, r *http.Request) {
 // the lease store so the busy cache forgets each domain. Audit rows are written
 // by the store; nothing is deleted.
 func (s *Server) operatorResetExecutions(w http.ResponseWriter, r *http.Request) {
-	list, err := s.store.ListActive(r.Context(), s.cfg.MerchantID, 10000)
+	list, err := s.store.ListActive(r.Context(), s.cfg.MerchantID, "", 10000)
 	if err != nil {
 		s.storeError(w, err)
 		return
 	}
 	revoked := 0
 	for i := range list {
-		if _, err := s.leases.Revoke(r.Context(), s.cfg.MerchantID, list[i].ID, requestID(r), ReasonAdminReset); err != nil {
+		if _, err := s.leases.Revoke(r.Context(), s.cfg.MerchantID, list[i].ID, list[i].SessionID, requestID(r), ReasonAdminReset); err != nil {
 			var gone *lease.GoneError
 			if errors.As(err, &gone) || errors.Is(err, lease.ErrNotFound) {
 				continue

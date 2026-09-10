@@ -63,6 +63,12 @@ func TestAuthorizeUnawareBusyAndAlreadyHeld(t *testing.T) {
 	if code != http.StatusOK || body["status"] != "ALLOW" {
 		t.Fatalf("same cookie want ALREADY_HELD/ALLOW got %d %v", code, body)
 	}
+	if body["execution_id"] == "" {
+		t.Fatalf("resume missing execution_id: %v", body)
+	}
+	if _, ok := body["heartbeat_after_ms"]; !ok {
+		t.Fatalf("ALLOW missing heartbeat_after_ms: %v", body)
+	}
 	code, body = authorize(cookie2)
 	if code != http.StatusConflict || body["status"] != "BUSY" {
 		t.Fatalf("second login want BUSY got %d %v", code, body)

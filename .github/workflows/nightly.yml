@@ -1,0 +1,34 @@
+name: nightly
+
+on:
+  schedule:
+    - cron: "20 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  eaf-10000:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bruiser
+          POSTGRES_PASSWORD: bruiser
+          POSTGRES_DB: bruiser_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bruiser"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.0"
+      - name: 1×10000 EAF
+        env:
+          BRUISER_TEST_DATABASE_URL: postgres://bruiser:bruiser@127.0.0.1:5432/bruiser_test?sslmode=disable
+          BRUISER_EAF_N: "10000"
+        run: make eaf-nightly

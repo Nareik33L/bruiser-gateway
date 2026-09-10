@@ -13,10 +13,10 @@ paths:
         "200": { description: process is up }
   /readyz:
     get:
-      summary: Readiness (store reachable)
+      summary: Readiness (store, signing key, mode)
       responses:
         "200": { description: ready }
-        "503": { description: store unavailable }
+        "503": { description: store or signing key not ready }
   /v1/sessions:
     post:
       summary: Exchange a customer assertion for a Bruiser session
@@ -30,12 +30,24 @@ paths:
       security: [{ bearerAuth: [] }]
       responses:
         "201": { description: GRANTED }
-        "200": { description: ALREADY_HELD }
+        "200": { description: ALREADY_HELD (same principal; TTL extended) }
+        "202": { description: QUEUED (bounded intra-customer wait) }
         "409": { description: BUSY }
         "503": { description: store unavailable }
   /v1/executions/{id}/renew:
     post:
-      summary: Renew an execution lease
+      summary: Renew an execution lease (heartbeat)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: renewed }
+        "410": { description: gone }
+  /v1/executions/{id}/heartbeat:
+    post:
+      summary: Heartbeat alias of renew
       parameters:
         - in: path
           name: id
@@ -46,14 +58,48 @@ paths:
         "410": { description: gone }
   /v1/executions/{id}/release:
     post:
-      summary: Release an execution lease
+      summary: Release an execution lease (or leave the intra-customer queue)
       parameters:
         - in: path
           name: id
           required: true
           schema: { type: string }
       responses:
-        "200": { description: released }
+        "200": { description: released or dequeued }
+  /v1/executions/{id}/leave:
+    post:
+      summary: Leave the intra-customer queue (alias of release on a waiter)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: dequeued }
+  /v1/executions/{id}/handoff:
+    post:
+      summary: Transfer an execution (cooperative or preemptive)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "201": { description: successor granted }
+        "403": { description: cannot preempt }
+        "410": { description: gone }
+  /v1/executions/{id}/revoke:
+    post:
+      summary: End an execution (holder or higher-precedence principal)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: revoked }
+        "403": { description: cannot preempt }
+        "410": { description: gone }
   /v1/executions/{id}:
     get:
       summary: Execution status
@@ -97,10 +143,70 @@ paths:
           schema: { type: string }
       responses:
         "200": { description: ALLOW }
+        "202": { description: QUEUED }
         "401": { description: missing or invalid merchant session }
         "403": { description: unrouted or DENIED }
         "409": { description: BUSY }
         "503": { description: store unavailable }
+  /v1/policy:
+    get:
+      summary: Active policy (admin)
+      responses:
+        "200": { description: version and yaml }
+        "401": { description: bad admin secret }
+    put:
+      summary: Activate a new policy version
+      responses:
+        "200": { description: compiled and active }
+        "400": { description: invalid policy }
+        "401": { description: bad admin secret }
+  /v1/authority-check:
+    get:
+      summary: Last Authority Check report
+      responses:
+        "200": { description: last AUTHORITY_CHECK audit }
+        "401": { description: bad admin secret }
+    post:
+      summary: Run Authority Check and persist AUTHORITY_CHECK
+      responses:
+        "200": { description: PASS }
+        "409": { description: FAIL }
+        "401": { description: bad admin secret }
+  /v1/admin/status:
+    get:
+      summary: Operator status (EAF, usage, executions, last check)
+      responses:
+        "200": { description: status }
+  /v1/admin/export:
+    get:
+      summary: Audit export as JSONL
+      responses:
+        "200": { description: ndjson }
+  /v1/admin/controls:
+    get:
+      summary: Emergency controls (mode, enforcement, queue)
+      responses:
+        "200": { description: current controls }
+    put:
+      summary: Patch emergency controls (audited CONTROL_CHANGED)
+      responses:
+        "200": { description: saved }
+  /v1/admin/dry-run:
+    get:
+      summary: What Bruiser would have stopped (24h WOULD_* + EAF)
+      responses:
+        "200": { description: dry-run report }
+  /v1/admin/ramp:
+    get:
+      summary: Progressive enforcement report (observed vs enforced)
+      responses:
+        "200": { description: ramp report }
+  /v1/introspect:
+    post:
+      summary: Verify an execution token (Embedded)
+      responses:
+        "200": { description: claims + active }
+        "401": { description: invalid token }
   /.well-known/bruiser/jwks.json:
     get:
       summary: Execution-token public keys

@@ -32,7 +32,7 @@ func Connect(ctx context.Context, url string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse database url: %w", err)
 	}
-	cfg.MaxConns = 8
+	cfg.MaxConns = 16
 	cfg.MinConns = 0
 	cfg.MaxConnIdleTime = 5 * time.Minute
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
@@ -76,6 +76,17 @@ func Migrate(ctx context.Context, url string) error {
 func migrateDB(ctx context.Context, db *sql.DB) error {
 	migrateMu.Lock()
 	defer migrateMu.Unlock()
+	lock, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if _, err := lock.ExecContext(ctx, `select pg_advisory_lock(872514001)`); err != nil {
+		return fmt.Errorf("migration lock: %w", err)
+	}
+	defer func() {
+		_, _ = lock.ExecContext(context.Background(), `select pg_advisory_unlock(872514001)`)
+	}()
 	if _, err := db.ExecContext(ctx, `
 		create table if not exists schema_migrations (
 			filename text primary key,
@@ -152,7 +163,7 @@ func wrapStore(err error) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, lease.ErrNotFound) || errors.Is(err, lease.ErrNotHolder) || errors.Is(err, lease.ErrGone) || errors.Is(err, lease.ErrInvalidInput) {
+	if errors.Is(err, lease.ErrNotFound) || errors.Is(err, lease.ErrNotHolder) || errors.Is(err, lease.ErrGone) || errors.Is(err, lease.ErrInvalidInput) || errors.Is(err, lease.ErrPrecedence) || errors.Is(err, lease.ErrForbidden) {
 		return err
 	}
 	var gone *lease.GoneError
@@ -168,19 +179,28 @@ func wrapStore(err error) error {
 type auditRow struct {
 	typ, customerID, principalType, principalID, domainKey, executionID, ruleName, reason, requestID string
 	fence                                                                                            *int64
+	attrs                                                                                            []byte
 }
 
 func insertAudit(ctx context.Context, tx pgx.Tx, merchantID string, a auditRow) error {
 	_, err := tx.Exec(ctx, `
 		insert into audit_events (
 			merchant_id, type, customer_id, principal_type, principal_id,
-			domain_key, execution_id, fence, rule_name, reason, request_id
-		) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+			domain_key, execution_id, fence, rule_name, reason, request_id, attrs
+		) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
 		merchantID, a.typ, nullIfEmpty(a.customerID), nullIfEmpty(a.principalType),
 		nullIfEmpty(a.principalID), nullIfEmpty(a.domainKey), nullIfEmpty(a.executionID),
 		a.fence, nullIfEmpty(a.ruleName), nullIfEmpty(a.reason), nullIfEmpty(a.requestID),
+		attrsOrEmpty(a.attrs),
 	)
 	return err
+}
+
+func attrsOrEmpty(raw []byte) []byte {
+	if len(raw) == 0 {
+		return []byte("{}")
+	}
+	return raw
 }
 
 func nullIfEmpty(s string) any {

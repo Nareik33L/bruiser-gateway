@@ -25,9 +25,11 @@ func TestIsActiveDerivedExpiry(t *testing.T) {
 }
 
 func TestDomainKey(t *testing.T) {
-	got := DomainKey("arsenal", "purchase-per-event", "cust_alice", "event:ars-che")
 	want := "arsenal/purchase-per-event/customer=cust_alice/resource=event:ars-che"
-	if got != want {
-		t.Fatalf("got %q want %q", got, want)
+	for _, res := range []string{"event:ars-che", "EVENT:ARS-CHE/", "event:ars-che.", "event:ars–che"} {
+		got := DomainKey("arsenal", "purchase-per-event", "cust_alice", res)
+		if got != want {
+			t.Fatalf("%q got %q want %q", res, got, want)
+		}
 	}
 }

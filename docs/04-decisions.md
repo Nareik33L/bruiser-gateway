@@ -301,29 +301,249 @@ remains useful for clubs that look like a simpler version of the same model.
 **Revisit when.** First Stage A questionnaire comes back; replace or fork the
 profile rather than silently drifting.
 
-## ADR-023 — Harchester United is a reference Edge deployment, not product code
+## ADR-023 — Heartbeat renewal and reconnect recovery
+
+**Decision.** An ACTIVE execution is kept alive by a lightweight heartbeat every
+20–30 seconds (default 25 s). Each heartbeat is `POST /v1/executions/{id}/renew`
+(alias `POST /v1/executions/{id}/heartbeat`) and sets
+`expires_at = least(now()+ttl, max_lifetime_at)`. Default lease TTL is 60 seconds.
+If heartbeats stop, the lease expires and is released automatically.
+
+The same principal re-acquiring before expiry is a resume, not a new grant:
+ALREADY_HELD extends the TTL, increments `renew_count`, rebinds `session_id`, and
+audits `EXECUTION_RENEWED` with reason `resume`. A reconnect after expiry may
+acquire a new execution under merchant policy.
+
+On Edge and Proxy, a Bruiser-unaware client does not speak the protocol: the same
+cookie presenting again is the heartbeat.
+
+**Why.** Acquire / renew / release / expire / revoke / handoff named the
+lifecycle but did not say *how* renewal happens. Without an explicit heartbeat,
+a closed tab either holds the domain until max lifetime or a refresh looks like a
+second competing principal. Recovery is an acceptance criterion: brief disconnects
+must not lock the customer out, and abandoned tabs must not hold the domain.
+
+**Consequences.** Holder checks accept the original session *or* a new session
+bound to the same principal. Clients receive `heartbeat_after_ms` on ACTIVE
+execution responses. `BRUISER_HEARTBEAT_INTERVAL` (default 25 s) is independent of
+`BRUISER_LEASE_TTL` (default 60 s).
+
+**Revisit when.** A design partner needs a different default TTL (for example a
+longer basket hold) or wants heartbeats tied to inventory-hold keepalives rather
+than the execution lease.
+
+## ADR-024 — Default precedence is browser over agent
+
+**Decision.** Until the M4 policy engine exposes a per-rule `precedence` list,
+handoff and customer-revoke use a fixed rank: `browser` outranks `agent`. A
+higher rank may preempt (take control) or revoke. Equal ranks cannot preempt;
+they need a cooperative handoff (holder → named principal). Agents cannot take
+control from a browser.
+
+**Why.** The product guarantee is that the execution belongs to the customer.
+"Alice clicks Take control" must work without waiting for YAML policy. The
+default matches the brief (§7) and keeps fencing meaningful: the successor is a
+new grant with `fence+1`, so the agent's still-unexpired token is stale
+downstream.
+
+**Consequences.** BUSY includes `can_preempt` from this rank function.
+`POST /v1/executions/{id}/handoff` and `/revoke` are in protocol v0. Custom
+precedence lists remain M4.
+
+**Revisit when.** M4 ships; merchants who need agent-to-agent preemption or
+membership-tier ranks configure them in policy.
+
+## ADR-025 — V1 policy is first-match YAML, compiled, versioned
+
+**Decision.** Scarcity domains are a YAML document (design §7). The compiler
+produces an immutable snapshot; evaluation is first-match, top-down. Scope
+dimensions are `customer`, `resource`, `resource_pool`, `principal_type`, and
+`anchor:<name>`. Missing anchors deny or fall through per rule. `control: none`
+skips the lease. Fallback is `deny` or `allow-uncontrolled`. Policy versions
+live in Postgres; `PUT /v1/policy` activates a new version for *new* acquires
+only. `bruiser policy validate` checks a file against the compiler (JSON Schema
+in `protocol/policy.schema.json` is documentation of the same shape).
+
+**Why.** The M1 hard-coded `customer+resource` / `max_active: 1` rule cannot
+express household caps or live `max_active` changes. First-match keeps "why was
+this denied?" a single `rule_name`. Existing executions keep the domain key and
+terms they were granted under.
+
+**Consequences.** Acquire, authorize, handoff and BUSY `can_preempt` read the
+active compiled snapshot. A busy-cache occupancy count allows `max_active > 1`
+without treating the domain as full after the first grant. Cross-node NOTIFY
+reload is still M4 leftover; a PUT on one process updates that process immediately.
+
+**Revisit when.** A design partner needs overlapping rules (V2) or must push
+policy to every gateway in under a second.
+
+## ADR-026 — Policy fan-out is LISTEN/NOTIFY plus a one-second poll
+
+**Decision.** `PUT /v1/policy` writes the version, then `NOTIFY bruiser_policy`
+with the merchant id. Every gateway process `LISTEN`s and also polls
+`ActivePolicy` once a second. On a newer version it recompiles and resets the
+busy cache. Existing executions keep granted terms.
+
+**Why.** A PUT on one process must not leave the other nodes enforcing a stale
+`max_active`. NOTIFY is the fast path; the poll covers a missed notification
+(classic LISTEN race after subscribe).
+
+**Consequences.** `Server.Start` owns the listener. Tests that need cross-node
+reload call `Start`. A spurious extra compile is harmless.
+
+**Revisit when.** Gateways must converge in well under a second at very large
+fleet size, or NOTIFY drop rate shows up in torture.
+
+## ADR-027 — Bruiser plugs into an existing path; unmatched traffic fails open
+
+**Decision.** A merchant profile lists allocation routes and how to *read*
+the customer they already have (cookie JWT, bearer JWT, or a header). Routes
+not listed pass through (`unmatched: allow`). Allocation routes fail closed.
+Bruiser does not wait on a partner-specific admission-path project and does
+not require clients to speak the protocol.
+
+**Why.** Clubs already have a box office, a session, and an edge. The product
+is the control layer between those and scarce inventory. Forcing a new
+admission API, or 403ing every unlisted path, makes Proxy/Edge unusable as a
+drop-in.
+
+**Consequences.** `identity.extractor: auto|cookie-jwt|bearer-jwt|header`.
+`bruiser profile validate` / `profile init`. Edge forwards `X-Customer-Id` /
+`X-User-Id`. Discovery questionnaire remains a sales tool, not an engineering
+gate.
+
+**Revisit when.** A merchant's session is opaque with no header/JWT/introspection
+path at all — then Embedded or an edge transform is required.
+
+## ADR-028 — v2.4 product instructions are binding
+
+**Decision.** [00-product-instructions.md](00-product-instructions.md) is the
+product. Self-hosted, merchant-owned identity and data, telemetry off,
+configure-don’t-customise, Community/Core/Enterprise naming, football as the
+wedge not the product, discovery in parallel not as a build gate.
+
+**Why.** The north-star is whether a merchant can put Bruiser in front of an
+existing scarce-inventory system without handing customer data or
+infrastructure to the vendor.
+
+**Consequences.** Default heartbeat 20 s. Extractors include introspection and
+edge-signed headers. Helm and a Cloudflare Worker are first-class placements.
+No vendor telemetry unless `BRUISER_TELEMETRY=1`.
+
+**Revisit when.** Counsel signs BSL parameters, or a design partner proves a
+fourth placement is required.
+
+## ADR-029 — Optional bounded intra-customer queue
+
+**Decision.** The queue is a **customer-concurrency** mechanism, not a
+waiting room. Invariant:
+
+> One customer can have one active execution (or `max_active`) on a scarcity
+> domain. Additional agents of *that same customer* become waiters. When the
+> execution ends, the next permitted execution of that customer can proceed.
+
+Default remains BUSY. When a rule sets `waiting.mode: bounded` and
+`max_waiters: N`, further agents of the **same customer / same domain** are
+QUEUED (HTTP 202) up to N, then BUSY. Release, revoke, and expiry promote the
+oldest waiter of that domain to a fenced GRANT. Same principal already waiting
+is idempotent. A second customer on the same resource is a **different
+domain** and is granted independently.
+
+Inter-customer waiting rooms (Queue-it, Cloudflare Waiting Room, lotteries)
+stay out of scope. Bruiser must not order Alice behind Bob. The busy cache
+does not answer locally when `MaxWaiters > 0`.
+
+**Why.** v2.4 asks for optional coalescing so 10,000 agents of one customer do
+not independently retry origin. That is still “one customer remains one
+customer.” Becoming a public waiting-room product muddies the proposition
+(ADR-006).
+
+**Consequences.** Waiter rows live in Postgres, serialised on the domain lock
+(domain key already includes `customer=`). Promote uses the waiter id as the
+execution id so watch/GET keep working. Overflow is still BUSY.
+
+**Revisit when.** Merchants need fair inter-customer queues (explicitly a
+product decision, not a technical one) or durable wait longer than
+`max_lifetime`.
+
+## ADR-030 — Post-core ops: dry-run, doctor, emergency controls
+
+**Decision.** Transparent dry-run, `bruiser doctor` / `config validate`,
+expanded `/readyz`, and auditable emergency controls are **supporting**
+capabilities. They must not change the product (one customer remains one
+customer) or delay outbound. Dry-run uses the **same** production path and
+the **same** policies as enforce. It never blocks, queues, or revokes.
+Hypothetical occupancy lives in `dry_run_holds` so Alice’s second agent is
+`WOULD_QUEUE` while Bob on the same resource is `WOULD_ALLOW`. The
+intra-customer queue invariant (ADR-029) holds in dry-run.
+
+Enforcement OFF is fail-open pass-through (`X-Bruiser-Control: bypass`).
+Allocation still **fails closed** on store unavailability unless the
+operator explicitly sets `fail_closed: false` — an unhealthy node must not
+create uncontrolled concurrent allocation by accident. Every control change
+is `CONTROL_CHANGED`.
+
+Install → Dry Run → Observe → Tune → Enforce. Same placement (Embedded /
+Edge / Proxy). No merchant architecture change between modes.
+
+**Why.** Clubs will not flip enforcement on without seeing what Bruiser
+would have done on real traffic, and operators need a kill switch that is
+faster than a redeploy.
+
+**Consequences.** New tables (`runtime_controls`, `dry_run_holds`,
+`dry_run_events`). Admin: `GET/PUT /v1/admin/controls`, drain, revoke-all,
+`GET /v1/admin/dry-run`. Doctor is PASS/WARN/FAIL. Upgrade/rollback and
+backup/restore stay merchant-Postgres procedures ([ops.md](ops.md)).
+
+**Revisit when.** A merchant needs shadow decisions written into the real
+lease table (rejected: pollutes enforcement) or a hosted dry-run SaaS
+(rejected: contradicts self-hosted).
+
+## ADR-031 — Progressive enforcement is a percent of the same path
+
+**Decision.** Active enforcement is a merchant-configured **0–100%** of
+eligible customers. Observation, evaluation and recording stay at **100%**
+at every level. 0% is dry-run. Assignment is a stable hash of
+`customer_id` (plus optional salt) so a customer’s agents do not flip
+between enforced and unenforced behaviour. Scope (event, route, pool,
+cohort, environment, policy) limits who is eligible; everyone else is
+still observed.
+
+The same admit/acquire path and policy engine run for every request.
+Unenforced customers get `ShadowDecide` + `WOULD_*`. Enforced customers
+get a real lease and an `enforced=true` decision row. Emergency 0% is
+the kill switch for *active* enforcement, not a silent bypass.
+
+**Why.** “Don’t trust us. Start at 10%.” Clubs will not hand Bruiser 100%
+authority on day one. A separate simulator would diverge from production.
+
+**Consequences.** `enforce_percent` / `scope` on `runtime_controls` (admin
+`PUT`, no redeploy). Dashboard splits observed / evaluated / enforced /
+hypothetical. `CONTROL_CHANGED` includes the percent.
+
+**Revisit when.** A merchant needs request-level (not customer-level)
+bucketing — that would violate the customer-as-unit invariant.
+
+## ADR-032 — Harchester United is a reference Edge deployment, not product code
 
 **Decision.** The Harchester United / SimTix demonstration environment lives
 under `demos/` in this repository. Demo packages must not import `internal/`.
 They talk to the gateway over HTTP (`POST /v1/authorize`, `GET /metrics`,
 operator endpoints). Operator endpoints (`/v1/operator/*`, gated by
-`BRUISER_OPERATOR_SECRET`) are the first slice of M7: they revoke live
-executions through the store (so the busy cache forgets), list active
-executions and audit, and reset in-process EAF accumulators. They never delete
-`audit_events`. Demo supporter passwords are plaintext by design, in a
-separate `harchester` database, and must never be copied into production
-schema.
+`BRUISER_OPERATOR_SECRET`) revoke live executions through the store (so the
+busy cache forgets), list active executions and audit, and reset in-process
+EAF accumulators. They never delete `audit_events`. Demo supporter passwords
+are plaintext by design, in a separate `harchester` database, and must never
+be copied into production schema.
 
 **Why.** The demo is a reference Edge deployment of the product, not a mock.
 Keeping demo code out of `internal/` preserves the product/demo boundary the
-sales story depends on (club site and platform do not contain Bruiser). Reset
-has to go through `Revoke` because a SQL delete of `executions` leaves stale
-BUSY answers in the in-memory busy cache for up to the lease TTL.
+sales story depends on.
 
 **Consequences.** `configs/harchester.yaml` is the merchant profile the demo
-gateway loads. Percentage rollout is an Edge setting, not a lease-core policy.
-See `docs/08-harchester-demo-scope.md`.
+gateway loads. Percentage rollout for the Harchester Edge is a demo Edge
+setting. See `docs/08-harchester-demo-scope.md`.
 
-**Revisit when.** M7 admin UI lands and subsumes the operator endpoints, or a
-design partner replaces Harchester as the standing demo merchant.
+**Revisit when.** A design partner replaces Harchester as the standing demo
+merchant.
 

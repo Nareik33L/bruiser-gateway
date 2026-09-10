@@ -1,0 +1,6 @@
+apiVersion: v2
+name: bruiser-gateway
+description: Merchant-controlled execution control layer (self-hosted).
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

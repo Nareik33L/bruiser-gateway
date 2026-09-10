@@ -28,6 +28,9 @@ services:
     environment:
       BRUISER_DATABASE_URL: postgres://bruiser:bruiser@postgres:5432/bruiser?sslmode=disable
       BRUISER_HTTP_ADDR: ":8080"
+      BRUISER_ENV: lab
+      BRUISER_ADMIN_ADDR: "127.0.0.1:8082"
+      BRUISER_ADMIN_SECRET: admin-secret-dev
       BRUISER_DEV_HMAC_SECRET: dev-secret-change-me
       BRUISER_MERCHANT_ID: harchester
       BRUISER_MERCHANT_NAME: Harchester United FC

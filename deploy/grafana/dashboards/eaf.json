@@ -1,0 +1,68 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Observed EAF",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "bruiser_observed_eaf",
+          "legendFormat": "{{resource}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "decimals": 0 }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Downstream EAF",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "bruiser_downstream_eaf",
+          "legendFormat": "{{resource}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Allocation attempts",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "rate(bruiser_allocation_attempts_total[1m])",
+          "legendFormat": "{{resource}} {{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Intra-customer queue depth",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "targets": [
+        {
+          "expr": "bruiser_queue_depth",
+          "legendFormat": "{{merchant}}"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 38,
+  "tags": ["bruiser", "eaf"],
+  "templating": { "list": [] },
+  "time": { "from": "now-15m", "to": "now" },
+  "title": "Bruiser EAF",
+  "uid": "bruiser-eaf"
+}
