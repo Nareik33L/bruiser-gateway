@@ -8,7 +8,7 @@ DDoS.
 ## Before the room
 
 - [ ] `make demo-up-local` (or Compose) is healthy: club `:8100`, tickets `:8091`, admin `:8110`.
-- [ ] Admin password `harchester`. Enforcement **100 %**. Control is Off · Dry Run · 10/25/50/75/100 % — percent is **per-customer rollout**, not “X% of the swarm.”
+- [ ] Admin password `harchester`. Enforcement **100 %**. Control is Off · Dry Run · 10/25/50/75/100 % — percent is **per-customer rollout**, not “X% of the swarm.” Off lifts Bruiser **and** the SimTix per-account cap.
 - [ ] **Reset demo** so Scenario 1 starts clean. Confirm the toast: seats remaining + executions cleared.
 - [ ] Browser windows: club (supporter), admin (operator). Do not show the gateway port.
 - [ ] Confirm club home has no Bruiser branding.
@@ -30,11 +30,11 @@ DDoS.
 
 ## Scenario Off — burn seats (~2 min)
 
-- [ ] **Reset demo** (toast confirms seats/executions cleared).
-- [ ] Enforcement **Off**. Preset **10 × N** (membership box hidden). Launch.
-- [ ] Watch **Seats remaining** drop and **Orders** rise. Feed shows ten distinct membership IDs completing `order`.
-- [ ] Origin 409 is capacity/limit, not Bruiser BUSY. Per-account cap is 4 (~40 orders from 10 customers). For a sell-out, Reset → Off → **1,000 × 10**.
-- [ ] **Reset** and set **100 %** before the next scenario.
+- [ ] **Reset demo** (toast confirms seats/executions cleared; feed empty).
+- [ ] Enforcement **Off**. Preset **Single supporter**, N = 200. Launch.
+- [ ] Watch **Seats remaining** drop well past 4 and **Orders** rise toward inventory. Off lifts Bruiser hold-back **and** the SimTix per-account cap.
+- [ ] Origin 409 is sold out, not Bruiser BUSY.
+- [ ] **Reset** and set **100 %** before the next scenario (cap 4 + one execution).
 
 ## Scenario 10×N enforce (~2 min)
 

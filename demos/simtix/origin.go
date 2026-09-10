@@ -41,6 +41,8 @@ type origin struct {
 	orders map[string]order
 	log    []reqLog
 	seq    int
+	// perAccountLimit is tickets per membership (0 = unlimited). Default 4.
+	perAccountLimit int
 }
 
 type liveEvent struct {
@@ -89,9 +91,10 @@ func newOrigin(cfg originConfig) *origin {
 				MaxIdleConnsPerHost: 256,
 			},
 		},
-		events: map[string]*liveEvent{},
-		holds:  map[string]hold{},
-		orders: map[string]order{},
+		events:          map[string]*liveEvent{},
+		holds:           map[string]hold{},
+		orders:          map[string]order{},
+		perAccountLimit: seed.PerAccountLimit,
 	}
 	for _, ev := range seed.Events(cfg.Opponent) {
 		le := &liveEvent{Event: ev, Blocks: seed.Blocks(ev.ID)}
@@ -128,6 +131,8 @@ func (o *origin) handler() http.Handler {
 
 	r.Get("/_admin/stats", o.adminStats)
 	r.Post("/_admin/reset", o.adminReset)
+	r.Get("/_admin/per-account-cap", o.adminGetCap)
+	r.Put("/_admin/per-account-cap", o.adminPutCap)
 	r.Post("/_admin/clear-logs", o.adminClearLogs)
 	r.Get("/_internal/orders", o.internalOrders)
 	return r
@@ -243,7 +248,7 @@ func (o *origin) createHold(w http.ResponseWriter, r *http.Request) {
 				held += ord.Seats
 			}
 		}
-		if held+body.Seats > seed.PerAccountLimit {
+		if accountCapExceeded(o.perAccountLimit, held, body.Seats) {
 			shared.WriteErr(w, http.StatusConflict, "per-account limit")
 			return
 		}
@@ -335,6 +340,44 @@ func (o *origin) adminAuth(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// accountCapExceeded reports whether held+seats would exceed limit.
+// limit <= 0 means unlimited (Off mode lifts the SimTix per-membership cap).
+func accountCapExceeded(limit, held, seats int) bool {
+	if limit <= 0 {
+		return false
+	}
+	return held+seats > limit
+}
+
+func (o *origin) adminGetCap(w http.ResponseWriter, r *http.Request) {
+	if !o.adminAuth(w, r) {
+		return
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	shared.WriteJSON(w, http.StatusOK, map[string]any{"limit": o.perAccountLimit})
+}
+
+func (o *origin) adminPutCap(w http.ResponseWriter, r *http.Request) {
+	if !o.adminAuth(w, r) {
+		return
+	}
+	var body struct {
+		Limit int `json:"limit"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		shared.WriteErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if body.Limit < 0 {
+		body.Limit = 0
+	}
+	o.mu.Lock()
+	o.perAccountLimit = body.Limit
+	o.mu.Unlock()
+	shared.WriteJSON(w, http.StatusOK, map[string]any{"limit": body.Limit})
+}
+
 func (o *origin) adminStats(w http.ResponseWriter, r *http.Request) {
 	if !o.adminAuth(w, r) {
 		return
@@ -347,6 +390,7 @@ func (o *origin) adminStats(w http.ResponseWriter, r *http.Request) {
 		"event_id": ev.ID, "name": ev.Name, "seats": ev.Seats,
 		"held": ev.Held, "sold": ev.Sold, "available": ev.Available(),
 		"holds": len(o.holds), "orders": len(o.orders), "request_log": len(o.log),
+		"per_account_limit": o.perAccountLimit,
 	})
 }
 

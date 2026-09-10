@@ -14,12 +14,9 @@ executions cleared.
 Enforcement control stays **Off · Dry Run · 10 / 25 / 50 / 75 / 100 %**.
 Percent is **per-customer rollout** (stable hash: some customers fully
 enforced, others dry-run), not “let through X% of an agent swarm.” Off
-skips Bruiser. Dry Run observes and forwards. 100% is one allow per
-customer, rest BUSY.
-
-SimTix origin still applies a **per-account limit of 4** tickets. Off does
-not lift that origin rule; it only stops Bruiser from holding extra agents
-at BUSY.
+skips Bruiser **and** lifts the SimTix per-account cap (0 = unlimited) so
+one membership can fill the stand. Dry Run keeps the origin cap at 4.
+100% restores cap 4 and one allow per customer.
 
 ## Scenario 1 — Normal purchase (~2 min)
 
@@ -41,21 +38,18 @@ and `busy` for the rest. Path is club → Edge hold/order.
 
 ## Scenario Off — burn seats (no guardrails, ~2 min)
 
-Reset demo → enforcement **Off** → Agent Lab **10 × N** (N = 50 or 200).
+Reset demo → enforcement **Off** → Agent Lab **Single supporter**
+(N = 200). Bruiser is not asked. The SimTix per-account cap is lifted, so
+agents that reach origin complete holds **and orders** until the stand
+sells out (500 seats).
 
-The membership box is hidden: ten seeded eligible IDs (Alice `1001234` plus
-nine others) each send N agents. Bruiser is not asked. Agents that reach
-origin complete holds **and orders** until that account hits the 4-ticket
-cap or the stand sells out.
+Expect: **Seats remaining drops well past 4**, **Orders rise** toward
+inventory (not stuck at the old 4-ticket cap). Origin 409 is **sold out**,
+not Bruiser BUSY. Live feed shows `order` rows for membership `1001234`.
 
-Expect: **Seats remaining drops**, **Orders rise** (about 40 checkouts from
-10×4). Origin 409 (limit / sold out) is **denied**, not Bruiser BUSY. Live
-feed shows distinct membership IDs and `order` rows.
-
-To empty the stand (500 seats), Reset then Off then **1,000 × 10**. Do not
-use Single + Off if you want a visible burn (one customer still caps at 4).
-
-Reset and switch enforcement back to **100 %** before the next beat.
+**10 × N** Off still works and burns faster (ten memberships, no cap).
+Reset and switch enforcement back to **100 %** before the next beat
+(that restores origin cap 4 and Bruiser one-execution).
 
 ## Scenario 10×N enforce (~2 min)
 

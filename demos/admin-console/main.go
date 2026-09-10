@@ -156,12 +156,20 @@ func (c *console) getJSON(url string, headers map[string]string) any {
 }
 
 func (c *console) post(url string, headers map[string]string, body any) map[string]any {
+	return c.call(http.MethodPost, url, headers, body)
+}
+
+func (c *console) put(url string, headers map[string]string, body any) map[string]any {
+	return c.call(http.MethodPut, url, headers, body)
+}
+
+func (c *console) call(method, url string, headers map[string]string, body any) map[string]any {
 	var rdr io.Reader
 	if body != nil {
 		b, _ := json.Marshal(body)
 		rdr = bytes.NewReader(b)
 	}
-	req, _ := http.NewRequest(http.MethodPost, url, rdr)
+	req, _ := http.NewRequest(method, url, rdr)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -212,7 +220,13 @@ func (c *console) enforcement(w http.ResponseWriter, r *http.Request) {
 		Percent int    `json:"percent"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
-	c.post(c.simtixEdge+"/_edge/config", map[string]string{"X-Demo-Admin-Secret": c.adminSecret}, body)
+	h := map[string]string{"X-Demo-Admin-Secret": c.adminSecret}
+	c.post(c.simtixEdge+"/_edge/config", h, body)
+	cap := seed.PerAccountLimit
+	if body.Mode == "off" {
+		cap = 0
+	}
+	c.put(c.simtixOrigin+"/_admin/per-account-cap", h, map[string]int{"limit": cap})
 	shared.WriteJSON(w, http.StatusOK, body)
 }
 
@@ -323,7 +337,7 @@ const dashboardHTML = `
   <button onclick="runCheck()">Run Authority Check</button>
   <button onclick="loadAudit()">Refresh audit</button>
 </div>
-<p class="hint" id="enfHint">Percent is <strong>per-customer rollout</strong> (some customers fully enforced, others dry-run) — not “let through X% of an agent swarm.”</p>
+<p class="hint" id="enfHint">Percent is <strong>per-customer rollout</strong> (some customers fully enforced, others dry-run) — not “let through X% of an agent swarm.” Off skips Bruiser <em>and</em> lifts the SimTix per-account cap so one membership can fill the stand. Dry Run keeps the origin cap at 4. 100% restores cap 4 and one allow per customer.</p>
 <h2>Agent Lab</h2>
 <div class="row">
   <label class="mem-field" id="memWrap">Membership <input id="mem" value="1001234" placeholder="Membership"></label>

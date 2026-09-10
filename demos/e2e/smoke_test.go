@@ -172,6 +172,43 @@ func TestDemoOffBurnsSeats(t *testing.T) {
 	}
 }
 
+func TestDemoOffSingleBurnsPastAccountCap(t *testing.T) {
+	requireStack(t)
+	n := 80
+	if os.Getenv("DEMO_E2E_QUICK") != "" {
+		n = 25
+	}
+	resetDemo(t)
+	setEdge(t, "off", 0)
+	t.Cleanup(func() { setEdge(t, "enforce", 100) })
+	before := simtixStats(t)
+	summary := runSwarm(t, map[string]any{
+		"membership_number": "1001234",
+		"password":          "password",
+		"agents":            n,
+		"spawn_per_s":       n,
+		"retry_window_sec":  8,
+		"preset":            "single",
+	}, time.Duration(n/4+40)*time.Second)
+	after := simtixStats(t)
+	orders := asInt(summary["orders"])
+	if orders <= 4 {
+		t.Fatalf("Off must lift origin per-account cap of 4; orders=%v summary=%v", orders, summary)
+	}
+	if orders < n/2 {
+		t.Fatalf("Off single swarm should fill well past 4 tickets, orders=%v agents=%d summary=%v", orders, n, summary)
+	}
+	if asInt(after["sold"]) <= 4 {
+		t.Fatalf("sold stuck at per-account cap: before=%v after=%v", before, after)
+	}
+	if asInt(after["available"]) >= asInt(before["available"])-4 {
+		t.Fatalf("seats should drop by more than 4: before=%v after=%v", before["available"], after["available"])
+	}
+	if asInt(summary["busy"]) != 0 {
+		t.Fatalf("Off must not report Bruiser BUSY: busy=%v", summary["busy"])
+	}
+}
+
 func TestDemoResetClearsFeed(t *testing.T) {
 	requireStack(t)
 	resetDemo(t)
@@ -279,6 +316,29 @@ func setEdge(t *testing.T, mode string, percent int) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("edge config %d", resp.StatusCode)
+	}
+	cap := 4
+	if mode == "off" {
+		cap = 0
+	}
+	setOriginCap(t, cap)
+}
+
+func setOriginCap(t *testing.T, limit int) {
+	t.Helper()
+	origin := getenv("SIMTIX_ORIGIN_URL", "http://127.0.0.1:8090")
+	body, _ := json.Marshal(map[string]int{"limit": limit})
+	req, _ := http.NewRequest(http.MethodPut, origin+"/_admin/per-account-cap", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Demo-Admin-Secret", getenv("DEMO_ADMIN_SECRET", "demo-admin-dev"))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("origin cap %d", resp.StatusCode)
 	}
 }
 
