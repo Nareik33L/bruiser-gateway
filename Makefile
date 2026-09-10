@@ -69,7 +69,7 @@ demo-up-local: demo-build
 	bash scripts/demo-up-local.sh
 
 demo-e2e:
-	DEMO_E2E=1 BRUISER_TEST_DATABASE_URL="$(TEST_DATABASE_URL)" $(GO) test ./demos/e2e -count=1 -timeout 180s
+	DEMO_E2E=1 BRUISER_BIN="$(CURDIR)/bin/bruiser" BRUISER_TEST_DATABASE_URL="$(TEST_DATABASE_URL)" $(GO) test ./demos/e2e -count=1 -timeout 180s
 
 demo-down-local:
 	bash scripts/demo-down-local.sh

@@ -69,7 +69,7 @@ jobs:
       - name: Demo e2e (200-agent single + 50×4 multi)
         env:
           DEMO_E2E: "1"
-          BRUISER_BIN: bin/bruiser
+          BRUISER_BIN: ${{ github.workspace }}/bin/bruiser
         run: make demo-e2e
       - name: Stop demo
         if: always()

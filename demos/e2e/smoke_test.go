@@ -86,7 +86,18 @@ func TestDemoMultiSupporterSwarm(t *testing.T) {
 
 func TestAuthorityCheckCertificate(t *testing.T) {
 	requireStack(t)
-	bin := getenv("BRUISER_BIN", "bin/bruiser")
+	bin := getenv("BRUISER_BIN", "")
+	if bin == "" {
+		for _, c := range []string{"bin/bruiser", "../bin/bruiser", "../../bin/bruiser"} {
+			if _, err := os.Stat(c); err == nil {
+				bin = c
+				break
+			}
+		}
+	}
+	if bin == "" {
+		bin = "bin/bruiser"
+	}
 	cmd := exec.Command(bin, "authority-check",
 		"--edge", getenv("SIMTIX_EDGE_URL", "http://127.0.0.1:8091"),
 		"--origin", getenv("SIMTIX_ORIGIN_URL", "http://127.0.0.1:8090"),

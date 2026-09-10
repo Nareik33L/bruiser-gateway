@@ -40,7 +40,7 @@ jobs:
         env:
           DEMO_E2E: "1"
           DEMO_E2E_AGENTS: "10000"
-          BRUISER_BIN: bin/bruiser
+          BRUISER_BIN: ${{ github.workspace }}/bin/bruiser
         run: go test ./demos/e2e -count=1 -timeout 20m -run TestDemoSingleSupporterSwarm
       - name: Stop demo
         if: always()
