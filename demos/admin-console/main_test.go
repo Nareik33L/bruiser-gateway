@@ -21,3 +21,22 @@ func TestDashboardPerCustomerLimitControl(t *testing.T) {
 		t.Fatal("percent should stay as advanced, not primary")
 	}
 }
+
+func TestAdminConsoleIvoryRustIdentity(t *testing.T) {
+	css := pageShell("Operations", dashboardHTML)
+	if strings.Contains(css, "#d6ff4a") || strings.Contains(css, "--lime") {
+		t.Fatal("admin console must not use neon lime")
+	}
+	if !strings.Contains(css, "#f3eee4") {
+		t.Fatal("expected warm ivory background")
+	}
+	if !strings.Contains(css, "#1c1917") {
+		t.Fatal("expected charcoal ink")
+	}
+	if !strings.Contains(css, "#b44a32") {
+		t.Fatal("expected rust accent")
+	}
+	if !strings.Contains(css, `class="mark"`) {
+		t.Fatal("expected rust brand mark")
+	}
+}

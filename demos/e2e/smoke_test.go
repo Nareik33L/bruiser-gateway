@@ -238,6 +238,11 @@ func TestDemoResetClearsFeed(t *testing.T) {
 	if asInt(sum["denied"]) != 0 || asInt(sum["authenticated"]) != 0 {
 		t.Fatalf("reset must clear summary, got %v", sum)
 	}
+	club := getenv("HARCHESTER_URL", "http://127.0.0.1:8100")
+	online := getJSON(t, club+"/_admin/online", "X-Demo-Admin-Secret", adminSecret)
+	if asInt(online["customers_online"]) != 0 {
+		t.Fatalf("reset must clear club_sessions, customers_online=%v", online["customers_online"])
+	}
 }
 
 func TestAuthorityCheckCertificate(t *testing.T) {
@@ -298,6 +303,7 @@ func resetDemo(t *testing.T) {
 	reset(t, getenv("BRUISER_URL", "http://127.0.0.1:8080")+"/v1/operator/reset-executions", "X-Bruiser-Operator-Secret", opSecret)
 	reset(t, getenv("SIMTIX_ORIGIN_URL", "http://127.0.0.1:8090")+"/_admin/reset", "X-Demo-Admin-Secret", adminSecret)
 	reset(t, getenv("LOADLAB_URL", "http://127.0.0.1:8120")+"/reset", "X-Demo-Admin-Secret", adminSecret)
+	reset(t, getenv("HARCHESTER_URL", "http://127.0.0.1:8100")+"/_admin/reset-sessions", "X-Demo-Admin-Secret", adminSecret)
 	setEdge(t, "enforce", 100)
 }
 

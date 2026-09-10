@@ -194,6 +194,7 @@ func (c *console) reset(w http.ResponseWriter, _ *http.Request) {
 	sim := c.post(c.simtixOrigin+"/_admin/reset", h, nil)
 	c.post(c.simtixEdge+"/_edge/reset-stats", h, nil)
 	c.post(c.loadlab+"/reset", h, nil)
+	c.post(c.harchester+"/_admin/reset-sessions", h, nil)
 	gw := c.post(c.gateway+"/v1/operator/reset-executions", map[string]string{"X-Bruiser-Operator-Secret": c.operatorSecret}, nil)
 	seats := seed.HeadlineSeats
 	if v, ok := sim["available"].(float64); ok {
@@ -205,7 +206,7 @@ func (c *console) reset(w http.ResponseWriter, _ *http.Request) {
 	if v, ok := gw["revoked"].(float64); ok {
 		revoked = int(v)
 	}
-	msg := fmt.Sprintf("Demo reset: %d seats remaining, executions cleared (%d revoked).", seats, revoked)
+	msg := fmt.Sprintf("Demo reset: %d seats remaining, executions cleared (%d revoked), customers online cleared.", seats, revoked)
 	shared.WriteJSON(w, http.StatusOK, map[string]any{
 		"status":          "reset",
 		"seats_remaining": seats,
@@ -281,47 +282,50 @@ func errString(err error) string {
 func pageShell(title, body string) string {
 	return fmt.Sprintf(`<!doctype html><html><head><meta charset="utf-8"><title>%s · Bruiser</title>
 <style>
-:root{--bg:#0b0d12;--ink:#f4efe4;--muted:#9a9386;--lime:#d6ff4a;--line:rgba(244,239,228,.12)}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:ui-sans-serif,system-ui,sans-serif}
-header{padding:16px 24px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between}
+:root{--bg:#f3eee4;--panel:#fffdf8;--ink:#1c1917;--muted:#6b645c;--rust:#b44a32;--line:rgba(28,25,23,.12);--ok:#2f5d45;--busy:#a15c12;--deny:#9f2d20}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:"Segoe UI",ui-sans-serif,system-ui,sans-serif}
+header{padding:16px 24px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;background:var(--bg)}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:.08em;font-size:13px;text-transform:uppercase}
+.mark{width:28px;height:28px;border-radius:8px;background:var(--rust);color:var(--bg);display:grid;place-items:center;font-size:14px}
+header>span{color:var(--muted);font-size:13px}
 main{width:min(1100px,calc(100%% - 32px));margin:24px auto}
 .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
 @media (max-width:900px){.tiles{grid-template-columns:repeat(2,1fr)}}
-.tile{background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:14px;padding:14px}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
 .tile b{display:block;font-size:1.6rem}
 .tile span{color:var(--muted);font-size:12px}
-.row{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}
-button,select,input{background:#151821;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font:inherit}
-button.primary{background:var(--lime);color:#111;font-weight:800;border:0}
-pre{background:#151821;padding:12px;border-radius:10px;overflow:auto;max-height:320px;font-size:12px}
-.cert{background:#151821;padding:16px;border-radius:12px;border:1px solid var(--line);margin:12px 0}
-.cert.pass{border-color:var(--lime)}
-.cert.fail{border-color:#ff6b4a}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0;align-items:center}
+button,select,input{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font:inherit}
+button.primary,.form button{background:var(--rust);color:var(--bg);font-weight:800;border:0}
+pre{background:var(--panel);padding:12px;border-radius:10px;overflow:auto;max-height:320px;font-size:12px;border:1px solid var(--line)}
+.cert{background:var(--panel);padding:16px;border-radius:12px;border:1px solid var(--line);margin:12px 0}
+.cert.pass{border-color:var(--ok)}
+.cert.fail{border-color:var(--deny)}
 .cert ul{margin:8px 0 0;padding-left:18px}
 .form label{display:block;margin:12px 0}
-h1{font-weight:500}
+h1{font-family:Palatino,Georgia,serif;font-weight:500;letter-spacing:-.02em}
 .hint{color:var(--muted);font-size:13px;margin:0 0 12px}
-.tile.hot{border-color:var(--lime)}
+.tile.hot{border-color:var(--rust)}
 table.feed{width:100%%;border-collapse:collapse;font-size:13px}
 table.feed th,table.feed td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
 table.feed th{color:var(--muted);font-weight:600}
-.st-order{color:var(--lime);font-weight:700}
-.st-allow{color:#9ad4ff}
-.st-busy{color:#ffcc66}
-.st-denied{color:#ff6b4a}
-#toast{position:fixed;right:20px;bottom:20px;background:var(--lime);color:#111;font-weight:700;padding:12px 16px;border-radius:10px;display:none;max-width:420px;z-index:9}
+.st-order{color:var(--ok);font-weight:700}
+.st-allow{color:#215a8c}
+.st-busy{color:var(--busy)}
+.st-denied{color:var(--deny)}
+#toast{position:fixed;right:20px;bottom:20px;background:var(--ink);color:var(--bg);font-weight:700;padding:12px 16px;border-radius:10px;display:none;max-width:420px;z-index:9;border-left:4px solid var(--rust)}
 #toast.show{display:block}
-#resetStatus:not(:empty){color:var(--lime);font-weight:700;margin:0}
+#resetStatus:not(:empty){color:var(--ink);font-weight:700;margin:0}
 .mem-field.hidden{display:none}
 .limit-block{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .limit-label{font-weight:700}
-.seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
-.seg button{border:0;border-radius:0;margin:0}
-.seg button.on{background:var(--lime);color:#111;font-weight:800}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--panel)}
+.seg button{border:0;border-radius:0;margin:0;background:transparent}
+.seg button.on{background:var(--rust);color:var(--bg);font-weight:800}
 details.advanced{margin:0 0 16px;max-width:640px}
 details.advanced summary{cursor:pointer;color:var(--muted);font-size:13px}
 </style></head><body>
-<header><strong>Bruiser</strong><span>Harchester United · operations</span></header>
+<header><span class="brand"><span class="mark">B</span> Bruiser</span><span>Harchester United · operations</span></header>
 <main>%s</main><div id="toast"></div></body></html>`, title, body)
 }
 

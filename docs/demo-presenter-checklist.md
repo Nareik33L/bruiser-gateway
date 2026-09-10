@@ -9,7 +9,7 @@ DDoS.
 
 - [ ] `make demo-up-local` (or Compose) is healthy: club `:8100`, tickets `:8091`, admin `:8110`.
 - [ ] Admin password `harchester`. **Per-customer limit On**. Control is Off · Dry run · On. On = one customer, one execution. Off = no limit.
-- [ ] **Reset demo** so Scenario 1 starts clean. Confirm the toast: seats remaining + executions cleared.
+- [ ] **Reset demo** so Scenario 1 starts clean. Confirm the toast: seats remaining, executions cleared, customers online cleared.
 - [ ] Browser windows: club (supporter), admin (operator). Do not show the gateway port.
 - [ ] Confirm club home has no Bruiser branding.
 

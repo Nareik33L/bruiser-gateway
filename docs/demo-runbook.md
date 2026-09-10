@@ -8,8 +8,8 @@ Start from **Reset demo**, **Per-customer limit On**. Hosted:
 https://club.bruiser-gateway.com · https://tickets.bruiser-gateway.com ·
 https://admin.bruiser-gateway.com (Access: `kiedl33@outlook.com`).
 
-Reset between every scenario. The admin toast confirms seats restored and
-executions cleared.
+Reset between every scenario. The admin toast confirms seats restored,
+executions cleared, and customers online cleared.
 
 **Per-customer limit: Off · Dry run · On** is the presenter control.
 On = one customer, one execution (Enforce 100%). Off = no Bruiser hold-back

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
@@ -49,6 +50,7 @@ func main() {
 		ticketsURL:     ticketsURL,
 		simtixInternal: simtixInternal,
 		opponent:       opponent,
+		adminSecret:    shared.Env("DEMO_ADMIN_SECRET", "demo-admin-dev"),
 		log:            log,
 	}
 	srv := &http.Server{Addr: addr, Handler: s.routes(), ReadHeaderTimeout: 5 * time.Second}
@@ -65,6 +67,7 @@ type server struct {
 	ticketsURL     string
 	simtixInternal string
 	opponent       string
+	adminSecret    string
 	log            *slog.Logger
 }
 
@@ -91,17 +94,41 @@ func (s *server) routes() http.Handler {
 	r.Get("/tickets/hfc-ars", s.pageMatch)
 	r.Get("/tickets/hfc-ars/buy", s.buy)
 	r.Get("/_admin/online", s.online)
+	r.Post("/_admin/reset-sessions", s.resetSessions)
 	return r
 }
 
-func (s *server) online(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("X-Demo-Admin-Secret") != shared.Env("DEMO_ADMIN_SECRET", "demo-admin-dev") {
+func (s *server) adminAuth(w http.ResponseWriter, r *http.Request) bool {
+	got := r.Header.Get("X-Demo-Admin-Secret")
+	if subtle.ConstantTimeCompare([]byte(got), []byte(s.adminSecret)) != 1 {
 		shared.WriteErr(w, http.StatusUnauthorized, "unauthorized")
+		return false
+	}
+	return true
+}
+
+func (s *server) online(w http.ResponseWriter, r *http.Request) {
+	if !s.adminAuth(w, r) {
 		return
 	}
 	var n int
 	_ = s.pool.QueryRow(r.Context(), `select count(*) from club_sessions where last_seen > now() - interval '10 minutes'`).Scan(&n)
 	shared.WriteJSON(w, http.StatusOK, map[string]int{"customers_online": n})
+}
+
+func (s *server) resetSessions(w http.ResponseWriter, r *http.Request) {
+	if !s.adminAuth(w, r) {
+		return
+	}
+	tag, err := s.pool.Exec(r.Context(), `delete from club_sessions`)
+	if err != nil {
+		shared.WriteErr(w, http.StatusInternalServerError, "reset-sessions")
+		return
+	}
+	shared.WriteJSON(w, http.StatusOK, map[string]any{
+		"status":  "reset",
+		"deleted": tag.RowsAffected(),
+	})
 }
 
 func (s *server) lookup(ctx context.Context, membership, password string) (member, bool) {
