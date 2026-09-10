@@ -297,6 +297,7 @@ table.feed th{color:var(--muted);font-weight:600}
 .st-denied{color:#ff6b4a}
 #toast{position:fixed;right:20px;bottom:20px;background:var(--lime);color:#111;font-weight:700;padding:12px 16px;border-radius:10px;display:none;max-width:420px;z-index:9}
 #toast.show{display:block}
+#resetStatus:not(:empty){color:var(--lime);font-weight:700;margin:0}
 .mem-field.hidden{display:none}
 </style></head><body>
 <header><strong>Bruiser</strong><span>Harchester United · operations</span></header>
@@ -354,14 +355,15 @@ const log = document.getElementById('log');
 const cert = document.getElementById('cert');
 const auditEl = document.getElementById('audit');
 const feed = document.getElementById('feed');
-const toastEl = document.getElementById('toast');
 function toast(msg){
-  toastEl.textContent = msg;
-  toastEl.className = 'show';
   const rs = document.getElementById('resetStatus');
   if (rs) rs.textContent = msg;
-  clearTimeout(toastEl._t);
-  toastEl._t = setTimeout(() => { toastEl.className = ''; }, 8000);
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'show';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.className = ''; }, 8000);
 }
 function syncPreset(){
   const preset = document.getElementById('preset').value;
@@ -420,9 +422,14 @@ es.addEventListener('snapshot', (e) => {
   log.textContent = JSON.stringify({loadlab: {running: lab.running, done: lab.done, preset: lab.preset, summary: sum}, edge, eaf}, null, 2);
 });
 async function resetDemo(){
-  const res = await fetch('/reset', {method:'POST'});
-  const d = await res.json().catch(() => ({}));
-  toast(d.message || ('Reset: '+(d.seats_remaining??'—')+' seats remaining, executions cleared.'));
+  toast('Resetting…');
+  try {
+    const res = await fetch('/reset', {method:'POST'});
+    const d = await res.json().catch(() => ({}));
+    toast(d.message || ('Reset: '+(d.seats_remaining??'—')+' seats remaining, executions cleared.'));
+  } catch (err) {
+    toast('Reset failed: '+(err && err.message ? err.message : err));
+  }
 }
 async function setEnf(){
   const v = document.getElementById('enf').value;
