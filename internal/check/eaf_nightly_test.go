@@ -26,7 +26,7 @@ func TestEAFNightly(t *testing.T) {
 	if err != nil || n < 2 {
 		t.Fatalf("BRUISER_EAF_N=%q", raw)
 	}
-	front, origin, _, hmac := startProxyLab(t, "origin-lock-dev")
+	front, origin, _, hmac, _ := startProxyLab(t, "origin-lock-dev")
 	var allow, busy, other atomic.Int64
 	var wg sync.WaitGroup
 	wg.Add(n)

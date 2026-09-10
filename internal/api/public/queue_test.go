@@ -12,14 +12,15 @@ import (
 )
 
 func TestHTTPBoundedQueue(t *testing.T) {
-	srv, cfg := startServer(t)
+	lab := startLab(t)
+	srv, cfg := lab.Server, lab.Cfg
 	doc := policy.DefaultDocument(cfg.MerchantID)
 	doc.Domains[0].Waiting = policy.Waiting{Mode: "bounded", MaxWaiters: 1}
 	raw, err := yaml.Marshal(doc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	req, _ := http.NewRequest(http.MethodPut, srv.URL+"/v1/policy", bytes.NewReader(raw))
+	req, _ := http.NewRequest(http.MethodPut, lab.Admin.URL+"/v1/policy", bytes.NewReader(raw))
 	req.Header.Set("X-Bruiser-Admin-Secret", cfg.AdminSecret)
 	req.Header.Set("Content-Type", "application/yaml")
 	resp, err := http.DefaultClient.Do(req)
@@ -97,14 +98,15 @@ func TestHTTPBoundedQueue(t *testing.T) {
 }
 
 func TestHTTPLeaveQueue(t *testing.T) {
-	srv, cfg := startServer(t)
+	lab := startLab(t)
+	srv, cfg := lab.Server, lab.Cfg
 	doc := policy.DefaultDocument(cfg.MerchantID)
 	doc.Domains[0].Waiting = policy.Waiting{Mode: "bounded", MaxWaiters: 1}
 	raw, err := yaml.Marshal(doc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	req, _ := http.NewRequest(http.MethodPut, srv.URL+"/v1/policy", bytes.NewReader(raw))
+	req, _ := http.NewRequest(http.MethodPut, lab.Admin.URL+"/v1/policy", bytes.NewReader(raw))
 	req.Header.Set("X-Bruiser-Admin-Secret", cfg.AdminSecret)
 	req.Header.Set("Content-Type", "application/yaml")
 	resp, err := http.DefaultClient.Do(req)
@@ -151,7 +153,7 @@ func TestHTTPLeaveQueue(t *testing.T) {
 		t.Fatalf("leave %d", resp.StatusCode)
 	}
 
-	req, _ = http.NewRequest(http.MethodGet, srv.URL+"/v1/admin/status", nil)
+	req, _ = http.NewRequest(http.MethodGet, lab.Admin.URL+"/v1/admin/status", nil)
 	req.Header.Set("X-Bruiser-Admin-Secret", cfg.AdminSecret)
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {

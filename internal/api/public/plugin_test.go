@@ -146,7 +146,7 @@ func TestExampleProfileLoads(t *testing.T) {
 	if !found {
 		t.Fatal("configs/example.yaml not found")
 	}
-	if p.MerchantID != "example" || !p.UnmatchedAllow() {
-		t.Fatalf("example profile %+v", p)
+	if p.MerchantID != "example" || p.UnmatchedAllow() {
+		t.Fatalf("example profile should ship unmatched deny: %+v", p)
 	}
 }

@@ -35,7 +35,7 @@ func (s *Store) GetControls(ctx context.Context, merchantID string) (ops.Control
 	return ops.Normalize(c), true, nil
 }
 
-func (s *Store) PutControls(ctx context.Context, merchantID string, c ops.Controls) (ops.Controls, error) {
+func (s *Store) PutControls(ctx context.Context, merchantID string, c ops.Controls, audit AdminAudit) (ops.Controls, error) {
 	c = ops.Normalize(c)
 	scope, _ := json.Marshal(c.Scope)
 	_, err := s.pool.Exec(ctx, `
@@ -63,7 +63,7 @@ func (s *Store) PutControls(ctx context.Context, merchantID string, c ops.Contro
 	if err != nil {
 		return c, wrapStore(err)
 	}
-	if err := s.WriteAudit(ctx, merchantID, "CONTROL_CHANGED", c.Mode, id.Request(), map[string]any{
+	if err := s.writeAdminAction(ctx, merchantID, "CONTROL_CHANGED", c.Mode, id.Request(), audit, map[string]any{
 		"enforcement":       c.Enforcement,
 		"enforce_percent":   c.EnforcePercent,
 		"effective_percent": c.EffectivePercent(),
@@ -81,19 +81,19 @@ func (s *Store) PutControls(ctx context.Context, merchantID string, c ops.Contro
 	return c, nil
 }
 
-func (s *Store) DrainWaiters(ctx context.Context, merchantID, requestID string) (int, error) {
+func (s *Store) DrainWaiters(ctx context.Context, merchantID, requestID string, audit AdminAudit) (int, error) {
 	tag, err := s.pool.Exec(ctx, `delete from waiters where merchant_id = $1`, merchantID)
 	if err != nil {
 		return 0, wrapStore(err)
 	}
 	n := int(tag.RowsAffected())
-	if err := s.WriteAudit(ctx, merchantID, "EMERGENCY_DRAIN", "waiters", requestID, map[string]any{"count": n}); err != nil {
+	if err := s.writeAdminAction(ctx, merchantID, "EMERGENCY_DRAIN", "waiters", requestID, audit, map[string]any{"count": n}); err != nil {
 		return n, err
 	}
 	return n, nil
 }
 
-func (s *Store) RevokeActive(ctx context.Context, merchantID, requestID, reason string) (int, error) {
+func (s *Store) RevokeActive(ctx context.Context, merchantID, requestID, reason string, audit AdminAudit) (int, error) {
 	if reason == "" {
 		reason = "emergency"
 	}
@@ -107,7 +107,7 @@ func (s *Store) RevokeActive(ctx context.Context, merchantID, requestID, reason 
 			n++
 		}
 	}
-	if err := s.WriteAudit(ctx, merchantID, "EMERGENCY_REVOKE", reason, requestID, map[string]any{"count": n}); err != nil {
+	if err := s.writeAdminAction(ctx, merchantID, "EMERGENCY_REVOKE", reason, requestID, audit, map[string]any{"count": n}); err != nil {
 		return n, err
 	}
 	return n, nil

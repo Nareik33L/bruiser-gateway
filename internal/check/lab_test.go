@@ -16,9 +16,10 @@ import (
 	"github.com/Nareik33L/bruiser-gateway/internal/testlab"
 )
 
-func startLab(t *testing.T, originSecret string) (edgeURL, originURL, gwURL, hmac string) {
+func startLab(t *testing.T, originSecret string) (edgeURL, originURL, gwURL, hmac, adminURL string) {
 	t.Helper()
-	_, gw, cfg, signer := testlab.GatewayAPI(t, testlab.ArsenalProfile(t))
+	lab := testlab.Start(t, testlab.ArsenalProfile(t), nil)
+	gw, cfg, signer := lab.Server, lab.Cfg, lab.Signer
 	origin := simtix.New(simtix.Lab(cfg.DevHMACSecret, originSecret, cfg.MerchantID, signer.Public, gw.URL, 20))
 	originSrv := httptest.NewServer(origin.Handler())
 	t.Cleanup(originSrv.Close)
@@ -34,15 +35,16 @@ func startLab(t *testing.T, originSecret string) (edgeURL, originURL, gwURL, hma
 	}
 	edgeSrv := httptest.NewServer(p.Handler())
 	t.Cleanup(edgeSrv.Close)
-	return edgeSrv.URL, originSrv.URL, gw.URL, cfg.DevHMACSecret
+	return edgeSrv.URL, originSrv.URL, gw.URL, cfg.DevHMACSecret, lab.Admin.URL
 }
 
 func TestAuthorityCheckLockdownOnPass(t *testing.T) {
-	edgeURL, originURL, gwURL, hmac := startLab(t, "origin-lock-dev")
+	edgeURL, originURL, gwURL, hmac, adminURL := startLab(t, "origin-lock-dev")
 	rep, err := check.Run(check.Config{
 		EdgeURL:    edgeURL,
 		OriginURL:  originURL,
 		ControlURL: gwURL,
+		AdminURL:   adminURL,
 		HMACSecret: hmac,
 		Membership: "1001234",
 		EventID:    "ars-che",
@@ -59,11 +61,12 @@ func TestAuthorityCheckLockdownOnPass(t *testing.T) {
 }
 
 func TestAuthorityCheckLockdownOffFail(t *testing.T) {
-	edgeURL, originURL, gwURL, hmac := startLab(t, "")
+	edgeURL, originURL, gwURL, hmac, adminURL := startLab(t, "")
 	rep, err := check.Run(check.Config{
 		EdgeURL:    edgeURL,
 		OriginURL:  originURL,
 		ControlURL: gwURL,
+		AdminURL:   adminURL,
 		HMACSecret: hmac,
 		Membership: "1001234",
 		EventID:    "ars-che",
@@ -86,7 +89,7 @@ func TestAuthorityCheckLockdownOffFail(t *testing.T) {
 }
 
 func TestUnawareSwarmOneHold(t *testing.T) {
-	edgeURL, _, _, hmac := startLab(t, "origin-lock-dev")
+	edgeURL, _, _, hmac, _ := startLab(t, "origin-lock-dev")
 	c1, err := auth.IssueBoxOfficeSession(hmac, "1001234", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -120,10 +123,11 @@ func TestUnawareSwarmOneHold(t *testing.T) {
 }
 
 func TestAuthorityCheckMissingOriginFails(t *testing.T) {
-	edgeURL, _, gwURL, hmac := startLab(t, "origin-lock-dev")
+	edgeURL, _, gwURL, hmac, adminURL := startLab(t, "origin-lock-dev")
 	rep, err := check.Run(check.Config{
 		EdgeURL:    edgeURL,
 		ControlURL: gwURL,
+		AdminURL:   adminURL,
 		HMACSecret: hmac,
 		Membership: "1001234",
 		EventID:    "ars-che",
@@ -146,7 +150,7 @@ func TestAuthorityCheckMissingOriginFails(t *testing.T) {
 }
 
 func TestAuthorityCheckMissingControlFails(t *testing.T) {
-	edgeURL, originURL, _, hmac := startLab(t, "origin-lock-dev")
+	edgeURL, originURL, _, hmac, _ := startLab(t, "origin-lock-dev")
 	rep, err := check.Run(check.Config{
 		EdgeURL:    edgeURL,
 		OriginURL:  originURL,
@@ -163,7 +167,7 @@ func TestAuthorityCheckMissingControlFails(t *testing.T) {
 }
 
 func TestSearchOpenViaEdge(t *testing.T) {
-	edgeURL, _, _, _ := startLab(t, "origin-lock-dev")
+	edgeURL, _, _, _, _ := startLab(t, "origin-lock-dev")
 	resp, err := http.Get(edgeURL + "/api/events")
 	if err != nil {
 		t.Fatal(err)

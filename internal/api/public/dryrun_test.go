@@ -16,16 +16,17 @@ import (
 )
 
 func TestDryRunNeverBlocks(t *testing.T) {
-	_, srv, cfg, _ := testlab.GatewayWith(t, testlab.ArsenalProfile(t), func(c *config.Config) {
+	lab := testlab.Start(t, testlab.ArsenalProfile(t), func(c *config.Config) {
 		c.Mode = ops.ModeDryRun
 	})
+	srv, cfg := lab.Server, lab.Cfg
 	doc := policy.DefaultDocument(cfg.MerchantID)
 	doc.Domains[0].Waiting = policy.Waiting{Mode: "bounded", MaxWaiters: 1}
 	raw, err := yaml.Marshal(doc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	req, _ := http.NewRequest(http.MethodPut, srv.URL+"/v1/policy", bytes.NewReader(raw))
+	req, _ := http.NewRequest(http.MethodPut, lab.Admin.URL+"/v1/policy", bytes.NewReader(raw))
 	req.Header.Set("X-Bruiser-Admin-Secret", cfg.AdminSecret)
 	req.Header.Set("Content-Type", "application/yaml")
 	resp, err := http.DefaultClient.Do(req)
@@ -84,7 +85,7 @@ func TestDryRunNeverBlocks(t *testing.T) {
 		t.Fatalf("bob must WOULD_ALLOW independently: %d %s %v", code, hdr.Get("X-Bruiser-Dry-Run"), body)
 	}
 
-	req, _ = http.NewRequest(http.MethodGet, srv.URL+"/v1/admin/dry-run", nil)
+	req, _ = http.NewRequest(http.MethodGet, lab.Admin.URL+"/v1/admin/dry-run", nil)
 	req.Header.Set("X-Bruiser-Admin-Secret", cfg.AdminSecret)
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
@@ -99,7 +100,7 @@ func TestDryRunNeverBlocks(t *testing.T) {
 		t.Fatalf("dry-run report %+v", report)
 	}
 
-	req, _ = http.NewRequest(http.MethodGet, srv.URL+"/v1/admin/status", nil)
+	req, _ = http.NewRequest(http.MethodGet, lab.Admin.URL+"/v1/admin/status", nil)
 	req.Header.Set("X-Bruiser-Admin-Secret", cfg.AdminSecret)
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
@@ -117,7 +118,8 @@ func TestDryRunNeverBlocks(t *testing.T) {
 }
 
 func TestKillSwitchPassThrough(t *testing.T) {
-	_, srv, cfg, _ := testlab.GatewayAPI(t, testlab.ArsenalProfile(t))
+	lab := testlab.Start(t, testlab.ArsenalProfile(t), nil)
+	srv, cfg := lab.Server, lab.Cfg
 	cookie1, err := auth.IssueBoxOfficeSession(cfg.DevHMACSecret, "1001234", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -151,7 +153,7 @@ func TestKillSwitchPassThrough(t *testing.T) {
 		t.Fatalf("second should BUSY before kill switch: %d %v", code, body)
 	}
 
-	req, _ := http.NewRequest(http.MethodPut, srv.URL+"/v1/admin/controls", bytes.NewBufferString(`{"enforcement":false,"updated_by":"test"}`))
+	req, _ := http.NewRequest(http.MethodPut, lab.Admin.URL+"/v1/admin/controls", bytes.NewBufferString(`{"enforcement":false,"updated_by":"test"}`))
 	req.Header.Set("X-Bruiser-Admin-Secret", cfg.AdminSecret)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)

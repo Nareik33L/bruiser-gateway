@@ -14,7 +14,7 @@ lease:
 # waiting:
 #   mode: bounded
 #   max_waiters: 1
-unmatched: allow
+unmatched: deny
 routes:
   - match: { method: POST, path: "/api/holds" }
     resource_from: event_id

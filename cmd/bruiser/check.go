@@ -19,6 +19,7 @@ func cmdAuthorityCheck() error {
 	frontURL := fs.String("front", "", "alias of -edge")
 	originURL := fs.String("origin", env("SIMTIX_ORIGIN_URL", "http://127.0.0.1:8090"), "box-office origin URL")
 	controlURL := fs.String("control", env("BRUISER_HTTP_URL", ""), "optional Bruiser control-plane URL for /v1/authorize probes")
+	adminURL := fs.String("admin", env("BRUISER_ADMIN_URL", ""), "Bruiser admin listener URL (policy/admin); not the public control URL")
 	secret := fs.String("hmac-secret", env("BRUISER_DEV_HMAC_SECRET", "dev-secret-change-me"), "HMAC used to mint box-office cookies")
 	membership := fs.String("membership", "1001234", "7-digit membership number analogue")
 	eventID := fs.String("event", "ars-che", "event id")
@@ -35,10 +36,14 @@ func cmdAuthorityCheck() error {
 	if strings.TrimSpace(*controlURL) == "" {
 		*controlURL = env("BRUISER_CHECK_CONTROL_URL", "http://127.0.0.1:8080")
 	}
+	if strings.TrimSpace(*adminURL) == "" {
+		*adminURL = env("BRUISER_CHECK_ADMIN_URL", "http://127.0.0.1:8082")
+	}
 	rep, err := check.Run(check.Config{
 		EdgeURL:    front,
 		OriginURL:  *originURL,
 		ControlURL: *controlURL,
+		AdminURL:   *adminURL,
 		HMACSecret: *secret,
 		Membership: *membership,
 		EventID:    *eventID,

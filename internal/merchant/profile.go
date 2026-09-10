@@ -14,8 +14,9 @@ type Profile struct {
 	Name        string `yaml:"name"`
 	ProfileName string `yaml:"profile"`
 	Assumptions string `yaml:"assumptions"`
-	// Unmatched is "allow" (default) or "deny". Allocation routes fail closed;
-	// everything else fails open so Bruiser can sit in front of a whole origin.
+	// Unmatched is "deny" (default) or "allow". Allocation routes fail closed.
+	// Unmatched allow is fail-open for unlisted routes and requires
+	// BRUISER_ALLOW_UNSAFE_MODES in production.
 	Unmatched string   `yaml:"unmatched"`
 	Mode      string   `yaml:"mode"` // enforce (default) or dry-run
 	Identity  Identity `yaml:"identity"`
@@ -129,7 +130,7 @@ func Parse(b []byte) (Profile, error) {
 		p.Identity.Header = "X-Customer-Id"
 	}
 	if p.Unmatched == "" {
-		p.Unmatched = "allow"
+		p.Unmatched = "deny"
 	}
 	return p, nil
 }

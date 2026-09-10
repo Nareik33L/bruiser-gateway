@@ -196,7 +196,7 @@ secrets and dry-run / partial ramp / fail-open unless
 
 ## Emergency controls
 
-`GET/PUT /v1/admin/controls` (admin secret). Audited as `CONTROL_CHANGED`.
+`GET/PUT /v1/admin/controls` on `BRUISER_ADMIN_ADDR` (operator or admin credential). Audited as `CONTROL_CHANGED`. Policy writes and revoke-all require the admin credential.
 
 | Control | Effect |
 |---------|--------|

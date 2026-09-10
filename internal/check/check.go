@@ -20,6 +20,7 @@ type Config struct {
 	EdgeURL      string
 	OriginURL    string
 	ControlURL   string
+	AdminURL     string
 	HMACSecret   string
 	EdgeSecret   string
 	OriginSecret string
@@ -100,10 +101,14 @@ func Run(cfg Config) (Report, error) {
 	if cfg.AdminSecret == "" {
 		cfg.AdminSecret = "admin-secret-dev"
 	}
+	if cfg.AdminURL == "" {
+		cfg.AdminURL = os.Getenv("BRUISER_ADMIN_URL")
+	}
 	client := &http.Client{Timeout: cfg.Timeout}
 	edge := strings.TrimRight(cfg.EdgeURL, "/")
 	origin := strings.TrimRight(cfg.OriginURL, "/")
 	control := strings.TrimRight(cfg.ControlURL, "/")
+	admin := strings.TrimRight(cfg.AdminURL, "/")
 	holdPath := "/api/events/" + cfg.EventID + "/holds"
 
 	rep := Report{
@@ -577,11 +582,14 @@ func Run(cfg Config) (Report, error) {
 		if origin == "" || control == "" {
 			return fail("--origin and --control are required")
 		}
+		if admin == "" {
+			return fail("--admin (admin listener) is required; admin paths are not on the public control URL")
+		}
 		exe, err := mintHoldExecution(client, control, cfg, fmt.Sprintf("revoked-%d", time.Now().UnixNano()))
 		if err != nil {
 			return fail("%s", err.Error())
 		}
-		revCode, revBody := postJSON(client, control+"/v1/admin/executions/"+exe.ID+"/revoke", map[string]string{
+		revCode, revBody := postJSON(client, admin+"/v1/admin/executions/"+exe.ID+"/revoke", map[string]string{
 			"X-Bruiser-Admin-Secret": cfg.AdminSecret,
 		}, map[string]string{"reason": "authority-check"})
 		if revCode != http.StatusOK {

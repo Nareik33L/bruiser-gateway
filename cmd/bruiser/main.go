@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -76,6 +77,7 @@ func cmdMigrate(cfg config.Config, log *slog.Logger) error {
 }
 
 func cmdServe(cfg config.Config, log *slog.Logger) error {
+	cfg.NormalizeListen()
 	profile, err := loadProfile(cfg, log)
 	if err != nil {
 		return err
@@ -99,6 +101,9 @@ func cmdServe(cfg config.Config, log *slog.Logger) error {
 			if i.Level == "FAIL" {
 				return fmt.Errorf("%s: %s", i.Field, i.Message)
 			}
+		}
+		if err := merchant.ValidateProductionPolicy(profile, cfg.AllowUnsafeModes); err != nil {
+			return err
 		}
 	}
 	for _, w := range cfg.SecretWarnings() {
@@ -139,8 +144,14 @@ func cmdServe(cfg config.Config, log *slog.Logger) error {
 		log.Info("telemetry disabled (merchant-controlled; no vendor phone-home)")
 	}
 	handler := publicapi.New(cfg, store, signer, log, profile)
+	if err := handler.CheckPolicySafety(); err != nil {
+		return err
+	}
 	handler.Start(ctx)
 	defer handler.Close()
+	if strings.TrimSpace(cfg.AdminAddr) == "" {
+		return fmt.Errorf("BRUISER_ADMIN_ADDR is required")
+	}
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           handler,
@@ -149,11 +160,23 @@ func cmdServe(cfg config.Config, log *slog.Logger) error {
 		WriteTimeout:      35 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
+	adminSrv := &http.Server{
+		Addr:              cfg.AdminAddr,
+		Handler:           handler.AdminHandler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      35 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
 
-	errCh := make(chan error, 1)
+	errCh := make(chan error, 2)
 	go func() {
 		log.Info("listening", "addr", cfg.HTTPAddr, "merchant", cfg.MerchantID)
 		errCh <- srv.ListenAndServe()
+	}()
+	go func() {
+		log.Info("admin listening", "addr", cfg.AdminAddr, "merchant", cfg.MerchantID)
+		errCh <- adminSrv.ListenAndServe()
 	}()
 
 	var proxySrv *http.Server
@@ -193,6 +216,7 @@ func cmdServe(cfg config.Config, log *slog.Logger) error {
 	if proxySrv != nil {
 		_ = proxySrv.Shutdown(shutCtx)
 	}
+	_ = adminSrv.Shutdown(shutCtx)
 	return srv.Shutdown(shutCtx)
 }
 
@@ -259,6 +283,12 @@ func cmdPolicy() error {
 	c, err := policy.CompileYAML(raw)
 	if err != nil {
 		return err
+	}
+	cfg := config.Load()
+	if cfg.Production() {
+		if err := policy.CheckProductionSafety(c.Doc, cfg.AllowUnsafeModes); err != nil {
+			return err
+		}
 	}
 	fmt.Printf("ok version=%d rules=%d fallback=%s\n", c.Doc.Version, len(c.Doc.Domains), c.Doc.Fallback)
 	return nil

@@ -2,13 +2,14 @@ package publicapi
 
 import (
 	"context"
-	"crypto/subtle"
 	"io"
 	"net/http"
 	"time"
 
 	"github.com/Nareik33L/bruiser-gateway/internal/lease"
+	"github.com/Nareik33L/bruiser-gateway/internal/merchant"
 	"github.com/Nareik33L/bruiser-gateway/internal/policy"
+	pgstore "github.com/Nareik33L/bruiser-gateway/internal/store/postgres"
 )
 
 func (s *Server) loadPolicy() {
@@ -26,6 +27,19 @@ func (s *Server) loadPolicy() {
 		}
 	}
 	s.compiled.Store(&c)
+}
+
+func (s *Server) CheckPolicySafety() error {
+	if s == nil {
+		return nil
+	}
+	if err := merchant.ValidateProductionPolicy(s.profile, s.cfg.AllowUnsafeModes); err != nil && s.cfg.Production() {
+		return err
+	}
+	if s.cfg.Production() {
+		return policy.CheckProductionSafety(s.getCompiled().Doc, s.cfg.AllowUnsafeModes)
+	}
+	return nil
 }
 
 func (s *Server) applyStorePolicy() {
@@ -108,27 +122,8 @@ func (s *Server) evaluate(merchantID, customerID, ptype, resource, action string
 	})
 }
 
-func (s *Server) adminSecret() string {
-	return s.cfg.AdminSecret
-}
-
-func (s *Server) adminOK(r *http.Request) bool {
-	secret := s.adminSecret()
-	if secret == "" {
-		return false
-	}
-	got := r.Header.Get("X-Bruiser-Admin-Secret")
-	if got == "" {
-		if c, err := r.Cookie("bruiser_admin"); err == nil {
-			got = c.Value
-		}
-	}
-	return subtle.ConstantTimeCompare([]byte(got), []byte(secret)) == 1
-}
-
 func (s *Server) getPolicy(w http.ResponseWriter, r *http.Request) {
-	if !s.adminOK(r) {
-		writeErr(w, http.StatusUnauthorized, "bad admin secret")
+	if _, ok := s.requireRole(w, r, roleOperator); !ok {
 		return
 	}
 	c := s.getCompiled()
@@ -152,8 +147,8 @@ func (s *Server) getPolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) putPolicy(w http.ResponseWriter, r *http.Request) {
-	if !s.adminOK(r) {
-		writeErr(w, http.StatusUnauthorized, "bad admin secret")
+	actor, ok := s.requireRole(w, r, roleAdmin)
+	if !ok {
 		return
 	}
 	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
@@ -166,7 +161,27 @@ func (s *Server) putPolicy(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid policy", "detail": err.Error()})
 		return
 	}
-	row, err := s.store.PutPolicy(r.Context(), s.cfg.MerchantID, string(raw), requestID(r))
+	if s.cfg.Production() {
+		if err := policy.CheckProductionSafety(c.Doc, s.cfg.AllowUnsafeModes); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "fail-open policy", "detail": err.Error()})
+			return
+		}
+	}
+	beforeYAML := ""
+	if prev, err := s.store.ActivePolicy(r.Context(), s.cfg.MerchantID); err == nil {
+		beforeYAML = prev.YAML
+	}
+	beforeHash := policy.HashYAML([]byte(beforeYAML))
+	afterHash := policy.HashYAML(raw)
+	row, err := s.store.PutPolicy(r.Context(), s.cfg.MerchantID, string(raw), requestID(r), pgstore.AdminAudit{
+		Actor:     actor.Actor,
+		Role:      actor.Role,
+		IP:        clientIP(r),
+		Auth:      actor.Source,
+		Before:    beforeHash,
+		After:     afterHash,
+		RequestID: requestID(r),
+	})
 	if err != nil {
 		s.storeError(w, err)
 		return
@@ -177,15 +192,16 @@ func (s *Server) putPolicy(w http.ResponseWriter, r *http.Request) {
 		cache.Reset()
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"version":    row.Version,
-		"rule_names": ruleNames(c),
-		"status":     "active",
+		"version":     row.Version,
+		"rule_names":  ruleNames(c),
+		"status":      "active",
+		"before_hash": beforeHash,
+		"after_hash":  afterHash,
 	})
 }
 
 func (s *Server) policyHistory(w http.ResponseWriter, r *http.Request) {
-	if !s.adminOK(r) {
-		writeErr(w, http.StatusUnauthorized, "bad admin secret")
+	if _, ok := s.requireRole(w, r, roleOperator); !ok {
 		return
 	}
 	rows, err := s.store.PolicyHistory(r.Context(), s.cfg.MerchantID, 20)

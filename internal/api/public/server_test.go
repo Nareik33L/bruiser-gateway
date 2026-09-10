@@ -2,64 +2,34 @@ package publicapi_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"sync"
 	"testing"
 	"time"
 
-	"log/slog"
-
-	"github.com/Nareik33L/bruiser-gateway/internal/api/public"
 	"github.com/Nareik33L/bruiser-gateway/internal/auth"
 	"github.com/Nareik33L/bruiser-gateway/internal/config"
-	"github.com/Nareik33L/bruiser-gateway/internal/id"
 	"github.com/Nareik33L/bruiser-gateway/internal/merchant"
-	pgstore "github.com/Nareik33L/bruiser-gateway/internal/store/postgres"
+	"github.com/Nareik33L/bruiser-gateway/internal/testlab"
 )
+
+func startLab(t *testing.T) testlab.Lab {
+	t.Helper()
+	return testlab.Start(t, merchant.Profile{}, func(c *config.Config) {
+		c.LeaseTTL = 15 * time.Second
+		c.RateSessions, c.RateAcquire, c.RateAuthorize = 1e6, 1e6, 1e6
+		c.RateMerchant, c.RateCustomer, c.RatePrincipal = 1e6, 1e6, 1e6
+	})
+}
 
 func startServer(t *testing.T) (*httptest.Server, config.Config) {
 	t.Helper()
-	url := os.Getenv("BRUISER_TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("BRUISER_TEST_DATABASE_URL not set")
-	}
-	ctx := context.Background()
-	if err := pgstore.Migrate(ctx, url); err != nil {
-		t.Fatal(err)
-	}
-	store, err := pgstore.Connect(ctx, url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(store.Close)
-	cfg := config.Load()
-	cfg.DatabaseURL = url
-	cfg.MerchantID = id.New("m")
-	cfg.LeaseTTL = 15 * time.Second
-	cfg.Environment = "lab"
-	cfg.EdgeSecret = "edge-secret-dev"
-	cfg.AdminSecret = "admin-secret-dev"
-	cfg.DevAssertions = true
-	cfg.RateSessions, cfg.RateAcquire, cfg.RateAuthorize = 1e6, 1e6, 1e6
-	cfg.RateMerchant, cfg.RateCustomer, cfg.RatePrincipal = 1e6, 1e6, 1e6
-	if err := store.EnsureMerchant(ctx, cfg.MerchantID, "test", cfg.DevHMACSecret); err != nil {
-		t.Fatal(err)
-	}
-	key, err := store.EnsureSigningKey(ctx, cfg.MerchantID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	signer := auth.Signer{KID: key.KID, MerchantID: cfg.MerchantID, Private: key.Private, Public: key.Public}
-	h := publicapi.New(cfg, store, signer, slog.New(slog.NewTextHandler(io.Discard, nil)), merchant.Empty(cfg.MerchantID))
-	srv := httptest.NewServer(h)
-	t.Cleanup(srv.Close)
-	return srv, cfg
+	lab := startLab(t)
+	return lab.Server, lab.Cfg
 }
 
 func session(t *testing.T, srv *httptest.Server, cfg config.Config, customer, principal string) string {

@@ -22,9 +22,10 @@ import (
 )
 
 func TestSecurityAdminAndEdgeSecrets(t *testing.T) {
-	_, srv, cfg, _ := testlab.GatewayAPI(t, testlab.ArsenalProfile(t))
-	if cfg.AdminSecret == cfg.EdgeSecret {
-		t.Fatal("lab must use distinct admin and edge secrets")
+	lab := testlab.Start(t, testlab.ArsenalProfile(t), nil)
+	srv, cfg := lab.Server, lab.Cfg
+	if cfg.AdminSecret == cfg.EdgeSecret || cfg.AdminSecret == cfg.OperatorSecret {
+		t.Fatal("lab must use distinct admin, operator, and edge secrets")
 	}
 
 	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/admin/status", nil)
@@ -33,11 +34,21 @@ func TestSecurityAdminAndEdgeSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("public admin path want 404 got %d", resp.StatusCode)
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, lab.Admin.URL+"/v1/admin/status", nil)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("admin without secret %d", resp.StatusCode)
 	}
 
-	req, _ = http.NewRequest(http.MethodGet, srv.URL+"/v1/admin/status", nil)
+	req, _ = http.NewRequest(http.MethodGet, lab.Admin.URL+"/v1/admin/status", nil)
 	req.Header.Set("X-Bruiser-Admin-Secret", cfg.EdgeSecret)
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
@@ -48,7 +59,7 @@ func TestSecurityAdminAndEdgeSecrets(t *testing.T) {
 		t.Fatalf("edge secret must not unlock admin %d", resp.StatusCode)
 	}
 
-	req, _ = http.NewRequest(http.MethodGet, srv.URL+"/v1/admin/status?secret="+cfg.AdminSecret, nil)
+	req, _ = http.NewRequest(http.MethodGet, lab.Admin.URL+"/v1/admin/status?secret="+cfg.AdminSecret, nil)
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -138,7 +149,7 @@ func TestFailClosedOnStoreOutage(t *testing.T) {
 func TestFailOpenOnlyWhenConfigured(t *testing.T) {
 	lab := testlab.Start(t, testlab.ArsenalProfile(t), nil)
 	body := `{"fail_closed":false,"updated_by":"test"}`
-	req, _ := http.NewRequest(http.MethodPut, lab.Server.URL+"/v1/admin/controls", bytes.NewBufferString(body))
+	req, _ := http.NewRequest(http.MethodPut, lab.Admin.URL+"/v1/admin/controls", bytes.NewBufferString(body))
 	req.Header.Set("X-Bruiser-Admin-Secret", lab.Cfg.AdminSecret)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
@@ -167,7 +178,8 @@ func TestFailOpenOnlyWhenConfigured(t *testing.T) {
 }
 
 func TestPersistenceAcrossReplica(t *testing.T) {
-	_, srvA, _, srvB, cfg := testlab.GatewayPair(t, testlab.ArsenalProfile(t))
+	a, b := testlab.GatewayPair(t, testlab.ArsenalProfile(t))
+	srvA, srvB, cfg := a.Server, b.Server, a.Cfg
 	tok := session(t, srvA, cfg, "alice", "agent-1")
 	got := acquireJSON(t, srvA, tok)
 	if got.StatusCode != http.StatusCreated {
@@ -236,7 +248,8 @@ func TestRestartNewProcessSameStore(t *testing.T) {
 }
 
 func TestEmergencyDrainAndRevokeAll(t *testing.T) {
-	_, srv, cfg, _ := testlab.GatewayAPI(t, testlab.ArsenalProfile(t))
+	lab := testlab.Start(t, testlab.ArsenalProfile(t), nil)
+	srv, cfg := lab.Server, lab.Cfg
 	tok1 := session(t, srv, cfg, "alice", "agent-1")
 	tok2 := session(t, srv, cfg, "alice", "agent-2")
 	a := acquireJSON(t, srv, tok1)
@@ -245,7 +258,7 @@ func TestEmergencyDrainAndRevokeAll(t *testing.T) {
 	}
 	_ = tok2
 
-	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/admin/controls/revoke-all", nil)
+	req, _ := http.NewRequest(http.MethodPost, lab.Admin.URL+"/v1/admin/controls/revoke-all", nil)
 	req.Header.Set("X-Bruiser-Admin-Secret", cfg.AdminSecret)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -260,7 +273,7 @@ func TestEmergencyDrainAndRevokeAll(t *testing.T) {
 		t.Fatalf("revoke-all %d %+v", resp.StatusCode, out)
 	}
 
-	req, _ = http.NewRequest(http.MethodPost, srv.URL+"/v1/admin/controls/drain", nil)
+	req, _ = http.NewRequest(http.MethodPost, lab.Admin.URL+"/v1/admin/controls/drain", nil)
 	req.Header.Set("X-Bruiser-Admin-Secret", cfg.AdminSecret)
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
@@ -328,7 +341,8 @@ func TestHTTPConcurrentAcquireRelease(t *testing.T) {
 }
 
 func TestMetricsResumeDoesNotCountForwarded(t *testing.T) {
-	_, srv, cfg, _ := testlab.GatewayAPI(t, testlab.ArsenalProfile(t))
+	lab := testlab.Start(t, testlab.ArsenalProfile(t), nil)
+	srv, cfg := lab.Server, lab.Cfg
 	cookie, err := auth.IssueBoxOfficeSession(cfg.DevHMACSecret, "metrics-alice", time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -348,7 +362,7 @@ func TestMetricsResumeDoesNotCountForwarded(t *testing.T) {
 	}
 	authorize()
 	authorize()
-	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/admin/status", nil)
+	req, _ := http.NewRequest(http.MethodGet, lab.Admin.URL+"/v1/admin/status", nil)
 	req.Header.Set("X-Bruiser-Admin-Secret", cfg.AdminSecret)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -367,12 +381,13 @@ func TestMetricsResumeDoesNotCountForwarded(t *testing.T) {
 }
 
 func TestOneHundredPercentEnforcesSecondAgent(t *testing.T) {
-	_, srv, cfg, _ := testlab.GatewayWith(t, testlab.ArsenalProfile(t), func(c *config.Config) {
+	lab := testlab.Start(t, testlab.ArsenalProfile(t), func(c *config.Config) {
 		c.EnforcePercent = 100
 		c.Mode = ops.ModeEnforce
 	})
+	srv, cfg := lab.Server, lab.Cfg
 	body := `{"enforce_percent":100,"enforcement":true,"mode":"enforce","updated_by":"test"}`
-	req, _ := http.NewRequest(http.MethodPut, srv.URL+"/v1/admin/controls", bytes.NewBufferString(body))
+	req, _ := http.NewRequest(http.MethodPut, lab.Admin.URL+"/v1/admin/controls", bytes.NewBufferString(body))
 	req.Header.Set("X-Bruiser-Admin-Secret", cfg.AdminSecret)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
@@ -413,7 +428,8 @@ func TestOneHundredPercentEnforcesSecondAgent(t *testing.T) {
 }
 
 func TestAdminLoginUsesCookieNotQuery(t *testing.T) {
-	_, srv, cfg, _ := testlab.GatewayAPI(t, testlab.ArsenalProfile(t))
+	lab := testlab.Start(t, testlab.ArsenalProfile(t), nil)
+	srv, cfg := lab.Admin, lab.Cfg
 	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/admin", bytes.NewBufferString("secret="+cfg.AdminSecret))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	client := &http.Client{
@@ -435,7 +451,17 @@ func TestAdminLoginUsesCookieNotQuery(t *testing.T) {
 			cookie = c.Value
 		}
 	}
-	if cookie != cfg.AdminSecret {
-		t.Fatal("login must set HttpOnly admin cookie")
+	if cookie == "" || cookie == cfg.AdminSecret {
+		t.Fatal("login must set a signed HttpOnly admin cookie, not the raw secret")
+	}
+	req, _ = http.NewRequest(http.MethodGet, srv.URL+"/admin", nil)
+	req.AddCookie(&http.Cookie{Name: "bruiser_admin", Value: cookie})
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("cookie session %d", resp.StatusCode)
 	}
 }

@@ -15,14 +15,15 @@ import (
 )
 
 func TestProgressiveRampDeterministicAndScoped(t *testing.T) {
-	_, srv, cfg, _ := testlab.GatewayAPI(t, testlab.ArsenalProfile(t))
+	lab := testlab.Start(t, testlab.ArsenalProfile(t), nil)
+	srv, cfg := lab.Server, lab.Cfg
 	doc := policy.DefaultDocument(cfg.MerchantID)
 	doc.Domains[0].Waiting = policy.Waiting{Mode: "bounded", MaxWaiters: 1}
 	raw, err := yaml.Marshal(doc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	req, _ := http.NewRequest(http.MethodPut, srv.URL+"/v1/policy", bytes.NewReader(raw))
+	req, _ := http.NewRequest(http.MethodPut, lab.Admin.URL+"/v1/policy", bytes.NewReader(raw))
 	req.Header.Set("X-Bruiser-Admin-Secret", cfg.AdminSecret)
 	req.Header.Set("Content-Type", "application/yaml")
 	resp, err := http.DefaultClient.Do(req)
@@ -34,7 +35,7 @@ func TestProgressiveRampDeterministicAndScoped(t *testing.T) {
 
 	put := func(body string) {
 		t.Helper()
-		req, _ := http.NewRequest(http.MethodPut, srv.URL+"/v1/admin/controls", bytes.NewBufferString(body))
+		req, _ := http.NewRequest(http.MethodPut, lab.Admin.URL+"/v1/admin/controls", bytes.NewBufferString(body))
 		req.Header.Set("X-Bruiser-Admin-Secret", cfg.AdminSecret)
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := http.DefaultClient.Do(req)
@@ -135,7 +136,7 @@ func TestProgressiveRampDeterministicAndScoped(t *testing.T) {
 		t.Fatalf("0%% is dry-run: %d enf=%s %v", code, enf, body)
 	}
 
-	req, _ = http.NewRequest(http.MethodGet, srv.URL+"/v1/admin/ramp", nil)
+	req, _ = http.NewRequest(http.MethodGet, lab.Admin.URL+"/v1/admin/ramp", nil)
 	req.Header.Set("X-Bruiser-Admin-Secret", cfg.AdminSecret)
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {

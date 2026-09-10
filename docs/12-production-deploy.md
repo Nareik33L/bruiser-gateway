@@ -69,7 +69,7 @@ direct origin holds fail.
 1. `bruiser config validate <profile.yaml>` → no FAIL
 2. `bruiser doctor --profile <profile> --front <edge> --origin <origin>`
 3. `bruiser authority-check --front <edge> --origin <origin> --control <bruiser>` → PASS
-4. Distinct admin / edge / origin secrets
+4. Distinct admin / operator / edge / origin secrets; admin listener on `BRUISER_ADMIN_ADDR`
 5. Every hold/purchase path listed; origin lockdown on
 6. Start at `enforce_percent=0` or 10, then raise
 

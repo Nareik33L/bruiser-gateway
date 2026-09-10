@@ -41,17 +41,19 @@ func ArsenalProfile(t testing.TB) merchant.Profile {
 
 func Gateway(t testing.TB, profile merchant.Profile) (*httptest.Server, config.Config) {
 	t.Helper()
-	_, srv, cfg, _ := GatewayAPI(t, profile)
-	return srv, cfg
+	lab := Start(t, profile, nil)
+	return lab.Server, lab.Cfg
 }
 
 func GatewayAPI(t testing.TB, profile merchant.Profile) (*publicapi.Server, *httptest.Server, config.Config, auth.Signer) {
-	return GatewayWith(t, profile, nil)
+	lab := Start(t, profile, nil)
+	return lab.API, lab.Server, lab.Cfg, lab.Signer
 }
 
 type Lab struct {
 	API    *publicapi.Server
 	Server *httptest.Server
+	Admin  *httptest.Server
 	Cfg    config.Config
 	Signer auth.Signer
 	Store  *pgstore.Store
@@ -59,16 +61,15 @@ type Lab struct {
 
 func Start(t testing.TB, profile merchant.Profile, mut func(*config.Config)) Lab {
 	t.Helper()
-	api, srv, cfg, signer, store := gatewayWithStore(t, profile, mut)
-	return Lab{API: api, Server: srv, Cfg: cfg, Signer: signer, Store: store}
+	return gatewayWithStore(t, profile, mut)
 }
 
 func GatewayWith(t testing.TB, profile merchant.Profile, mut func(*config.Config)) (*publicapi.Server, *httptest.Server, config.Config, auth.Signer) {
-	api, srv, cfg, signer, _ := gatewayWithStore(t, profile, mut)
-	return api, srv, cfg, signer
+	lab := Start(t, profile, mut)
+	return lab.API, lab.Server, lab.Cfg, lab.Signer
 }
 
-func gatewayWithStore(t testing.TB, profile merchant.Profile, mut func(*config.Config)) (*publicapi.Server, *httptest.Server, config.Config, auth.Signer, *pgstore.Store) {
+func gatewayWithStore(t testing.TB, profile merchant.Profile, mut func(*config.Config)) Lab {
 	t.Helper()
 	url := os.Getenv("BRUISER_TEST_DATABASE_URL")
 	if url == "" {
@@ -85,12 +86,15 @@ func gatewayWithStore(t testing.TB, profile merchant.Profile, mut func(*config.C
 	t.Cleanup(store.Close)
 	cfg := config.Load()
 	cfg.Environment = "lab"
+	cfg.NormalizeListen()
 	cfg.DatabaseURL = url
 	cfg.MerchantID = id.New("m")
 	cfg.LeaseTTL = 30 * time.Second
 	cfg.EdgeSecret = "edge-secret-dev"
 	cfg.AdminSecret = "admin-secret-dev"
+	cfg.OperatorSecret = "operator-secret-dev"
 	cfg.OriginSecret = "origin-lock-dev"
+	cfg.AdminAddr = "127.0.0.1:0"
 	cfg.MaxInFlight = 8
 	cfg.RatePerSec = 100
 	cfg.DevAssertions = true
@@ -118,33 +122,37 @@ func gatewayWithStore(t testing.TB, profile merchant.Profile, mut func(*config.C
 	}
 	signer := auth.Signer{KID: key.KID, MerchantID: cfg.MerchantID, Private: key.Private, Public: key.Public}
 	api := publicapi.New(cfg, store, signer, slog.New(slog.NewTextHandler(io.Discard, nil)), profile)
-	srv := httptest.NewServer(api)
+	pub := httptest.NewServer(api)
+	admin := httptest.NewServer(api.AdminHandler())
 	t.Cleanup(func() {
 		api.Close()
-		srv.Close()
+		pub.Close()
+		admin.Close()
 	})
-	return api, srv, cfg, signer, store
+	return Lab{API: api, Server: pub, Admin: admin, Cfg: cfg, Signer: signer, Store: store}
 }
 
 // GatewayPair starts two control-plane processes against one merchant so
 // LISTEN/NOTIFY and cache-reset behaviour can be tested across nodes.
-func GatewayPair(t testing.TB, profile merchant.Profile) (*publicapi.Server, *httptest.Server, *publicapi.Server, *httptest.Server, config.Config) {
+func GatewayPair(t testing.TB, profile merchant.Profile) (Lab, Lab) {
 	t.Helper()
-	apiA, srvA, cfg, signer := GatewayAPI(t, profile)
-	url := cfg.DatabaseURL
+	a := Start(t, profile, nil)
+	url := a.Cfg.DatabaseURL
 	ctx := context.Background()
 	storeB, err := pgstore.Connect(ctx, url)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(storeB.Close)
-	apiB := publicapi.New(cfg, storeB, signer, slog.New(slog.NewTextHandler(io.Discard, nil)), profile)
-	srvB := httptest.NewServer(apiB)
+	apiB := publicapi.New(a.Cfg, storeB, a.Signer, slog.New(slog.NewTextHandler(io.Discard, nil)), profile)
+	pubB := httptest.NewServer(apiB)
+	adminB := httptest.NewServer(apiB.AdminHandler())
 	t.Cleanup(func() {
 		apiB.Close()
-		srvB.Close()
+		pubB.Close()
+		adminB.Close()
 	})
-	apiA.Start(ctx)
+	a.API.Start(ctx)
 	apiB.Start(ctx)
-	return apiA, srvA, apiB, srvB, cfg
+	return a, Lab{API: apiB, Server: pubB, Admin: adminB, Cfg: a.Cfg, Signer: a.Signer, Store: storeB}
 }

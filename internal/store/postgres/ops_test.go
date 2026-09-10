@@ -8,6 +8,7 @@ import (
 	"github.com/Nareik33L/bruiser-gateway/internal/id"
 	"github.com/Nareik33L/bruiser-gateway/internal/lease"
 	"github.com/Nareik33L/bruiser-gateway/internal/ops"
+	pgstore "github.com/Nareik33L/bruiser-gateway/internal/store/postgres"
 )
 
 func TestShadowDecideIntraCustomer(t *testing.T) {
@@ -58,7 +59,7 @@ func TestControlsAudit(t *testing.T) {
 	c.Mode = ops.ModeDryRun
 	c.EnforcePercent = 10
 	c.UpdatedBy = "test"
-	if _, err := s.PutControls(ctx, m, c); err != nil {
+	if _, err := s.PutControls(ctx, m, c, pgstore.AdminAudit{Actor: "test", Role: "admin"}); err != nil {
 		t.Fatal(err)
 	}
 	got, found, err := s.GetControls(ctx, m)
@@ -71,5 +72,8 @@ func TestControlsAudit(t *testing.T) {
 	ev, err := s.LastAudit(ctx, m, "CONTROL_CHANGED")
 	if err != nil || ev.Type != "CONTROL_CHANGED" {
 		t.Fatalf("audit %+v err=%v", ev, err)
+	}
+	if ev.PrincipalID != "test" || ev.PrincipalType != "admin" {
+		t.Fatalf("actor %+v", ev)
 	}
 }

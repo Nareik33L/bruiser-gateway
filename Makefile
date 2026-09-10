@@ -9,6 +9,8 @@ TEST_DATABASE_URL ?= postgres://bruiser:bruiser@127.0.0.1:5432/bruiser_test?sslm
 # when BRUISER_ENV is unset; these targets must ask for lab explicitly.
 LAB_ENV ?= BRUISER_ENV=lab \
 	BRUISER_ADMIN_SECRET=admin-secret-dev \
+	BRUISER_OPERATOR_SECRET=operator-secret-dev \
+	BRUISER_ADMIN_ADDR=127.0.0.1:8082 \
 	BRUISER_EDGE_SECRET=edge-secret-dev \
 	BRUISER_ORIGIN_SECRET=origin-lock-dev \
 	BRUISER_DEV_HMAC_SECRET=dev-secret-change-me \
@@ -60,7 +62,7 @@ simtix: build
 	$(SIMTIX)
 
 authority-check: build
-	$(LAB_ENV) $(BIN) authority-check --front http://127.0.0.1:8091 --origin http://127.0.0.1:8090 --control http://127.0.0.1:8080
+	$(LAB_ENV) $(BIN) authority-check --front http://127.0.0.1:8091 --origin http://127.0.0.1:8090 --control http://127.0.0.1:8080 --admin http://127.0.0.1:8082
 
 doctor: build
 	$(LAB_ENV) $(BIN) doctor --profile configs/example.yaml --skip-store

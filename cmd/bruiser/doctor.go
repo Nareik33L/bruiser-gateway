@@ -87,6 +87,11 @@ func cmdConfig() error {
 		Issuer:       cfg.Issuer,
 		Audience:     cfg.Audience,
 	})...)
+	if cfg.Production() {
+		if err := merchant.ValidateProductionPolicy(p, cfg.AllowUnsafeModes); err != nil {
+			issues = append(issues, merchant.Issue{Level: "FAIL", Field: "policy", Message: err.Error()})
+		}
+	}
 	for _, i := range issues {
 		fmt.Printf("%s  %s: %s\n", i.Level, i.Field, i.Message)
 		if i.Level == "FAIL" {

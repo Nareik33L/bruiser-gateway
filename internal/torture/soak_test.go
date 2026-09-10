@@ -91,6 +91,7 @@ func runSoak(t *testing.T, dur time.Duration, agents int, sampleEvery time.Durat
 	cfg.LeaseTTL = 15 * time.Second
 	cfg.Environment = "lab"
 	cfg.AdminSecret = "admin-secret-dev"
+	cfg.OperatorSecret = "operator-secret-dev"
 	cfg.EdgeSecret = "edge-secret-dev"
 	cfg.DevAssertions = true
 	cfg.RateSessions, cfg.RateAcquire, cfg.RateRenew, cfg.RateRelease = 1e6, 1e6, 1e6, 1e6
@@ -106,9 +107,10 @@ func runSoak(t *testing.T, dur time.Duration, agents int, sampleEvery time.Durat
 	profile := merchant.Empty(cfg.MerchantID)
 
 	type node struct {
-		api *publicapi.Server
-		st  *pgstore.Store
-		srv *httptest.Server
+		api   *publicapi.Server
+		st    *pgstore.Store
+		srv   *httptest.Server
+		admin *httptest.Server
 	}
 	var mu sync.Mutex
 	nodes := make([]*node, 0, 4)
@@ -120,7 +122,8 @@ func runSoak(t *testing.T, dur time.Duration, agents int, sampleEvery time.Durat
 		api := publicapi.New(cfg, st, signer, slog.New(slog.NewTextHandler(io.Discard, nil)), profile)
 		api.Start(ctx)
 		srv := httptest.NewServer(api)
-		n := &node{api: api, st: st, srv: srv}
+		admin := httptest.NewServer(api.AdminHandler())
+		n := &node{api: api, st: st, srv: srv, admin: admin}
 		mu.Lock()
 		nodes = append(nodes, n)
 		mu.Unlock()
@@ -138,6 +141,7 @@ func runSoak(t *testing.T, dur time.Duration, agents int, sampleEvery time.Durat
 			}
 			n.api.Close()
 			n.srv.Close()
+			n.admin.Close()
 			n.st.Close()
 		}
 	})
@@ -149,7 +153,7 @@ func runSoak(t *testing.T, dur time.Duration, agents int, sampleEvery time.Durat
 	if err != nil {
 		t.Fatal(err)
 	}
-	putPolicy(t, nodes[0].srv.URL, cfg.AdminSecret, raw)
+	putPolicy(t, nodes[0].admin.URL, cfg.AdminSecret, raw)
 
 	tokens := make([]string, agents)
 	principals := make([]string, agents)

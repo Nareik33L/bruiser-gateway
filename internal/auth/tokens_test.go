@@ -33,6 +33,21 @@ func TestRoundTripSessionAndExecution(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 
+	atok, err := s.SignAccess(RoleOperator, "admin-secret", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ac, err := ParseAccess(atok, pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ac.Role != RoleOperator || ac.Actor != "admin-secret" || ac.TokenType != AccessTokenType {
+		t.Fatalf("%+v", ac)
+	}
+	if _, err := ParseAccess(tok, pub); err == nil {
+		t.Fatal("session token must not parse as admin access")
+	}
+
 	exp := time.Now().UTC().Add(time.Minute)
 	etok, err := s.SignExecution(lease.Execution{
 		ID: "exe_1", MerchantID: "arsenal", CustomerID: "alice",

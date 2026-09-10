@@ -37,6 +37,8 @@ spec:
           ports:
             - containerPort: 8080
               name: http
+            - containerPort: 8082
+              name: admin
             - containerPort: 8081
               name: proxy
           env:
@@ -78,6 +80,9 @@ spec:
     - name: http
       port: {{ .Values.service.port }}
       targetPort: http
+    - name: admin
+      port: {{ .Values.service.adminPort | default 8082 }}
+      targetPort: admin
     - name: proxy
       port: {{ .Values.service.proxyPort }}
       targetPort: proxy

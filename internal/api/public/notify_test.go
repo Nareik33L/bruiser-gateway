@@ -9,7 +9,8 @@ import (
 )
 
 func TestPolicyNotifyReloadsOtherNode(t *testing.T) {
-	_, srvA, apiB, srvB, cfg := testlab.GatewayPair(t, testlab.ArsenalProfile(t))
+	a, b := testlab.GatewayPair(t, testlab.ArsenalProfile(t))
+	apiB, srvB, cfg := b.API, b.Server, a.Cfg
 	a1 := session(t, srvB, cfg, "alice", "agent-1")
 	a2 := session(t, srvB, cfg, "alice", "agent-2")
 
@@ -22,7 +23,7 @@ func TestPolicyNotifyReloadsOtherNode(t *testing.T) {
 		t.Fatalf("second want 409 got %d %s", second.StatusCode, second.Raw)
 	}
 
-	putPolicy(t, srvA.URL, cfg.AdminSecret, policyMax2)
+	putPolicy(t, a.Admin.URL, cfg.AdminSecret, policyMax2)
 
 	deadline := time.Now().Add(3 * time.Second)
 	var again exeBody

@@ -33,6 +33,8 @@ type Config struct {
 	CheckEdgeURL      string
 	CheckOriginURL    string
 	AdminSecret       string
+	OperatorSecret    string
+	AdminAddr         string
 	Telemetry         bool
 	IntrospectURL     string
 	Burst             int
@@ -84,6 +86,8 @@ func Load() Config {
 		CheckEdgeURL:      env("BRUISER_CHECK_EDGE_URL", "http://127.0.0.1:8091"),
 		CheckOriginURL:    env("BRUISER_CHECK_ORIGIN_URL", "http://127.0.0.1:8090"),
 		AdminSecret:       lookupEnv("BRUISER_ADMIN_SECRET"),
+		OperatorSecret:    lookupEnv("BRUISER_OPERATOR_SECRET"),
+		AdminAddr:         lookupEnv("BRUISER_ADMIN_ADDR"),
 		Telemetry:         env("BRUISER_TELEMETRY", "") == "1" || strings.EqualFold(env("BRUISER_TELEMETRY", ""), "true"),
 		IntrospectURL:     env("BRUISER_INTROSPECT_URL", ""),
 		Burst:             envInt("BRUISER_BURST", 10),
@@ -110,7 +114,22 @@ func Load() Config {
 	// HMAC dev assertions stay off unless the operator sets the flag.
 	// Validate refuses the flag outside explicit lab/dev/test.
 	c.DevAssertions = envBool("BRUISER_DEV_ASSERTIONS", false)
+	c.NormalizeListen()
 	return c
+}
+
+// NormalizeListen fills lab-only listen/credential defaults. Production
+// never invents an admin bind address or operator secret.
+func (c *Config) NormalizeListen() {
+	if c == nil || !c.Lab() {
+		return
+	}
+	if strings.TrimSpace(c.AdminAddr) == "" {
+		c.AdminAddr = "127.0.0.1:8082"
+	}
+	if strings.TrimSpace(c.OperatorSecret) == "" {
+		c.OperatorSecret = "operator-secret-dev"
+	}
 }
 
 // Lab is true only when the operator asked for lab/dev/test. Unset and
@@ -156,6 +175,9 @@ func (c Config) Validate() error {
 	}
 	if c.ProxyAddr != "" && c.OriginURL == "" {
 		return fmt.Errorf("BRUISER_ORIGIN_URL is required when BRUISER_PROXY_ADDR is set")
+	}
+	if err := c.ValidateAdminListen(); err != nil {
+		return err
 	}
 	if c.EnforcePercent > 100 {
 		return fmt.Errorf("BRUISER_ENFORCE_PERCENT must be 0–100")
@@ -212,6 +234,9 @@ func (c Config) ValidateSecrets() error {
 	if strings.TrimSpace(c.AdminSecret) == "" {
 		problems = append(problems, "BRUISER_ADMIN_SECRET is required and must not be empty")
 	}
+	if strings.TrimSpace(c.OperatorSecret) == "" {
+		problems = append(problems, "BRUISER_OPERATOR_SECRET is required and must not be empty")
+	}
 	if strings.TrimSpace(c.EdgeSecret) == "" {
 		problems = append(problems, "BRUISER_EDGE_SECRET is required and must not be empty")
 	}
@@ -224,12 +249,24 @@ func (c Config) ValidateSecrets() error {
 	if c.OriginSecret != "" && c.EdgeSecret == c.OriginSecret {
 		problems = append(problems, "BRUISER_EDGE_SECRET must be distinct from BRUISER_ORIGIN_SECRET")
 	}
+	if c.OperatorSecret != "" && c.OperatorSecret == c.AdminSecret {
+		problems = append(problems, "BRUISER_OPERATOR_SECRET must be distinct from BRUISER_ADMIN_SECRET")
+	}
+	if c.OperatorSecret != "" && c.OperatorSecret == c.EdgeSecret {
+		problems = append(problems, "BRUISER_OPERATOR_SECRET must be distinct from BRUISER_EDGE_SECRET")
+	}
+	if c.OperatorSecret != "" && c.OriginSecret != "" && c.OperatorSecret == c.OriginSecret {
+		problems = append(problems, "BRUISER_OPERATOR_SECRET must be distinct from BRUISER_ORIGIN_SECRET")
+	}
 	if c.Production() {
 		if hits := c.labSecretHits(); len(hits) > 0 {
 			problems = append(problems, "production refuses lab/placeholder secrets: "+strings.Join(hits, ", "))
 		}
 		if strings.TrimSpace(c.OriginSecret) == "" {
 			problems = append(problems, "BRUISER_ORIGIN_SECRET is required in production (origin lockdown)")
+		}
+		if strings.TrimSpace(c.AdminAddr) == "" {
+			problems = append(problems, "BRUISER_ADMIN_ADDR is required in production (admin listener must not share the public address)")
 		}
 	}
 	if len(problems) > 0 {
@@ -301,6 +338,7 @@ func (c Config) labSecretHits() []string {
 	var names []string
 	for _, pair := range []struct{ name, val string }{
 		{"BRUISER_ADMIN_SECRET", c.AdminSecret},
+		{"BRUISER_OPERATOR_SECRET", c.OperatorSecret},
 		{"BRUISER_EDGE_SECRET", c.EdgeSecret},
 		{"BRUISER_ORIGIN_SECRET", c.OriginSecret},
 		{"BRUISER_DEV_HMAC_SECRET", c.DevHMACSecret},
@@ -310,6 +348,42 @@ func (c Config) labSecretHits() []string {
 		}
 	}
 	return names
+}
+
+// ValidateAdminListen refuses a missing production admin bind and
+// refuses binding admin on the same address as public traffic.
+func (c Config) ValidateAdminListen() error {
+	if strings.TrimSpace(c.AdminAddr) == "" {
+		if c.Production() {
+			return fmt.Errorf("BRUISER_ADMIN_ADDR is required in production (admin listener must not share the public address)")
+		}
+		return nil
+	}
+	if sameListenAddr(c.HTTPAddr, c.AdminAddr) {
+		return fmt.Errorf("BRUISER_ADMIN_ADDR (%s) must be distinct from BRUISER_HTTP_ADDR (%s)", c.AdminAddr, c.HTTPAddr)
+	}
+	return nil
+}
+
+func sameListenAddr(a, b string) bool {
+	return canonListen(a) != "" && canonListen(a) == canonListen(b)
+}
+
+func canonListen(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return ""
+	}
+	if !strings.Contains(s, ":") {
+		s = s + ":80"
+	}
+	if strings.HasPrefix(s, ":") {
+		return "0.0.0.0" + s
+	}
+	if strings.HasPrefix(s, "*:") {
+		return "0.0.0.0" + s[1:]
+	}
+	return s
 }
 
 func (c Config) IdentityMode() string {
@@ -370,7 +444,8 @@ func isLabSecret(s string) bool {
 	}
 	switch s {
 	case "change-me", "edge-secret-dev", "origin-lock-dev", "admin-secret-dev",
-		"dev-secret-change-me", "jwt-secret-dev", "signing-key-dev", "hmac-secret-dev":
+		"operator-secret-dev", "dev-secret-change-me", "jwt-secret-dev",
+		"signing-key-dev", "hmac-secret-dev":
 		return true
 	}
 	return strings.HasPrefix(s, "change-me")

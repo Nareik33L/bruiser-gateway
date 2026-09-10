@@ -60,6 +60,8 @@ type advLab struct {
 	frontB string
 	gwA    string
 	gwB    string
+	adminA string
+	adminB string
 	hmac   string
 	admin  string
 	cfg    testlab.Lab
@@ -96,6 +98,8 @@ func startAdversarialLab(t *testing.T) *advLab {
 	t.Cleanup(apiB.Close)
 	srvB := httptest.NewServer(apiB)
 	t.Cleanup(srvB.Close)
+	adminB := httptest.NewServer(apiB.AdminHandler())
+	t.Cleanup(adminB.Close)
 	apiB.Start(ctx)
 
 	watch := &originWatch{exes: map[string]int{}, phase: map[string]int{}}
@@ -131,6 +135,8 @@ func startAdversarialLab(t *testing.T) *advLab {
 		frontB: frontB.URL,
 		gwA:    core.Server.URL,
 		gwB:    srvB.URL,
+		adminA: core.Admin.URL,
+		adminB: adminB.URL,
 		hmac:   core.Cfg.DevHMACSecret,
 		admin:  core.Cfg.AdminSecret,
 		cfg:    core,
@@ -238,7 +244,7 @@ func (a *advLab) assertPhaseAtMost(t *testing.T, n int) {
 
 func (a *advLab) revokeAll(t *testing.T) {
 	t.Helper()
-	req, _ := http.NewRequest(http.MethodPost, a.gwB+"/v1/admin/controls/revoke-all", nil)
+	req, _ := http.NewRequest(http.MethodPost, a.adminB+"/v1/admin/controls/revoke-all", nil)
 	req.Header.Set("X-Bruiser-Admin-Secret", a.admin)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -258,7 +264,7 @@ func (a *advLab) resetCaches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, gw := range []string{a.gwB, a.gwA} {
+	for _, gw := range []string{a.adminB, a.adminA} {
 		req, _ := http.NewRequest(http.MethodPut, gw+"/v1/policy", bytes.NewReader(raw))
 		req.Header.Set("X-Bruiser-Admin-Secret", a.admin)
 		req.Header.Set("Content-Type", "application/yaml")
@@ -285,7 +291,7 @@ func (a *advLab) ensureActive(t *testing.T) {
 
 func (a *advLab) active(t *testing.T) []string {
 	t.Helper()
-	req, _ := http.NewRequest(http.MethodGet, a.gwB+"/v1/admin/status", nil)
+	req, _ := http.NewRequest(http.MethodGet, a.adminB+"/v1/admin/status", nil)
 	req.Header.Set("X-Bruiser-Admin-Secret", a.admin)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -406,7 +412,7 @@ func (a *advLab) postAuth(t *testing.T, url, body, bearer string) (int, string, 
 
 func (a *advLab) putControls(t *testing.T, body string) {
 	t.Helper()
-	req, _ := http.NewRequest(http.MethodPut, a.gwB+"/v1/admin/controls", bytes.NewBufferString(body))
+	req, _ := http.NewRequest(http.MethodPut, a.adminB+"/v1/admin/controls", bytes.NewBufferString(body))
 	req.Header.Set("X-Bruiser-Admin-Secret", a.admin)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)

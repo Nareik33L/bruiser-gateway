@@ -11,8 +11,10 @@ func labConfig() Config {
 	c.Environment = "lab"
 	c.DevAssertions = true
 	c.AdminSecret = "admin-secret-dev"
+	c.OperatorSecret = "operator-secret-dev"
 	c.EdgeSecret = "edge-secret-dev"
 	c.OriginSecret = "origin-lock-dev"
+	c.AdminAddr = "127.0.0.1:8082"
 	c.AllowUnsafeModes = false
 	c.FailClosed = true
 	c.Enforcement = true
@@ -23,9 +25,11 @@ func labConfig() Config {
 
 func prodSecrets(c *Config) {
 	c.AdminSecret = "prod-admin-unique"
+	c.OperatorSecret = "prod-operator-unique"
 	c.EdgeSecret = "prod-edge-unique"
 	c.OriginSecret = "prod-origin-unique"
 	c.DevHMACSecret = "prod-hmac-unique"
+	c.AdminAddr = "127.0.0.1:8082"
 	c.JWKSURL = "https://idp.example/.well-known/jwks.json"
 	c.Issuer = "https://idp.example"
 	c.Audience = "bruiser"
@@ -83,9 +87,11 @@ func TestProductionDefaultSecretsNameEach(t *testing.T) {
 	c.Environment = "production"
 	c.DevAssertions = false
 	c.AdminSecret = "admin-secret-dev"
+	c.OperatorSecret = "operator-secret-dev"
 	c.EdgeSecret = "edge-secret-dev"
 	c.OriginSecret = "origin-lock-dev"
 	c.DevHMACSecret = "dev-secret-change-me"
+	c.AdminAddr = "127.0.0.1:8082"
 	c.JWKSURL = "https://idp.example/.well-known/jwks.json"
 	c.Issuer = "https://idp.example"
 	c.Audience = "bruiser"
@@ -96,6 +102,7 @@ func TestProductionDefaultSecretsNameEach(t *testing.T) {
 	msg := err.Error()
 	for _, name := range []string{
 		"BRUISER_ADMIN_SECRET",
+		"BRUISER_OPERATOR_SECRET",
 		"BRUISER_EDGE_SECRET",
 		"BRUISER_ORIGIN_SECRET",
 		"BRUISER_DEV_HMAC_SECRET",
@@ -154,6 +161,7 @@ func TestProductionIdentityUnconfigured(t *testing.T) {
 	c.Environment = "production"
 	c.DevAssertions = false
 	c.AdminSecret = "prod-admin-unique"
+	c.OperatorSecret = "prod-operator-unique"
 	c.EdgeSecret = "prod-edge-unique"
 	c.OriginSecret = "prod-origin-unique"
 	c.DevHMACSecret = "prod-hmac-unique"
@@ -251,5 +259,30 @@ func TestValidateRejectsAdminFallback(t *testing.T) {
 	c.JWKSURL = ""
 	if err := c.Validate(); err == nil {
 		t.Fatal("production must require JWKS")
+	}
+}
+
+func TestProductionRequiresAdminAddrAndDistinctOperator(t *testing.T) {
+	c := labConfig()
+	c.Environment = "production"
+	prodSecrets(&c)
+	c.AdminAddr = ""
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "BRUISER_ADMIN_ADDR") {
+		t.Fatalf("missing admin addr: %v", err)
+	}
+	prodSecrets(&c)
+	c.AdminAddr = c.HTTPAddr
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "distinct") {
+		t.Fatalf("same listen: %v", err)
+	}
+	prodSecrets(&c)
+	c.OperatorSecret = c.AdminSecret
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "BRUISER_OPERATOR_SECRET") {
+		t.Fatalf("operator == admin: %v", err)
+	}
+	prodSecrets(&c)
+	c.OperatorSecret = "operator-secret-dev"
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "BRUISER_OPERATOR_SECRET") {
+		t.Fatalf("lab operator secret: %v", err)
 	}
 }

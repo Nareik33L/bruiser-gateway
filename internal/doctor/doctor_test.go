@@ -13,6 +13,8 @@ func TestDoctorExampleProfile(t *testing.T) {
 	cfg.Environment = "lab"
 	cfg.DevAssertions = true
 	cfg.AdminSecret = "admin-secret-dev"
+	cfg.OperatorSecret = "operator-secret-dev"
+	cfg.AdminAddr = "127.0.0.1:8082"
 	cfg.EdgeSecret = "edge-secret-dev"
 	cfg.OriginSecret = "origin-lock-dev"
 	p, err := merchant.LoadFile("../../configs/example.yaml")
@@ -46,6 +48,8 @@ func TestDoctorMissingRoutesFail(t *testing.T) {
 	cfg.Environment = "lab"
 	cfg.DevAssertions = true
 	cfg.AdminSecret = "admin-secret-dev"
+	cfg.OperatorSecret = "operator-secret-dev"
+	cfg.AdminAddr = "127.0.0.1:8082"
 	cfg.EdgeSecret = "edge-secret-dev"
 	p := merchant.Empty("x")
 	rep := Run(Input{Config: cfg, Profile: p})

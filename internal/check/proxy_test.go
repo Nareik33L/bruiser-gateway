@@ -16,9 +16,10 @@ import (
 	"github.com/Nareik33L/bruiser-gateway/internal/testlab"
 )
 
-func startProxyLab(t *testing.T, originSecret string) (proxyURL, originURL, gwURL, hmac string) {
+func startProxyLab(t *testing.T, originSecret string) (proxyURL, originURL, gwURL, hmac, adminURL string) {
 	t.Helper()
-	api, gw, cfg, signer := testlab.GatewayAPI(t, testlab.ArsenalProfile(t))
+	core := testlab.Start(t, testlab.ArsenalProfile(t), nil)
+	api, gw, cfg, signer := core.API, core.Server, core.Cfg, core.Signer
 	origin := simtix.New(simtix.Lab(cfg.DevHMACSecret, originSecret, cfg.MerchantID, signer.Public, gw.URL, 200))
 	originSrv := httptest.NewServer(origin.Handler())
 	t.Cleanup(originSrv.Close)
@@ -28,15 +29,16 @@ func startProxyLab(t *testing.T, originSecret string) (proxyURL, originURL, gwUR
 	}
 	proxySrv := httptest.NewServer(ph)
 	t.Cleanup(proxySrv.Close)
-	return proxySrv.URL, originSrv.URL, gw.URL, cfg.DevHMACSecret
+	return proxySrv.URL, originSrv.URL, gw.URL, cfg.DevHMACSecret, core.Admin.URL
 }
 
 func TestAuthorityCheckProxyLockdownOnPass(t *testing.T) {
-	front, origin, gw, hmac := startProxyLab(t, "origin-lock-dev")
+	front, origin, gw, hmac, adminURL := startProxyLab(t, "origin-lock-dev")
 	rep, err := check.Run(check.Config{
 		EdgeURL:    front,
 		OriginURL:  origin,
 		ControlURL: gw,
+		AdminURL:   adminURL,
 		HMACSecret: hmac,
 		Membership: "1001234",
 		EventID:    "ars-che",
@@ -50,7 +52,7 @@ func TestAuthorityCheckProxyLockdownOnPass(t *testing.T) {
 }
 
 func TestProxyUnawareBusy(t *testing.T) {
-	front, _, _, hmac := startProxyLab(t, "origin-lock-dev")
+	front, _, _, hmac, _ := startProxyLab(t, "origin-lock-dev")
 	c1, _ := auth.IssueBoxOfficeSession(hmac, "1001234", 0)
 	c2, _ := auth.IssueBoxOfficeSession(hmac, "1001234", 0)
 	hold := func(c string) int {
@@ -74,7 +76,7 @@ func TestProxyUnawareBusy(t *testing.T) {
 }
 
 func TestEAFUnawareSwarm(t *testing.T) {
-	front, origin, gw, hmac := startProxyLab(t, "origin-lock-dev")
+	front, origin, gw, hmac, _ := startProxyLab(t, "origin-lock-dev")
 	const n = 200
 	var allow, busy atomic.Int64
 	var wg sync.WaitGroup

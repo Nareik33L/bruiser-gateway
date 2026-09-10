@@ -23,7 +23,17 @@ func TestValidateMissingRoutes(t *testing.T) {
 }
 
 func TestUnmatchedAllowWithoutLockdownFails(t *testing.T) {
-	p, err := LoadFile("../../configs/example.yaml")
+	p, err := Parse([]byte(`
+merchant_id: example
+unmatched: allow
+identity:
+  extractor: auto
+  header: X-Customer-Id
+routes:
+  - match: { method: POST, path: "/api/holds" }
+    resource: "sku:one"
+    action: hold
+`))
 	if err != nil {
 		t.Fatal(err)
 	}
