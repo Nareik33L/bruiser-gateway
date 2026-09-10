@@ -12,8 +12,9 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
+
+	"github.com/Nareik33L/bruiser-gateway/internal/limit"
 )
 
 const (
@@ -32,6 +33,7 @@ type Config struct {
 	EdgeSecret     string
 	OriginSecret   string
 	MaxInFlight    int
+	RatePerSec     float64
 	AuthorizePath  string
 	Mode           string
 	ModeFn         func(*http.Request) string
@@ -40,12 +42,11 @@ type Config struct {
 }
 
 type Proxy struct {
-	cfg      Config
-	origin   *url.URL
-	bruiser  string
-	client   *http.Client
-	mu       sync.Mutex
-	inflight map[string]int
+	cfg     Config
+	origin  *url.URL
+	bruiser string
+	client  *http.Client
+	limit   *limit.PerExecution
 }
 
 func New(cfg Config) (*Proxy, error) {
@@ -77,11 +78,11 @@ func New(cfg Config) (*Proxy, error) {
 		client.Transport = handlerTransport{h: cfg.BruiserHandler}
 	}
 	return &Proxy{
-		cfg:      cfg,
-		origin:   ou,
-		bruiser:  bruiser,
-		client:   client,
-		inflight: map[string]int{},
+		cfg:     cfg,
+		origin:  ou,
+		bruiser: bruiser,
+		client:  client,
+		limit:   limit.New(cfg.MaxInFlight, cfg.RatePerSec),
 	}, nil
 }
 
@@ -108,13 +109,18 @@ func (p *Proxy) Handler() http.Handler {
 		req.Host = p.origin.Host
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for name := range r.Header {
+			if strings.HasPrefix(http.CanonicalHeaderKey(name), "X-Bruiser-") {
+				r.Header.Del(name)
+			}
+		}
 		body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 		_ = r.Body.Close()
 		r.Body = io.NopCloser(bytes.NewReader(body))
 
 		mode := p.mode(r)
 		if mode == ModeOff {
-			p.forward(w, r, rp, body, "", "", true, false)
+			p.forward(w, r, rp, body, "", true, false)
 			return
 		}
 
@@ -132,6 +138,11 @@ func (p *Proxy) Handler() http.Handler {
 		}
 		if a := r.Header.Get("Authorization"); a != "" {
 			authReq.Header.Set("Authorization", a)
+		}
+		for _, name := range []string{"X-Customer-Id", "X-User-Id", "X-Principal-Id", "X-Bruiser-Customer", "X-Bruiser-Identity"} {
+			if v := r.Header.Get(name); v != "" {
+				authReq.Header.Set(name, v)
+			}
 		}
 		if eid := eventID(body); eid != "" {
 			authReq.Header.Set("X-Bruiser-Event-Id", eid)
@@ -171,14 +182,15 @@ func (p *Proxy) Handler() http.Handler {
 
 		exe := authResp.Header.Get("X-Bruiser-Execution")
 		if exe != "" && mode == ModeEnforce {
-			if !p.take(exe) {
+			release, ok := p.limit.Take(exe, time.Now())
+			if !ok {
 				w.Header().Set("Retry-After", "1")
 				w.Header().Set(HeaderDecision, "THROTTLED")
 				w.Header().Set(HeaderForwarded, "0")
 				http.Error(w, `{"error":"execution throttled"}`, http.StatusTooManyRequests)
 				return
 			}
-			defer p.release(exe)
+			defer release()
 		}
 
 		r.Body = io.NopCloser(bytes.NewReader(body))
@@ -186,12 +198,10 @@ func (p *Proxy) Handler() http.Handler {
 		r.Header.Set("X-Bruiser-Execution", exe)
 		r.Header.Set("X-Bruiser-Fence", authResp.Header.Get("X-Bruiser-Fence"))
 		r.Header.Set("X-Bruiser-Customer", authResp.Header.Get("X-Bruiser-Customer"))
-		if sec := authResp.Header.Get("X-Bruiser-Origin-Secret"); sec != "" {
-			r.Header.Set("X-Bruiser-Origin-Secret", sec)
-		} else if mode == ModeDryRun && p.cfg.OriginSecret != "" {
+		if p.cfg.OriginSecret != "" {
 			r.Header.Set("X-Bruiser-Origin-Secret", p.cfg.OriginSecret)
 		}
-		p.forward(w, r, rp, body, decision, exe, true, wouldBlock)
+		p.forward(w, r, rp, body, decision, true, wouldBlock)
 	})
 }
 
@@ -226,7 +236,7 @@ func (w *decisionWriter) Write(b []byte) (int, error) {
 	return w.ResponseWriter.Write(b)
 }
 
-func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rp *httputil.ReverseProxy, body []byte, decision string, _ string, forwarded, wouldBlock bool) {
+func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rp *httputil.ReverseProxy, body []byte, decision string, forwarded, wouldBlock bool) {
 	if decision == "" {
 		decision = "ALLOW"
 	}
@@ -242,25 +252,6 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rp *httputil.Rev
 		wouldBlock:     wouldBlock,
 	}
 	rp.ServeHTTP(out, r)
-}
-
-func (p *Proxy) take(exe string) bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.inflight[exe] >= p.cfg.MaxInFlight {
-		return false
-	}
-	p.inflight[exe]++
-	return true
-}
-
-func (p *Proxy) release(exe string) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.inflight[exe]--
-	if p.inflight[exe] <= 0 {
-		delete(p.inflight, exe)
-	}
 }
 
 type handlerTransport struct{ h http.Handler }
@@ -281,9 +272,6 @@ func decisionFrom(status int, body []byte) string {
 			return strings.ToUpper(v)
 		}
 		if v, ok := m["error"].(string); ok && status >= 400 {
-			if strings.Contains(strings.ToLower(v), "unauthor") {
-				return "DENIED"
-			}
 			if v != "" {
 				return "DENIED"
 			}

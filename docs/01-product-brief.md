@@ -1,12 +1,24 @@
-# Bruiser Gateway — Product & Technical Brief (v2.2)
+# Bruiser Gateway — Product & Technical Brief (v2.4)
 
 Working name: **Bruiser Gateway** · Domain: bruiser-gateway.com
 
-This is a revision of the original brief. It keeps the product direction intact and
-sharpens the parts that would otherwise cause trouble in engineering, sales or
-enterprise due-diligence. The concrete design lives in
-[02-technical-design.md](02-technical-design.md); the build sequence lives in
-[03-execution-plan.md](03-execution-plan.md).
+**Binding product instructions:** [00-product-instructions.md](00-product-instructions.md).
+This file keeps the v2–v2.3 rationale and technical sharpening. Where they
+conflict, **v2.4 wins**.
+
+The concrete design lives in [02-technical-design.md](02-technical-design.md);
+the build sequence lives in [03-execution-plan.md](03-execution-plan.md).
+
+### v2.4 — merchant-controlled drop-in (binding)
+
+| # | Change | Why it matters |
+|---|--------|----------------|
+| 28 | **North-star is install-in-front, merchant-held data.** Self-hosted by default. Vendor telemetry off unless explicitly opted in; no PII in telemetry. | Prevents Bruiser becoming a hosted identity/ticketing silo. |
+| 29 | **Discovery is a parallel commercial track, not an engineering gate.** Generic adapters first. “Can I put Bruiser in front of my existing system?” | Stops the roadmap waiting on club calls. |
+| 30 | **Identity extractors are configuration:** JWT, cookie JWT, introspection, edge-signed headers. | Configure Bruiser; do not custom-build per merchant. |
+| 31 | **Heartbeat default 20 s** (TTL 60 s). | Matches the instructed lease loop. |
+| 32 | **Free tier is Bruiser Community**, not “OSS”. Protocol/SDKs Apache-2.0 (intended); core BSL 1.1 pending counsel. | Honest licensing. |
+| 33 | **Initial integrations are generic** (Proxy, NGINX, Cloudflare Worker, Node, API Gateway, Compose, Helm). Not a Ticketmaster partnership. | First product is useful without a platform deal. |
 
 ---
 
@@ -52,7 +64,14 @@ the following:
 | 22 | **Execution Amplification Factor (EAF) is the primary operational KPI.** `EAF = incoming allocation attempts ÷ authorised executions forwarded`. The dashboard, demo and sales conversation all lead with it. | Turns the 10,000-agents story into a number a ticketing office can watch. |
 | 23 | **Transparent enforcement is a named product principle**, with two client classes: Bruiser-aware (explicit APIs, better UX) and Bruiser-unaware (merchant session, automatic acquire, same rules). | The merchant is protected regardless of the client. |
 | 24 | **Commercial messaging rule is binding.** Never: Redis lock, bot detection, DDoS, ticketing platform, middleware, a proxy or an API gateway. Always: the authoritative control layer for autonomous commerce that ensures one customer remains one customer, regardless of how many agents they deploy. | Prevents the product being sold as something a competent team builds in a week, or as a box. |
-| 25 | **Stage A commercial discovery starts immediately**, before significant engineering investment, and is a core product activity — not a post-MVP sales exercise. | Integration requirements that shape V1 come from clubs, not from the lab. |
+| 25 | **Commercial discovery starts immediately, in parallel with engineering.** It validates demand and recruits design partners. It does **not** decide whether Bruiser can be built. | v2.4 §30–32 |
+
+### v2.3 — lease heartbeat and recovery
+
+| # | Change | Why it matters |
+|---|--------|----------------|
+| 26 | **Heartbeat renewal is how a lease stays alive.** While an execution is ACTIVE, the client (browser or Bruiser-aware agent) sends a lightweight heartbeat every 20–30 seconds. Each heartbeat renews the lease. If heartbeats stop, the lease expires after a configurable timeout (default 60 seconds) and is released automatically. | Turns the lifecycle into a complete loop and answers "Alice closed the browser" without permanently locking the customer out. |
+| 27 | **Recovery is an acceptance criterion.** Reconnect before expiry resumes the same execution; after expiry a new execution may be acquired under merchant policy. | UX guarantee: a refresh or brief disconnect is not a lockout, and an abandoned tab is not a held domain. |
 
 ---
 
@@ -171,6 +190,7 @@ A lease is:
 
 - **short-lived** (default TTL 60 s) and **renewable** up to a **max lifetime**
   (default 15 min) — so an abandoned agent cannot hold a domain indefinitely;
+- **kept alive by heartbeat** — see below;
 - **revocable** by the merchant or by the customer (via precedence rules);
 - **fenced** — each grant in a domain has a strictly increasing fence number;
 - **scoped** to exactly one scarcity domain;
@@ -178,6 +198,24 @@ A lease is:
 - **auditable** — every transition is an audit event;
 - **idempotent** — a principal re-acquiring its own domain gets its existing lease
   back, so a retry storm from one agent is harmless.
+
+**Heartbeat renewal.** While an execution is ACTIVE, the client (browser or
+Bruiser-aware agent) sends a lightweight heartbeat every 20–30 seconds (default
+25 s). Each heartbeat is `POST /v1/executions/{id}/renew` (also
+`POST /v1/executions/{id}/heartbeat`) and extends `expires_at` to
+`min(now() + ttl, max_lifetime_at)`. If heartbeats stop, the lease expires after
+a configurable timeout (**default 60 seconds**) and is automatically released.
+Accidental refreshes and closed tabs recover gracefully: the customer is not
+locked out of the domain.
+
+On Edge and Proxy, a Bruiser-unaware client does not have to speak the protocol:
+the same cookie presenting again is treated as a heartbeat (ALREADY_HELD extends
+the TTL). An idle tab that makes no further allocation requests expires like any
+other missed heartbeat.
+
+**Recovery (acceptance criterion).** If a customer disconnects and reconnects
+*before* lease expiry, they resume the **same** execution. After expiry, a new
+execution may be acquired according to merchant policy.
 
 A lease is **not** an inventory hold. It is permission to attempt one.
 
@@ -326,7 +364,7 @@ classes of client exist; the merchant is protected regardless of which shows up.
 | | Bruiser-aware agents | Bruiser-unaware agents |
 |---|----------------------|------------------------|
 | Identity | Explicit session (`POST /v1/sessions`) | Merchant's existing authenticated session; Bruiser extracts the customer |
-| Execution | Explicit acquire / renew / release / handoff / watch | Execution acquired automatically on the first allocation request |
+| Execution | Explicit acquire / renew (heartbeat) / release / handoff / watch | Execution acquired automatically on the first allocation request; same cookie again heartbeats (ALREADY_HELD) |
 | Rules | Same concurrency policy | Same concurrency policy |
 | UX | Richer: watch instead of retry, clean handoff, named principals | Controlled, not convenient |
 
@@ -427,6 +465,7 @@ Scenarios:
 | Handoff | — | Alice clicks "Take control"; agent's next renew returns 410; browser completes purchase; agent's stale token rejected by SimTix |
 | Bypass attempt | agent goes straight to SimTix and succeeds | the same request is refused at the origin; the authority check reports no open paths |
 | Unaware agent | — | an agent that has never heard of Bruiser hits checkout with the club session cookie; Bruiser acquires transparently; the customer's second agent gets BUSY |
+| Recovery | closed tab holds the basket forever, or a refresh starts a second competing session | reconnect before expiry resumes the same execution; after expiry a new execution may be acquired |
 
 The dashboard shows side by side: **Execution Amplification Factor**, downstream
 requests, active executions, BUSY responses, seats-per-customer distribution,
@@ -637,6 +676,10 @@ chaos: **1 customer, 10,000 agents, 1 scarce event, exactly 1 authorised
 execution at any moment — never a duplicate grant.** Then a merchant writes their
 own policy and watches it enforced, revokes an execution, hands control to a
 browser, and answers "why was this request denied?" from the audit log.
+
+**Recovery.** If a customer disconnects and reconnects before lease expiry, they
+resume the same execution. After expiry, a new execution may be acquired according
+to merchant policy. A closed browser does not permanently lock the customer out.
 
 The result must be reliable, secure, observable, self-hostable, easy to integrate
 (a control layer, not a project), easy to demonstrate, and credible to an

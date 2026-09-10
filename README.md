@@ -13,11 +13,10 @@ scarce resource at a time.
 ```bash
 # Postgres must be reachable (docker compose or local).
 export BRUISER_DATABASE_URL=postgres://bruiser:bruiser@127.0.0.1:5432/bruiser?sslmode=disable
-export BRUISER_DEV_HMAC_SECRET=dev-secret-change-me
-make serve
+make serve   # sets BRUISER_ENV=lab and injects lab-only secrets
 ```
 
-Or: `docker compose -f deploy/compose/docker-compose.yml up --build`
+Or: `make demo-up` (compose interpolates lab secrets from the Makefile; do not commit them).
 
 ```bash
 # Dev customer assertion (HMAC JWT, membership number)
@@ -36,7 +35,14 @@ curl -sS -X POST localhost:8080/v1/executions/acquire \
   -d '{"resource":"event:ars-che","action":"purchase"}'
 ```
 
-A second agent for the same customer and resource receives `409 BUSY`.
+A second agent for the same customer and resource receives `409 BUSY`
+(or `202 QUEUED` when the rule sets `waiting.mode: bounded`). That queue
+is intra-customer concurrency — Alice’s extra agents wait for Alice, not
+behind Bob. A second customer on the same resource is granted independently.
+
+Drop-in: copy `configs/example.yaml`, list your hold/purchase routes, point
+Edge or Proxy at the origin you already have. Unmatched traffic passes
+through. See [docs/08-make-authoritative.md](docs/08-make-authoritative.md).
 
 Dev assertions default to membership `1001234` (Alice in the Arsenal-like lab):
 
@@ -44,7 +50,15 @@ Dev assertions default to membership `1001234` (Alice in the Arsenal-like lab):
 ./bin/bruiser assertion 1001234
 ```
 
-`GET /healthz` liveness, `GET /readyz` store readiness, `GET /metrics` Prometheus.
+`GET /healthz` liveness, `GET /readyz` store + signing key + mode, `GET /metrics` Prometheus.
+
+```bash
+make config-validate
+make doctor
+# Production path, observe only (refused unless acknowledged):
+BRUISER_ENV=production BRUISER_ALLOW_UNSAFE_MODES=1 BRUISER_MODE=dry-run make serve
+# PUT /v1/admin/controls {"enforce_percent":10}
+```
 
 ## Attack Lab
 
@@ -59,28 +73,47 @@ The lab creates a temporary drop store inside Bruiser, runs simulated shoppers t
 
 | Document | Purpose |
 |----------|---------|
-| [docs/01-product-brief.md](docs/01-product-brief.md) | Product brief (v2.2) |
+| [docs/00-product-instructions.md](docs/00-product-instructions.md) | Binding product instructions (v2.4) |
+| [docs/01-product-brief.md](docs/01-product-brief.md) | Product brief (v2.4) |
 | [docs/02-technical-design.md](docs/02-technical-design.md) | V1 design |
 | [docs/03-execution-plan.md](docs/03-execution-plan.md) | Milestones M0–M8 |
 | [docs/04-decisions.md](docs/04-decisions.md) | Architecture decision log |
 | [docs/05-decisions-from-founder-review.md](docs/05-decisions-from-founder-review.md) | Founder decisions |
 | [docs/06-integration-discovery.md](docs/06-integration-discovery.md) | Stage A discovery questionnaire |
 | [docs/07-club-profile-arsenal.md](docs/07-club-profile-arsenal.md) | Unverified Arsenal-like standing analogue |
+| [docs/08-make-authoritative.md](docs/08-make-authoritative.md) | Edge / Proxy / Embedded placement + Authority Check |
+| [docs/09-post-core-capabilities.md](docs/09-post-core-capabilities.md) | Dry-run, doctor, emergency controls (non-blocking) |
+| [docs/demo.md](docs/demo.md) | 90-second demo script + make targets |
+| [docs/ops.md](docs/ops.md) | Deploy, upgrade/rollback, backup/restore, emergency controls |
+| [docs/security/threat-model.md](docs/security/threat-model.md) | Lab threat model (not an external review) |
+| [CHANGELOG.md](CHANGELOG.md) | What shipped |
+| [sdk/README.md](sdk/README.md) | Go / Node / Python Embedded SDKs + Go agent client |
 | [protocol/v0-draft.md](protocol/v0-draft.md) | Bruiser Protocol v0 draft |
+| [protocol/tokens.md](protocol/tokens.md) | Assertion, session, execution tokens |
+| [protocol/audit.md](protocol/audit.md) | Audit event catalogue |
+| [protocol/mcp/README.md](protocol/mcp/README.md) | MCP tool catalogue (convenience only) |
+| [protocol/policy.schema.json](protocol/policy.schema.json) | Policy document JSON Schema |
 
 ## Licensing (intended, pending legal review)
 
-Protocol, schemas, specifications and SDKs: Apache-2.0. Gateway core: BSL 1.1.
-No licence files are committed until the OSS/Core boundary is formally decided.
+Protocol, schemas, specifications and SDKs: intended Apache-2.0. Gateway core:
+intended BSL 1.1 (source-available). The free tier is **Bruiser Community**,
+not “open source”. No licence files until counsel signs the split.
+Vendor telemetry is **off** unless `BRUISER_TELEMETRY=1`.
 
 ## Status
 
-M0–M2 are in this tree. M3 Edge is standing up against an **unverified
-Arsenal-like** club profile (`docs/07-club-profile-arsenal.md`,
-`configs/arsenal.yaml`) until Stage A discovery confirms or replaces it:
-`POST /v1/authorize`, transparent acquire from `boxoffice_session`, SimTix
-origin + Edge analogue, `bruiser authority-check`. Embedded SDKs, Proxy, and
-the 1×10,000 EAF demo remain. Stage A commercial discovery runs in parallel.
+**V1 is frozen. RC1 is the production candidate.** No new product
+features. Remaining work is human-owned
+(LICENSE/counsel, trademark, hosted sandbox DNS, image signing keys,
+Stage A outbound). See [docs/11-rc1.md](docs/11-rc1.md).
+
+The tree has Edge, Proxy, Go/Node/Python Embedded SDKs, Authority Check,
+EAF (`make eaf-nightly` 10,000× burst; `make soak` 30-minute 10k churn),
+YAML policy, handoff/revoke, bounded intra-customer queue, OIDC/JWKS,
+Helm, dry-run, doctor, emergency controls, and deployment acceptance
+across Embedded / Edge / Proxy. `bruiser_observed_eaf` is process-local —
+do not sum it across replicas (`docs/ops.md`).
 
 ## Arsenal-like lab (best guess until discovery)
 
@@ -91,13 +124,19 @@ platform origin Bruiser sits in front of (Edge), not club-owned checkout
 
 ```bash
 export BRUISER_DATABASE_URL=postgres://bruiser:bruiser@127.0.0.1:5432/bruiser?sslmode=disable
-make serve          # :8080  — gateway, merchant arsenal
-make simtix         # :8090 origin (lockdown), :8091 Edge analogue
-make authority-check
+make serve            # :8080 control plane; BRUISER_PROXY_ADDR=:8081 for Proxy
+make simtix           # :8090 origin (lockdown) + :8091 Edge analogue
+make authority-check  # Overall Result PASS; writes AUTHORITY_CHECK
+make eaf-demo         # unaware swarm; observed EAF ~N×, downstream 1×
+# Dashboard: http://127.0.0.1:8080/admin  (admin/edge secret)
 ```
 
 Two logins of membership `1001234` against `POST /api/events/ars-che/holds`
 via the Edge: first hold is created, second session receives `409 BUSY`.
-The same cookie is `ALREADY_HELD`. Direct origin holds without
+The same cookie is `ALREADY_HELD` and heartbeats the lease. A reconnect before
+expiry resumes the same execution; after expiry a new execution may be acquired.
+A Bruiser-aware browser can take control of an agent's execution (`handoff`
+mode `preempt`); the agent's next renew is `410` and a stale fence is rejected
+at origin. Direct origin holds without
 `X-Bruiser-Origin-Secret` are `403`. With origin lockdown off, Authority
 Check reports Overall Result FAIL and names the open path.

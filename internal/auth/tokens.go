@@ -13,6 +13,8 @@ import (
 	"github.com/Nareik33L/bruiser-gateway/internal/lease"
 )
 
+const Skew = 5 * time.Second
+
 var (
 	ErrUnauthorized = errors.New("unauthorized")
 	ErrForbidden    = errors.New("forbidden")
@@ -32,6 +34,7 @@ type SessionClaims struct {
 	PrincipalType string            `json:"pty"`
 	PrincipalID   string            `json:"pid"`
 	SessionID     string            `json:"sid"`
+	Version       int               `json:"ver,omitempty"`
 	Anchors       map[string]string `json:"anc,omitempty"`
 	jwt.RegisteredClaims
 }
@@ -45,6 +48,20 @@ type ExecutionClaims struct {
 	Action      string `json:"act"`
 	Principal   string `json:"prn"`
 	Fence       int64  `json:"fnc"`
+	jwt.RegisteredClaims
+}
+
+const (
+	AccessTokenType = "bruiser_admin"
+	RoleAdmin       = "admin"
+	RoleOperator    = "operator"
+)
+
+type AccessClaims struct {
+	MerchantID string `json:"mid"`
+	Role       string `json:"role"`
+	Actor      string `json:"act"`
+	TokenType  string `json:"typ"`
 	jwt.RegisteredClaims
 }
 
@@ -86,6 +103,79 @@ func (s Signer) SignExecution(e lease.Execution) (string, error) {
 	return tok.SignedString(s.Private)
 }
 
+func ParseExecution(token string, pub ed25519.PublicKey) (ExecutionClaims, error) {
+	var claims ExecutionClaims
+	parsed, err := jwt.ParseWithClaims(token, &claims, func(t *jwt.Token) (any, error) {
+		if t.Method.Alg() != jwt.SigningMethodEdDSA.Alg() {
+			return nil, fmt.Errorf("%w: unexpected alg", ErrUnauthorized)
+		}
+		return pub, nil
+	}, jwt.WithLeeway(Skew), jwt.WithValidMethods([]string{jwt.SigningMethodEdDSA.Alg()}))
+	if err != nil || !parsed.Valid {
+		return ExecutionClaims{}, ErrUnauthorized
+	}
+	if claims.ExpiresAt != nil && time.Now().UTC().After(claims.ExpiresAt.Time.Add(Skew)) {
+		return ExecutionClaims{}, ErrUnauthorized
+	}
+	if claims.ExecutionID == "" || claims.CustomerID == "" || claims.MerchantID == "" {
+		return ExecutionClaims{}, ErrUnauthorized
+	}
+	return claims, nil
+}
+
+func (s Signer) SignAccess(role, actor string, ttl time.Duration) (string, error) {
+	if role != RoleAdmin && role != RoleOperator {
+		return "", fmt.Errorf("%w: unknown role", ErrForbidden)
+	}
+	if ttl <= 0 {
+		ttl = 5 * time.Minute
+	}
+	if ttl > time.Hour {
+		ttl = time.Hour
+	}
+	now := time.Now().UTC()
+	claims := AccessClaims{
+		MerchantID: s.MerchantID,
+		Role:       role,
+		Actor:      actor,
+		TokenType:  AccessTokenType,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "bruiser/" + s.MerchantID,
+			Subject:   actor,
+			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+			ID:        id.New("jti"),
+		},
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
+	tok.Header["kid"] = s.KID
+	return tok.SignedString(s.Private)
+}
+
+func ParseAccess(token string, pub ed25519.PublicKey) (AccessClaims, error) {
+	var claims AccessClaims
+	parsed, err := jwt.ParseWithClaims(token, &claims, func(t *jwt.Token) (any, error) {
+		if t.Method.Alg() != jwt.SigningMethodEdDSA.Alg() {
+			return nil, fmt.Errorf("%w: unexpected alg", ErrUnauthorized)
+		}
+		return pub, nil
+	}, jwt.WithLeeway(Skew), jwt.WithValidMethods([]string{jwt.SigningMethodEdDSA.Alg()}))
+	if err != nil || !parsed.Valid {
+		return AccessClaims{}, ErrUnauthorized
+	}
+	if claims.TokenType != AccessTokenType {
+		return AccessClaims{}, ErrUnauthorized
+	}
+	if claims.Role != RoleAdmin && claims.Role != RoleOperator {
+		return AccessClaims{}, ErrUnauthorized
+	}
+	if claims.ExpiresAt != nil && time.Now().UTC().After(claims.ExpiresAt.Time.Add(Skew)) {
+		return AccessClaims{}, ErrUnauthorized
+	}
+	return claims, nil
+}
+
 func ParseSession(token string, pub ed25519.PublicKey) (SessionClaims, error) {
 	var claims SessionClaims
 	parsed, err := jwt.ParseWithClaims(token, &claims, func(t *jwt.Token) (any, error) {
@@ -104,22 +194,37 @@ func ParseSession(token string, pub ed25519.PublicKey) (SessionClaims, error) {
 }
 
 func ParseAssertionHS256(token, secret, audience string) (CustomerAssertion, error) {
+	return ParseAssertionHS256Claim(token, secret, "sub")
+}
+
+func ParseAssertionHS256Claim(token, secret, subjectClaim string) (CustomerAssertion, error) {
 	var claims jwt.MapClaims
 	parsed, err := jwt.ParseWithClaims(token, &claims, func(t *jwt.Token) (any, error) {
 		if t.Method.Alg() != jwt.SigningMethodHS256.Alg() {
 			return nil, fmt.Errorf("%w: unexpected alg", ErrUnauthorized)
 		}
 		return []byte(secret), nil
-	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
+	}, jwt.WithLeeway(Skew), jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
 	if err != nil || !parsed.Valid {
 		return CustomerAssertion{}, ErrUnauthorized
 	}
-	sub, _ := claims.GetSubject()
+	if subjectClaim == "" {
+		subjectClaim = "sub"
+	}
+	sub, _ := claims[subjectClaim].(string)
+	if sub == "" {
+		if subjectClaim == "sub" {
+			sub, _ = claims.GetSubject()
+		}
+	}
 	if sub == "" {
 		return CustomerAssertion{}, ErrUnauthorized
 	}
 	exp, err := claims.GetExpirationTime()
 	if err != nil || exp == nil {
+		return CustomerAssertion{}, ErrUnauthorized
+	}
+	if time.Now().UTC().After(exp.Time.Add(Skew)) {
 		return CustomerAssertion{}, ErrUnauthorized
 	}
 	out := CustomerAssertion{
@@ -129,6 +234,11 @@ func ParseAssertionHS256(token, secret, audience string) (CustomerAssertion, err
 	}
 	if v, ok := claims["jti"].(string); ok {
 		out.JTI = v
+	}
+	if v, ok := claims["mid"].(string); ok {
+		out.MerchantID = v
+	} else if v, ok := claims["merchant_id"].(string); ok {
+		out.MerchantID = v
 	}
 	if raw, ok := claims["bruiser_anchors"].(map[string]any); ok {
 		for k, v := range raw {
@@ -151,6 +261,78 @@ func JWKS(kid string, pub ed25519.PublicKey) map[string]any {
 			"x":   base64.RawURLEncoding.EncodeToString(pub),
 		}},
 	}
+}
+
+type AssertionOpts struct {
+	Issuer     string
+	Audience   string
+	MerchantID string
+	Claim      string
+}
+
+func ParseAssertion(token, secret string, opts AssertionOpts) (CustomerAssertion, error) {
+	claim := opts.Claim
+	if claim == "" {
+		claim = "sub"
+	}
+	a, err := ParseAssertionHS256Claim(token, secret, claim)
+	if err != nil {
+		return CustomerAssertion{}, err
+	}
+	if opts.Issuer != "" {
+		var claims jwt.MapClaims
+		parsed, err := jwt.ParseWithClaims(token, &claims, func(t *jwt.Token) (any, error) {
+			return []byte(secret), nil
+		}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithLeeway(Skew))
+		if err != nil || parsed == nil {
+			return CustomerAssertion{}, ErrUnauthorized
+		}
+		iss, _ := claims.GetIssuer()
+		if iss != opts.Issuer {
+			return CustomerAssertion{}, ErrUnauthorized
+		}
+		if opts.Audience != "" {
+			ok := false
+			if list, err := claims.GetAudience(); err == nil {
+				for _, a := range list {
+					if a == opts.Audience {
+						ok = true
+						break
+					}
+				}
+			}
+			if !ok {
+				return CustomerAssertion{}, ErrUnauthorized
+			}
+		}
+	} else if opts.Audience != "" {
+		var claims jwt.MapClaims
+		parsed, err := jwt.ParseWithClaims(token, &claims, func(t *jwt.Token) (any, error) {
+			return []byte(secret), nil
+		}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithLeeway(Skew))
+		if err != nil || parsed == nil {
+			return CustomerAssertion{}, ErrUnauthorized
+		}
+		ok := false
+		if list, err := claims.GetAudience(); err == nil {
+			for _, a := range list {
+				if a == opts.Audience {
+					ok = true
+					break
+				}
+			}
+		}
+		if !ok {
+			return CustomerAssertion{}, ErrUnauthorized
+		}
+	}
+	if opts.MerchantID != "" && a.MerchantID != "" && a.MerchantID != opts.MerchantID {
+		return CustomerAssertion{}, ErrUnauthorized
+	}
+	if opts.MerchantID != "" && a.MerchantID == "" {
+		a.MerchantID = opts.MerchantID
+	}
+	return a, nil
 }
 
 func IssueDevAssertion(secret, customerID string, ttl time.Duration, anchors map[string]string) (string, error) {

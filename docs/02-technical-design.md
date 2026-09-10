@@ -61,7 +61,7 @@ Domain          merchant_id, domain_key  (PK), fence bigint, updated_at
 Execution       execution_id, merchant_id, domain_key, customer_id, principal,
                 resource, action, rule_name, fence, state, granted_at,
                 expires_at, max_lifetime_at, renew_count, ended_at, end_reason
-Waiter (V1.5)   merchant_id, domain_key, seq, session_id, enqueued_at, claim_deadline
+Waiter          merchant_id, domain_key, waiter_id (= future execution_id), principal, expires_at
 AuditEvent      seq, merchant_id, at (store clock), type, customer_id, principal,
                 domain_key, execution_id, fence, rule_name, reason, request_id, attrs{}
 ```
@@ -152,7 +152,9 @@ BEGIN;
   SELECT fence FROM domains WHERE merchant_id=$m AND domain_key=$d FOR UPDATE;      -- serialises the domain
   SELECT * FROM executions
     WHERE merchant_id=$m AND domain_key=$d AND state='ACTIVE' AND expires_at > now();
-  -- if one of those is held by this session/principal → return it (idempotent, 200)
+  -- if one of those is held by this principal → heartbeat/resume:
+  --     expires_at = least(now()+ttl, max_lifetime_at), rebind session_id,
+  --     renew_count + 1, audit EXECUTION_RENEWED reason=resume, return ALREADY_HELD
   -- if count >= rule.max_active → BUSY (409) with holder info; write audit; COMMIT
   UPDATE domains SET fence = fence + 1 ... RETURNING fence;
   INSERT INTO executions (... fence, state='ACTIVE',
@@ -169,10 +171,23 @@ path with a count check.
 ### 4.3 Renew / release / revoke / handoff
 
 All take the domain row lock first, re-check `state='ACTIVE' AND expires_at >
-now()`, then mutate. Renew sets `expires_at = least(now()+ttl, max_lifetime_at)`
-and returns a fresh token with the same fence. Handoff ends the old execution and
-inserts the successor with `fence+1` in the same transaction; `successor_id` links
-them.
+now()`, then mutate.
+
+**Renew is the heartbeat.** Clients (browser or Bruiser-aware agent) send
+`POST /v1/executions/{id}/renew` (alias `POST /v1/executions/{id}/heartbeat`)
+every 20–30 seconds (default 25 s). Each call sets
+`expires_at = least(now()+ttl, max_lifetime_at)` (`ttl` default 60 s) and returns
+a fresh token with the same fence. The holder is the original session *or* a new
+session bound to the same principal, so a refresh or reconnect before expiry
+resumes rather than locking the customer out. If heartbeats stop, the lease
+expires after the TTL and is released automatically. A reconnect *after* expiry
+is a new acquire under merchant policy (typically a new GRANT).
+
+On Edge and Proxy, a Bruiser-unaware client does not call renew: the same cookie
+presenting again is ALREADY_HELD and takes the resume path above.
+
+Handoff ends the old execution and inserts the successor with `fence+1` in the
+same transaction; `successor_id` links them.
 
 ### 4.4 Local busy cache
 
@@ -303,7 +318,8 @@ header honoured on mutating requests; `request_id` echoed in responses and audit
 |---------------|---------|---------|------------------|
 | `POST /v1/sessions` | exchange customer assertion + principal for a session | 201 | 401 bad assertion, 403 principal type not allowed |
 | `POST /v1/executions/acquire` `{resource, action}` | request a lease in the matching domain | 201 GRANTED, 200 already held by this principal | 409 BUSY, 403 DENIED, 503 UNAVAILABLE |
-| `POST /v1/executions/{id}/renew` | extend lease | 200 new token | 410 with `reason` ∈ EXPIRED/REVOKED/HANDED_OFF/RELEASED, 403 not holder |
+| `POST /v1/executions/{id}/renew` | heartbeat: extend lease | 200 new token, `heartbeat_after_ms` | 410 with `reason` ∈ EXPIRED/REVOKED/HANDED_OFF/RELEASED, 403 not holder |
+| `POST /v1/executions/{id}/heartbeat` | alias of renew | 200 | same as renew |
 | `POST /v1/executions/{id}/release` | give up lease | 200 | 410 |
 | `POST /v1/executions/{id}/handoff` `{to: {type, id?}, mode}` | transfer lease | 201 new execution (token to new holder) | 403 precedence, 409 target has own lease |
 | `POST /v1/executions/{id}/revoke` `{reason}` | end lease (customer via precedence, or admin) | 200 | 403 |
@@ -323,6 +339,10 @@ BUSY body:
   "retry_after_ms": 4000, "watch": "/v1/executions/exe_839281/watch",
   "can_preempt": false }
 ```
+
+**Recovery.** Reconnect before expiry resumes the same execution (ALREADY_HELD
+extends TTL and rebinds the session). After expiry, a new execution may be
+acquired according to merchant policy.
 
 `can_preempt: true` is how a browser learns it may "take control".
 

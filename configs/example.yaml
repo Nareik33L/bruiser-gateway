@@ -1,0 +1,76 @@
+# Drop-in profile: list the scarce-inventory routes, point Edge or Proxy
+# at your existing origin, lock the origin. Everything else passes through.
+#
+#   bruiser config validate configs/example.yaml
+#   bruiser doctor --profile configs/example.yaml
+#   BRUISER_PROFILE=configs/example.yaml BRUISER_PROXY_ADDR=:8081 \
+#     BRUISER_ORIGIN_URL=http://your-box-office:8090 bruiser serve
+#   BRUISER_MODE=dry-run  # same path; never blocks; then flip to enforce
+
+merchant_id: example
+name: Example merchant
+# unmatched: deny is the shipped default (fail closed on unlisted
+# routes). Discovery/static paths must be listed below with no
+# resource so they stay uncontrolled. unmatched: allow is fail-open
+# and needs BRUISER_ALLOW_UNSAFE_MODES=1 in production.
+# Confirm with: bruiser authority-check --front … --origin … --control …
+unmatched: deny
+
+# Optional closed catalogue of canonical resource IDs. When set, inbound
+# strings fold then must resolve to one of these. Empty = fold-only.
+# resources:
+#   - sku:final
+
+identity:
+  # Lab drop-in. Production refuses extractor: auto + unsigned header
+  # unless identity.allow_unsigned_header: true is set on purpose.
+  # Production identity is oidc/jwks with issuer + audience.
+  # HS256 requires BRUISER_ENV=lab and BRUISER_DEV_ASSERTIONS=1.
+  extractor: auto
+  cookie: session
+  header: X-Customer-Id
+  principal_header: X-Principal-Id
+  subject_claim: sub
+  hmac_secret_env: BRUISER_DEV_HMAC_SECRET
+  # jwks_url: https://idp.example/.well-known/jwks.json
+  # issuer: https://idp.example
+  # audience: bruiser
+
+routes:
+  # Discovery / static / login: no lease.
+  - match: { method: GET, path: "/healthz" }
+    action: health
+  - match: { method: GET, path: "/api/catalog" }
+    action: search
+  # Allocation: fail closed. Rename these to your hold/purchase paths.
+  - match: { method: POST, path: "/api/holds" }
+    resource_from: event_id
+    resource_prefix: "sku:"
+    action: hold
+  - match: { method: POST, path: "/api/checkout" }
+    resource_from: event_id
+    resource_prefix: "sku:"
+    action: purchase
+
+policy:
+  version: 1
+  defaults:
+    lease_ttl: 60s
+    max_lifetime: 15m
+  domains:
+    - name: one-execution-per-customer
+      match: { action: [purchase, hold] }
+      scope: [customer, resource]
+      max_active: 1
+      precedence: [browser, agent]
+      # One-seat example: one ACTIVE and one protected op. Merchants
+      # who need more set a higher cap; omit the block for unlimited.
+      budget: { max_ops: 1 }
+      # Optional intra-customer concurrency (not a waiting room):
+      # one ACTIVE for this customer; extra agents QUEUED, then BUSY.
+      # A second customer on the same resource is a different domain.
+      # waiting: { mode: bounded, max_waiters: 1 }
+    - name: discovery
+      match: { action: [search] }
+      control: none
+  fallback: deny

@@ -26,6 +26,8 @@ type cacheItem struct {
 	holder    Principal
 	exeID     string
 	expiresAt time.Time
+	maxActive int
+	occupied  int
 }
 
 func NewBusyCache(inner Store, hedge uint64) *BusyCache {
@@ -42,28 +44,47 @@ func NewBusyCache(inner Store, hedge uint64) *BusyCache {
 
 func cacheKey(merchantID, domainKey string) string { return merchantID + "\x00" + domainKey }
 
-func (c *BusyCache) remember(merchantID, domainKey string, exe *Execution) {
+func (c *BusyCache) Reset() {
+	c.mu.Lock()
+	c.items = map[string]cacheItem{}
+	c.mu.Unlock()
+}
+
+func (c *BusyCache) remember(merchantID, domainKey string, exe *Execution, maxActive, occupied int) {
 	if exe == nil {
 		return
+	}
+	if maxActive < 1 {
+		maxActive = 1
+	}
+	if occupied < 1 {
+		occupied = 1
 	}
 	c.mu.Lock()
 	c.items[cacheKey(merchantID, domainKey)] = cacheItem{
 		holder:    exe.Principal,
 		exeID:     exe.ID,
 		expiresAt: exe.ExpiresAt,
+		maxActive: maxActive,
+		occupied:  occupied,
 	}
 	c.mu.Unlock()
 }
 
-func (c *BusyCache) rememberBusy(merchantID, domainKey string, b *BusyInfo) {
+func (c *BusyCache) rememberBusy(merchantID, domainKey string, b *BusyInfo, maxActive int) {
 	if b == nil {
 		return
+	}
+	if maxActive < 1 {
+		maxActive = 1
 	}
 	c.mu.Lock()
 	c.items[cacheKey(merchantID, domainKey)] = cacheItem{
 		holder:    b.Holder,
 		exeID:     b.ActiveExecutionID,
 		expiresAt: b.ExpiresAt,
+		maxActive: maxActive,
+		occupied:  maxActive,
 	}
 	c.mu.Unlock()
 }
@@ -91,10 +112,14 @@ func (c *BusyCache) lookup(merchantID, domainKey string) (cacheItem, bool) {
 func (c *BusyCache) Acquire(ctx context.Context, req AcquireRequest) (AcquireResult, error) {
 	n := c.n.Add(1)
 	refresh := c.hedge > 0 && n%c.hedge == 0
+	// A local BUSY would skip the store and starve the intra-customer queue.
+	if req.MaxWaiters > 0 {
+		refresh = true
+	}
 	if !refresh {
 		if it, ok := c.lookup(req.MerchantID, req.DomainKey); ok {
 			same := it.holder.Type == req.Principal.Type && it.holder.ID == req.Principal.ID
-			if !same {
+			if !same && it.occupied >= it.maxActive {
 				c.hits.Add(1)
 				return AcquireResult{
 					Status: StatusBusy,
@@ -102,6 +127,7 @@ func (c *BusyCache) Acquire(ctx context.Context, req AcquireRequest) (AcquireRes
 						ActiveExecutionID: it.exeID,
 						Holder:            it.holder,
 						ExpiresAt:         it.expiresAt,
+						CanPreempt:        CanPreemptRanked(req.Principal, it.holder, req.Precedence),
 					},
 				}, nil
 			}
@@ -113,11 +139,27 @@ func (c *BusyCache) Acquire(ctx context.Context, req AcquireRequest) (AcquireRes
 	if err != nil {
 		return res, err
 	}
+	ma := req.MaxActive
+	if ma < 1 {
+		ma = 1
+	}
 	switch res.Status {
-	case StatusGranted, StatusAlreadyHeld:
-		c.remember(req.MerchantID, req.DomainKey, res.Execution)
+	case StatusGranted:
+		occ := 1
+		if it, ok := c.lookup(req.MerchantID, req.DomainKey); ok {
+			occ = it.occupied + 1
+		}
+		c.remember(req.MerchantID, req.DomainKey, res.Execution, ma, occ)
+	case StatusAlreadyHeld:
+		occ := 1
+		if it, ok := c.lookup(req.MerchantID, req.DomainKey); ok {
+			occ = it.occupied
+		}
+		c.remember(req.MerchantID, req.DomainKey, res.Execution, ma, occ)
 	case StatusBusy:
-		c.rememberBusy(req.MerchantID, req.DomainKey, res.Busy)
+		c.rememberBusy(req.MerchantID, req.DomainKey, res.Busy, ma)
+	case StatusQueued:
+		// Do not cache a full domain: a later waiter may still fit.
 	}
 	return res, nil
 }
@@ -125,7 +167,7 @@ func (c *BusyCache) Acquire(ctx context.Context, req AcquireRequest) (AcquireRes
 func (c *BusyCache) Renew(ctx context.Context, merchantID, executionID, sessionID, requestID string, ttl time.Duration) (Execution, error) {
 	e, err := c.inner.Renew(ctx, merchantID, executionID, sessionID, requestID, ttl)
 	if err == nil {
-		c.remember(merchantID, e.DomainKey, &e)
+		c.remember(merchantID, e.DomainKey, &e, 1, 1)
 	}
 	return e, err
 }
@@ -138,12 +180,20 @@ func (c *BusyCache) Release(ctx context.Context, merchantID, executionID, sessio
 	return e, err
 }
 
-func (c *BusyCache) Revoke(ctx context.Context, merchantID, executionID, requestID, reason string) (Execution, error) {
-	e, err := c.inner.Revoke(ctx, merchantID, executionID, requestID, reason)
+func (c *BusyCache) Revoke(ctx context.Context, merchantID, executionID, sessionID, requestID, reason string) (Execution, error) {
+	e, err := c.inner.Revoke(ctx, merchantID, executionID, sessionID, requestID, reason)
 	if err == nil {
 		c.forget(merchantID, e.DomainKey)
 	}
 	return e, err
+}
+
+func (c *BusyCache) Handoff(ctx context.Context, req HandoffRequest) (HandoffResult, error) {
+	res, err := c.inner.Handoff(ctx, req)
+	if err == nil {
+		c.remember(req.MerchantID, res.Successor.DomainKey, &res.Successor, 1, 1)
+	}
+	return res, err
 }
 
 func (c *BusyCache) Get(ctx context.Context, merchantID, executionID string) (Execution, error) {
@@ -156,7 +206,7 @@ func (c *BusyCache) ExpireDue(ctx context.Context, limit int) (int, error) {
 
 func (c *BusyCache) Ping(ctx context.Context) error { return c.inner.Ping(ctx) }
 
-func (c *BusyCache) Hits() uint64 { return c.hits.Load() }
+func (c *BusyCache) Hits() uint64   { return c.hits.Load() }
 func (c *BusyCache) Misses() uint64 { return c.miss.Load() }
 
 var _ Store = (*BusyCache)(nil)

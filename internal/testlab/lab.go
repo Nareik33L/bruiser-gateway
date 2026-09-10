@@ -41,6 +41,36 @@ func ArsenalProfile(t testing.TB) merchant.Profile {
 
 func Gateway(t testing.TB, profile merchant.Profile) (*httptest.Server, config.Config) {
 	t.Helper()
+	lab := Start(t, profile, nil)
+	return lab.Server, lab.Cfg
+}
+
+func GatewayAPI(t testing.TB, profile merchant.Profile) (*publicapi.Server, *httptest.Server, config.Config, auth.Signer) {
+	lab := Start(t, profile, nil)
+	return lab.API, lab.Server, lab.Cfg, lab.Signer
+}
+
+type Lab struct {
+	API    *publicapi.Server
+	Server *httptest.Server
+	Admin  *httptest.Server
+	Cfg    config.Config
+	Signer auth.Signer
+	Store  *pgstore.Store
+}
+
+func Start(t testing.TB, profile merchant.Profile, mut func(*config.Config)) Lab {
+	t.Helper()
+	return gatewayWithStore(t, profile, mut)
+}
+
+func GatewayWith(t testing.TB, profile merchant.Profile, mut func(*config.Config)) (*publicapi.Server, *httptest.Server, config.Config, auth.Signer) {
+	lab := Start(t, profile, mut)
+	return lab.API, lab.Server, lab.Cfg, lab.Signer
+}
+
+func gatewayWithStore(t testing.TB, profile merchant.Profile, mut func(*config.Config)) Lab {
+	t.Helper()
 	url := os.Getenv("BRUISER_TEST_DATABASE_URL")
 	if url == "" {
 		t.Skip("BRUISER_TEST_DATABASE_URL not set")
@@ -55,11 +85,31 @@ func Gateway(t testing.TB, profile merchant.Profile) (*httptest.Server, config.C
 	}
 	t.Cleanup(store.Close)
 	cfg := config.Load()
+	cfg.Environment = "lab"
+	cfg.NormalizeListen()
 	cfg.DatabaseURL = url
 	cfg.MerchantID = id.New("m")
 	cfg.LeaseTTL = 30 * time.Second
 	cfg.EdgeSecret = "edge-secret-dev"
+	cfg.AdminSecret = "admin-secret-dev"
+	cfg.OperatorSecret = "operator-secret-dev"
 	cfg.OriginSecret = "origin-lock-dev"
+	cfg.AdminAddr = "127.0.0.1:0"
+	cfg.MaxInFlight = 8
+	cfg.RatePerSec = 100
+	cfg.DevAssertions = true
+	cfg.RateSessions = 100000
+	cfg.RateAcquire = 100000
+	cfg.RateRenew = 100000
+	cfg.RateRelease = 100000
+	cfg.RateAuthorize = 100000
+	cfg.RateMerchant = 100000
+	cfg.RateCustomer = 100000
+	cfg.RatePrincipal = 100000
+	cfg.RateIP = 0
+	if mut != nil {
+		mut(&cfg)
+	}
 	if profile.MerchantID == "" {
 		profile = merchant.Empty(cfg.MerchantID)
 	}
@@ -71,8 +121,38 @@ func Gateway(t testing.TB, profile merchant.Profile) (*httptest.Server, config.C
 		t.Fatal(err)
 	}
 	signer := auth.Signer{KID: key.KID, MerchantID: cfg.MerchantID, Private: key.Private, Public: key.Public}
-	h := publicapi.New(cfg, store, signer, slog.New(slog.NewTextHandler(io.Discard, nil)), profile)
-	srv := httptest.NewServer(h)
-	t.Cleanup(srv.Close)
-	return srv, cfg
+	api := publicapi.New(cfg, store, signer, slog.New(slog.NewTextHandler(io.Discard, nil)), profile)
+	pub := httptest.NewServer(api)
+	admin := httptest.NewServer(api.AdminHandler())
+	t.Cleanup(func() {
+		api.Close()
+		pub.Close()
+		admin.Close()
+	})
+	return Lab{API: api, Server: pub, Admin: admin, Cfg: cfg, Signer: signer, Store: store}
+}
+
+// GatewayPair starts two control-plane processes against one merchant so
+// LISTEN/NOTIFY and cache-reset behaviour can be tested across nodes.
+func GatewayPair(t testing.TB, profile merchant.Profile) (Lab, Lab) {
+	t.Helper()
+	a := Start(t, profile, nil)
+	url := a.Cfg.DatabaseURL
+	ctx := context.Background()
+	storeB, err := pgstore.Connect(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(storeB.Close)
+	apiB := publicapi.New(a.Cfg, storeB, a.Signer, slog.New(slog.NewTextHandler(io.Discard, nil)), profile)
+	pubB := httptest.NewServer(apiB)
+	adminB := httptest.NewServer(apiB.AdminHandler())
+	t.Cleanup(func() {
+		apiB.Close()
+		pubB.Close()
+		adminB.Close()
+	})
+	a.API.Start(ctx)
+	apiB.Start(ctx)
+	return a, Lab{API: apiB, Server: pubB, Admin: adminB, Cfg: a.Cfg, Signer: a.Signer, Store: storeB}
 }

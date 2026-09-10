@@ -1,0 +1,11 @@
+{
+  "name": "@bruiser/sdk",
+  "version": "0.1.0",
+  "description": "Bruiser Embedded SDK for Node — verify execution tokens at the admission point.",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test test.js"
+  },
+  "license": "UNLICENSED"
+}

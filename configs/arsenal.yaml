@@ -2,6 +2,12 @@ merchant_id: arsenal
 name: Arsenal FC
 profile: arsenal-like-premier-league
 assumptions: unverified-best-guess
+unmatched: deny
+
+# Optional closed catalogue. When set, inbound IDs fold then must match.
+# Leave empty to fold only (lab / fixture templates like event:{event}).
+# resources:
+#   - event:ars-che
 
 identity:
   extractor: cookie-jwt
@@ -10,6 +16,10 @@ identity:
   hmac_secret_env: BRUISER_DEV_HMAC_SECRET
 
 routes:
+  - match: { method: GET, path: "/healthz" }
+    action: health
+  - match: { method: POST, path: "/login" }
+    action: identity
   - match: { method: GET, path: "/api/events" }
     action: search
   - match: { method: GET, path: "/api/events/{event}" }
@@ -23,7 +33,19 @@ routes:
     action: purchase
 
 policy:
-  rule_name: purchase-per-event
-  max_active: 1
-  lease_ttl: 60s
-  max_lifetime: 15m
+  version: 1
+  defaults:
+    lease_ttl: 60s
+    max_lifetime: 15m
+  domains:
+    - name: purchase-per-event
+      match: { action: [purchase, hold] }
+      scope: [customer, resource]
+      max_active: 1
+      lease_ttl: 60s
+      max_lifetime: 15m
+      precedence: [browser, agent]
+    - name: discovery
+      match: { action: [search] }
+      control: none
+  fallback: deny

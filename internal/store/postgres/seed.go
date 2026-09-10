@@ -20,13 +20,15 @@ type Merchant struct {
 }
 
 type SessionRow struct {
-	ID             string
-	MerchantID     string
-	CustomerID     string
-	Anchors        map[string]string
-	PrincipalType  string
-	PrincipalID    string
-	ExpiresAt      time.Time
+	ID            string
+	MerchantID    string
+	CustomerID    string
+	Anchors       map[string]string
+	PrincipalType string
+	PrincipalID   string
+	ExpiresAt     time.Time
+	RevokedAt     *time.Time
+	Version       int
 }
 
 type SigningKey struct {
@@ -142,10 +144,10 @@ func (s *Store) Session(ctx context.Context, sessionID string) (SessionRow, erro
 	var anchors []byte
 	err := s.pool.QueryRow(ctx, `
 		select session_id, merchant_id, customer_id, anchors,
-		       principal_type, principal_id, expires_at
+		       principal_type, principal_id, expires_at, revoked_at, version
 		from sessions where session_id = $1`, sessionID,
 	).Scan(&sess.ID, &sess.MerchantID, &sess.CustomerID, &anchors,
-		&sess.PrincipalType, &sess.PrincipalID, &sess.ExpiresAt)
+		&sess.PrincipalType, &sess.PrincipalID, &sess.ExpiresAt, &sess.RevokedAt, &sess.Version)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return sess, err
 	}

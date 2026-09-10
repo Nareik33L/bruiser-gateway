@@ -2,67 +2,51 @@ package publicapi_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"sync"
 	"testing"
 	"time"
 
-	"log/slog"
-
-	"github.com/Nareik33L/bruiser-gateway/internal/api/public"
 	"github.com/Nareik33L/bruiser-gateway/internal/auth"
 	"github.com/Nareik33L/bruiser-gateway/internal/config"
-	"github.com/Nareik33L/bruiser-gateway/internal/id"
 	"github.com/Nareik33L/bruiser-gateway/internal/merchant"
-	pgstore "github.com/Nareik33L/bruiser-gateway/internal/store/postgres"
+	"github.com/Nareik33L/bruiser-gateway/internal/testlab"
 )
+
+func startLab(t *testing.T) testlab.Lab {
+	t.Helper()
+	return testlab.Start(t, merchant.Profile{}, func(c *config.Config) {
+		c.LeaseTTL = 15 * time.Second
+		c.RateSessions, c.RateAcquire, c.RateAuthorize = 1e6, 1e6, 1e6
+		c.RateMerchant, c.RateCustomer, c.RatePrincipal = 1e6, 1e6, 1e6
+	})
+}
 
 func startServer(t *testing.T) (*httptest.Server, config.Config) {
 	t.Helper()
-	url := os.Getenv("BRUISER_TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("BRUISER_TEST_DATABASE_URL not set")
-	}
-	ctx := context.Background()
-	if err := pgstore.Migrate(ctx, url); err != nil {
-		t.Fatal(err)
-	}
-	store, err := pgstore.Connect(ctx, url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(store.Close)
-	cfg := config.Load()
-	cfg.DatabaseURL = url
-	cfg.MerchantID = id.New("m")
-	cfg.LeaseTTL = 15 * time.Second
-	if err := store.EnsureMerchant(ctx, cfg.MerchantID, "test", cfg.DevHMACSecret); err != nil {
-		t.Fatal(err)
-	}
-	key, err := store.EnsureSigningKey(ctx, cfg.MerchantID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	signer := auth.Signer{KID: key.KID, MerchantID: cfg.MerchantID, Private: key.Private, Public: key.Public}
-	h := publicapi.New(cfg, store, signer, slog.New(slog.NewTextHandler(io.Discard, nil)), merchant.Empty(cfg.MerchantID))
-	srv := httptest.NewServer(h)
-	t.Cleanup(srv.Close)
-	return srv, cfg
+	lab := startLab(t)
+	return lab.Server, lab.Cfg
 }
 
 func session(t *testing.T, srv *httptest.Server, cfg config.Config, customer, principal string) string {
+	return sessionAs(t, srv, cfg, customer, "agent", principal)
+}
+
+func sessionAs(t *testing.T, srv *httptest.Server, cfg config.Config, customer, ptype, principal string) string {
+	return sessionAnchored(t, srv, cfg, customer, ptype, principal, nil)
+}
+
+func sessionAnchored(t *testing.T, srv *httptest.Server, cfg config.Config, customer, ptype, principal string, anchors map[string]string) string {
 	t.Helper()
-	assertion, err := auth.IssueDevAssertion(cfg.DevHMACSecret, customer, time.Hour, nil)
+	assertion, err := auth.IssueDevAssertion(cfg.DevHMACSecret, customer, time.Hour, anchors)
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := fmt.Sprintf(`{"principal":{"type":"agent","id":%q}}`, principal)
+	body := fmt.Sprintf(`{"principal":{"type":%q,"id":%q}}`, ptype, principal)
 	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/sessions", bytes.NewBufferString(body))
 	req.Header.Set("Authorization", "Bearer "+assertion)
 	req.Header.Set("Content-Type", "application/json")
@@ -175,6 +159,75 @@ func TestAcquireBusyRenewRelease(t *testing.T) {
 		t.Fatalf("reacquire %d %s", resp.StatusCode, b)
 	}
 	resp.Body.Close()
+}
+
+func TestHeartbeatAndReconnect(t *testing.T) {
+	srv, cfg := startServer(t)
+	tok1 := session(t, srv, cfg, "alice", "agent-1")
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/executions/acquire", bytes.NewBufferString(`{"resource":"event:ars-che","action":"purchase"}`))
+	req.Header.Set("Authorization", "Bearer "+tok1)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var granted struct {
+		ID               string `json:"execution_id"`
+		HeartbeatAfterMs int64  `json:"heartbeat_after_ms"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&granted); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("acquire %d", resp.StatusCode)
+	}
+	if granted.HeartbeatAfterMs != cfg.HeartbeatInterval.Milliseconds() {
+		t.Fatalf("heartbeat_after_ms=%d want %d", granted.HeartbeatAfterMs, cfg.HeartbeatInterval.Milliseconds())
+	}
+
+	req, _ = http.NewRequest(http.MethodPost, srv.URL+"/v1/executions/"+granted.ID+"/heartbeat", nil)
+	req.Header.Set("Authorization", "Bearer "+tok1)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var beat struct {
+		RenewCount int `json:"renew_count"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&beat); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("heartbeat %d", resp.StatusCode)
+	}
+	if beat.RenewCount < 1 {
+		t.Fatalf("heartbeat renew_count=%d", beat.RenewCount)
+	}
+
+	tokResume := session(t, srv, cfg, "alice", "agent-1")
+	req, _ = http.NewRequest(http.MethodPost, srv.URL+"/v1/executions/acquire", bytes.NewBufferString(`{"resource":"event:ars-che","action":"purchase"}`))
+	req.Header.Set("Authorization", "Bearer "+tokResume)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resumed struct {
+		ID string `json:"execution_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&resumed); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("reconnect acquire want 200 got %d", resp.StatusCode)
+	}
+	if resumed.ID != granted.ID {
+		t.Fatalf("reconnect want same execution %s got %s", granted.ID, resumed.ID)
+	}
 }
 
 func TestHTTPConcurrentAcquire(t *testing.T) {
