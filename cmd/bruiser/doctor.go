@@ -65,6 +65,13 @@ func cmdConfig() error {
 		fails++
 	} else {
 		fmt.Printf("PASS  environment: mode=%s lease_ttl=%s heartbeat=%s\n", cfg.Mode, cfg.LeaseTTL, cfg.HeartbeatInterval)
+		fmt.Printf("PASS  posture: %s\n", cfg.StartupBanner())
+		for _, w := range cfg.SecretWarnings() {
+			fmt.Printf("WARN  secrets: %s\n", w)
+		}
+		for _, w := range cfg.UnsafeModeWarnings() {
+			fmt.Printf("WARN  unsafe: %s\n", w)
+		}
 	}
 	p, err := merchant.LoadFile(path)
 	if err != nil {

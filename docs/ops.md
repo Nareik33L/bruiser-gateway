@@ -177,9 +177,11 @@ Bruiser **consumes** the merchant’s authenticated customer identifier.
 It does not mint one and it does not decide who a human is.
 
 Production requires JWKS/OIDC (`BRUISER_JWKS_URL`, issuer, audience).
-`BRUISER_ENV` must be `lab` or `production` — empty is not lab.
-`BRUISER_DEV_ASSERTIONS=1` enables HS256 only with `BRUISER_ENV=lab`.
-See [docs/12-production-deploy.md](12-production-deploy.md).
+Unset or unrecognised `BRUISER_ENV` is production. Lab is explicit
+(`lab`, `dev`, or `test`). `BRUISER_DEV_ASSERTIONS=1` enables HS256
+only with that lab posture. Production refuses lab placeholder
+secrets and dry-run / partial ramp / fail-open unless
+`BRUISER_ALLOW_UNSAFE_MODES=1`. See [docs/12-production-deploy.md](12-production-deploy.md).
 
 - Signed extractors (`cookie-jwt`, `bearer-jwt`, `oidc`, `edge-signed`)
   are the V1 demonstration. The Arsenal-like lab uses a cookie JWT.

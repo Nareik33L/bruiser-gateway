@@ -42,6 +42,7 @@ func startServer(t *testing.T) (*httptest.Server, config.Config) {
 	cfg.DatabaseURL = url
 	cfg.MerchantID = id.New("m")
 	cfg.LeaseTTL = 15 * time.Second
+	cfg.Environment = "lab"
 	cfg.EdgeSecret = "edge-secret-dev"
 	cfg.AdminSecret = "admin-secret-dev"
 	cfg.DevAssertions = true

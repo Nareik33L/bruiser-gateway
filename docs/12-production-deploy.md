@@ -16,7 +16,8 @@ openssl rand -base64 32   # BRUISER_ORIGIN_SECRET
 
 Rotation: replace the secret on the edge and origin together, then
 restart Bruiser. Admin/edge/origin must stay pairwise distinct.
-`config validate` rejects lab placeholders when `BRUISER_ENV=production`.
+`config validate` rejects lab placeholders in production. Unset
+`BRUISER_ENV` is production; lab must be `BRUISER_ENV=lab`.
 
 ## 2. Identity
 
@@ -28,8 +29,11 @@ BRUISER_ISSUER=https://idp.example
 BRUISER_AUDIENCE=bruiser
 ```
 
-`BRUISER_ENV` is required (`lab` or `production`). Empty is not lab.
-HMAC customer assertions require `BRUISER_ENV=lab`.
+`BRUISER_ENV` defaults to production when unset or unrecognised.
+Lab is `lab`, `dev`, or `test`. HMAC customer assertions require
+`BRUISER_ENV=lab` and `BRUISER_DEV_ASSERTIONS=1`. Dry-run, a
+non-100% ramp, or fail-open in production require
+`BRUISER_ALLOW_UNSAFE_MODES=1`.
 
 Profile:
 

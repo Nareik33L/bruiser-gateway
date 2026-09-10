@@ -57,8 +57,8 @@ Dev assertions default to membership `1001234` (Alice in the Arsenal-like lab):
 BRUISER_ENV=lab BRUISER_ADMIN_SECRET=admin-secret-dev \
   ./bin/bruiser config validate configs/example.yaml
 BRUISER_ENV=lab ./bin/bruiser doctor --profile configs/example.yaml --skip-store
-# Production path, observe only, then ramp without redeploy:
-BRUISER_MODE=dry-run make serve
+# Production path, observe only (refused unless acknowledged):
+BRUISER_ENV=production BRUISER_ALLOW_UNSAFE_MODES=1 BRUISER_MODE=dry-run make serve
 # PUT /v1/admin/controls {"enforce_percent":10}
 ```
 

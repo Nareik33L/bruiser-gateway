@@ -100,9 +100,9 @@ func checkConfig(r *Report, cfg config.Config) {
 		r.add("configuration", Fail, err.Error())
 		return
 	}
-	detail := "mode=" + cfg.Mode + " lease_ttl=" + cfg.LeaseTTL.String() + " heartbeat=" + cfg.HeartbeatInterval.String()
-	if cfg.DevHMACSecret == "dev-secret-change-me" {
-		r.add("configuration", Warn, detail+"; BRUISER_DEV_HMAC_SECRET is the lab default")
+	detail := cfg.StartupBanner()
+	if warns := append(cfg.SecretWarnings(), cfg.UnsafeModeWarnings()...); len(warns) > 0 {
+		r.add("configuration", Warn, detail+"; "+strings.Join(warns, "; "))
 		return
 	}
 	r.add("configuration", Pass, detail)

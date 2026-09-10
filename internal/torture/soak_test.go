@@ -89,6 +89,7 @@ func runSoak(t *testing.T, dur time.Duration, agents int, sampleEvery time.Durat
 	cfg.DatabaseURL = url
 	cfg.MerchantID = id.New("m")
 	cfg.LeaseTTL = 15 * time.Second
+	cfg.Environment = "lab"
 	cfg.AdminSecret = "admin-secret-dev"
 	cfg.EdgeSecret = "edge-secret-dev"
 	cfg.DevAssertions = true
