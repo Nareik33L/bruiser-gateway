@@ -260,6 +260,7 @@ func (l *lab) execute(ctx context.Context, rn *run, req startReq) {
 		interval = time.Millisecond
 	}
 	tenIDs := seed.TenMemberships()
+	multiIDs := sequentialEligible(req.StartMembership, req.Supporters)
 
 	snapshot := func() Summary {
 		return Summary{
@@ -293,7 +294,7 @@ func (l *lab) execute(ctx context.Context, rn *run, req startReq) {
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			mem := membershipFor(req, idx, tenIDs)
+			mem := membershipFor(req, idx, tenIDs, multiIDs)
 			res := l.agent(ctx, mem, req.Password, time.Duration(req.RetrySec)*time.Second)
 			if res.authenticated {
 				authN.Add(1)
@@ -333,7 +334,20 @@ func (l *lab) execute(ctx context.Context, rn *run, req startReq) {
 	l.log.Info("run complete", "summary", rn.sum)
 }
 
-func membershipFor(req startReq, idx int, ten []string) string {
+func sequentialEligible(start, n int) []string {
+	if n < 1 {
+		n = 1
+	}
+	out := make([]string, 0, n)
+	for num := start; len(out) < n && num < start+n*4+50; num++ {
+		if seed.EligibleMembershipNumber(num) {
+			out = append(out, strconv.Itoa(num))
+		}
+	}
+	return out
+}
+
+func membershipFor(req startReq, idx int, ten, multi []string) string {
 	switch req.Preset {
 	case "ten":
 		if len(ten) == 0 {
@@ -341,7 +355,10 @@ func membershipFor(req startReq, idx int, ten []string) string {
 		}
 		return ten[idx%len(ten)]
 	case "multi":
-		return strconv.Itoa(req.StartMembership + (idx % req.Supporters))
+		if len(multi) == 0 {
+			return strconv.Itoa(req.StartMembership + (idx % req.Supporters))
+		}
+		return multi[idx%len(multi)]
 	default:
 		return req.Membership
 	}
@@ -424,6 +441,9 @@ func (l *lab) agent(ctx context.Context, membership, password string, retryWindo
 		_ = resp.Body.Close()
 		decision := resp.Header.Get("X-Bruiser-Lab-Decision")
 		kind := classifyHold(decision, resp.StatusCode)
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+			kind = "busy"
+		}
 		switch kind {
 		case "allow":
 			out.allowed++
@@ -476,7 +496,7 @@ func (l *lab) agent(ctx context.Context, membership, password string, retryWindo
 
 func (l *lab) completeOrder(ctx context.Context, client *http.Client, holdID string, deadline time.Time) bool {
 	payload := `{"event_id":"` + seed.HeadlineEventID + `","hold_id":"` + holdID + `"}`
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 8; i++ {
 		if ctx.Err() != nil {
 			return false
 		}
@@ -493,10 +513,13 @@ func (l *lab) completeOrder(ctx context.Context, client *http.Client, holdID str
 		b, _ := io.ReadAll(io.LimitReader(oresp.Body, 1<<16))
 		_ = oresp.Body.Close()
 		kind := classifyHold(oresp.Header.Get("X-Bruiser-Lab-Decision"), oresp.StatusCode)
+		if oresp.StatusCode == http.StatusTooManyRequests || oresp.StatusCode >= 500 {
+			kind = "busy"
+		}
 		if oresp.StatusCode >= 200 && oresp.StatusCode < 300 {
 			return true
 		}
-		if kind == "busy" {
+		if kind == "busy" || oresp.StatusCode == http.StatusForbidden || oresp.StatusCode >= 500 {
 			if time.Now().After(deadline) {
 				return false
 			}

@@ -30,6 +30,8 @@ func main() {
 		AdminSecret:  adminSecret,
 		Opponent:     opponent,
 		PublicURL:    publicURL,
+		BruiserURL:   bruiser,
+		MerchantID:   shared.Env("BRUISER_MERCHANT_ID", "harchester"),
 	})
 	originSrv := &http.Server{
 		Addr:              originAddr,

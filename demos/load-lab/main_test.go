@@ -32,7 +32,7 @@ func TestMembershipForTenRoundRobin(t *testing.T) {
 	req := startReq{Preset: "ten", Membership: "9999999"}
 	seen := map[string]bool{}
 	for i := 0; i < 10; i++ {
-		got := membershipFor(req, i, ids)
+		got := membershipFor(req, i, ids, nil)
 		if got == req.Membership {
 			t.Fatal("ten preset must not use the single membership field")
 		}

@@ -166,6 +166,23 @@ func Blocks(eventID string) []Block {
 	}
 }
 
+// EligibleMembershipNumber is true for seeded supporters who can buy the
+// Arsenal members' sale (excludes Sam and the i%7==0 ineligible slice).
+func EligibleMembershipNumber(num int) bool {
+	mem := fmt.Sprintf("%07d", num)
+	if mem == IneligibleMember {
+		return false
+	}
+	if mem == AliceMembership {
+		return true
+	}
+	i := num - FirstMembership
+	if i < 0 {
+		return true
+	}
+	return i%7 != 0
+}
+
 // TenMemberships is the Agent Lab 10×N preset: Alice plus nine other
 // eligible seeded supporters, in a stable order so the live feed shows
 // distinct membership IDs from the first ten agents.

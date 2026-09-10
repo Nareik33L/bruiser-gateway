@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +19,8 @@ import (
 	"github.com/Nareik33L/bruiser-gateway/demos/shared"
 )
 
+var errInvalidExecution = errors.New("invalid execution")
+
 type originConfig struct {
 	HMACSecret   string
 	SSOSecret    string
@@ -22,10 +28,13 @@ type originConfig struct {
 	AdminSecret  string
 	Opponent     string
 	PublicURL    string
+	BruiserURL   string
+	MerchantID   string
 }
 
 type origin struct {
 	cfg    originConfig
+	client *http.Client
 	mu     sync.Mutex
 	events map[string]*liveEvent
 	holds  map[string]hold
@@ -72,7 +81,14 @@ type reqLog struct {
 
 func newOrigin(cfg originConfig) *origin {
 	o := &origin{
-		cfg:    cfg,
+		cfg: cfg,
+		client: &http.Client{
+			Timeout: 3 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        256,
+				MaxIdleConnsPerHost: 256,
+			},
+		},
 		events: map[string]*liveEvent{},
 		holds:  map[string]hold{},
 		orders: map[string]order{},
@@ -182,10 +198,10 @@ func (o *origin) getEvent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (o *origin) createHold(w http.ResponseWriter, r *http.Request) {
-	if !o.originOK(w, r) {
+	eventID := chi.URLParam(r, "event")
+	if !o.requireOrigin(w, r, "event:"+eventID) {
 		return
 	}
-	eventID := chi.URLParam(r, "event")
 	var body struct {
 		Seats   int    `json:"seats"`
 		BlockID string `json:"block_id"`
@@ -255,15 +271,15 @@ func (o *origin) createHold(w http.ResponseWriter, r *http.Request) {
 }
 
 func (o *origin) createOrder(w http.ResponseWriter, r *http.Request) {
-	if !o.originOK(w, r) {
-		return
-	}
 	var body struct {
 		EventID string `json:"event_id"`
 		HoldID  string `json:"hold_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		shared.WriteErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if !o.requireOrigin(w, r, "") {
 		return
 	}
 	o.mu.Lock()
@@ -392,7 +408,7 @@ func (o *origin) internalOrders(w http.ResponseWriter, r *http.Request) {
 	shared.WriteJSON(w, http.StatusOK, map[string]any{"orders": out})
 }
 
-func (o *origin) originOK(w http.ResponseWriter, r *http.Request) bool {
+func (o *origin) requireOrigin(w http.ResponseWriter, r *http.Request, wantResource string) bool {
 	if o.cfg.OriginSecret == "" {
 		return true
 	}
@@ -404,7 +420,86 @@ func (o *origin) originOK(w http.ResponseWriter, r *http.Request) bool {
 		})
 		return false
 	}
+	tok := strings.TrimSpace(r.Header.Get("X-Bruiser-Execution"))
+	if tok == "" || wantResource == "" {
+		return true
+	}
+	info, err := o.introspectExecution(tok)
+	if err != nil {
+		if err == errInvalidExecution {
+			shared.WriteJSON(w, http.StatusForbidden, map[string]string{
+				"error":  "invalid execution token",
+				"detail": "origin rejected the Bruiser execution",
+			})
+			return false
+		}
+		// Gateway briefly unavailable: origin secret already matched (Edge
+		// forwarded). Do not mark the hold as Bruiser-invalid.
+		return true
+	}
+	if !info.Active {
+		shared.WriteJSON(w, http.StatusForbidden, map[string]string{
+			"error":  "invalid execution token",
+			"detail": "origin rejected the Bruiser execution",
+		})
+		return false
+	}
+	if o.cfg.MerchantID != "" && info.MerchantID != "" && info.MerchantID != o.cfg.MerchantID {
+		shared.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "wrong merchant"})
+		return false
+	}
+	if wantResource != "" && info.Resource != "" && info.Resource != wantResource {
+		shared.WriteJSON(w, http.StatusForbidden, map[string]string{"error": "wrong resource"})
+		return false
+	}
 	return true
+}
+
+type introspectInfo struct {
+	Active     bool   `json:"active"`
+	Resource   string `json:"resource"`
+	MerchantID string `json:"merchant_id"`
+}
+
+func (o *origin) introspectExecution(tok string) (introspectInfo, error) {
+	var out introspectInfo
+	if o.cfg.BruiserURL == "" || o.client == nil {
+		return out, io.EOF
+	}
+	payload, _ := json.Marshal(map[string]string{"token": tok})
+	url := strings.TrimRight(o.cfg.BruiserURL, "/") + "/v1/introspect"
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(payload))
+		if err != nil {
+			return out, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := o.client.Do(req)
+		if err != nil {
+			lastErr = err
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return out, errInvalidExecution
+		}
+		if resp.StatusCode >= 400 {
+			lastErr = io.EOF
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		if json.Unmarshal(b, &out) != nil {
+			return out, io.EOF
+		}
+		return out, nil
+	}
+	if lastErr == nil {
+		lastErr = io.EOF
+	}
+	return out, lastErr
 }
 
 func (o *origin) expireLocked(now time.Time) {

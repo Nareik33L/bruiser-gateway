@@ -232,6 +232,7 @@ func (c *console) authority(w http.ResponseWriter, _ *http.Request) {
 	hmac := shared.Env("BRUISER_DEV_HMAC_SECRET", "dev-secret-change-me")
 	cmd := exec.Command(c.bruiserBin, "authority-check",
 		"--edge", c.simtixEdge, "--origin", c.simtixOrigin,
+		"--control", c.gateway, "--admin", shared.Env("BRUISER_ADMIN_URL", "http://127.0.0.1:8082"),
 		"--membership", seed.AliceMembership, "--event", seed.HeadlineEventID,
 		"--hmac-secret", hmac, "--json")
 	out, err := cmd.CombinedOutput()

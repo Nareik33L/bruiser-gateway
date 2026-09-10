@@ -56,6 +56,18 @@ func TestTenMemberships(t *testing.T) {
 	}
 }
 
+func TestEligibleMembershipNumber(t *testing.T) {
+	if seed.EligibleMembershipNumber(1000002) {
+		t.Fatal("Sam must be ineligible")
+	}
+	if !seed.EligibleMembershipNumber(1001234) {
+		t.Fatal("Alice must be eligible")
+	}
+	if seed.EligibleMembershipNumber(1000001) {
+		t.Fatal("index 0 is ineligible")
+	}
+}
+
 func TestHeadlineEventSeats(t *testing.T) {
 	ev := seed.Events("")
 	if ev[0].ID != seed.HeadlineEventID || ev[0].Seats != seed.HeadlineSeats {
