@@ -18,7 +18,7 @@ import (
 func cmdEAFDemo() error {
 	fs := flag.NewFlagSet("eaf-demo", flag.ContinueOnError)
 	front := fs.String("front", env("SIMTIX_EDGE_URL", "http://127.0.0.1:8091"), "Edge or Proxy URL")
-	secret := fs.String("hmac-secret", env("BRUISER_DEV_HMAC_SECRET", "dev-secret-change-me"), "HMAC for box-office cookies")
+	secret := fs.String("hmac-secret", env("BRUISER_DEV_HMAC_SECRET", ""), "HMAC for box-office cookies")
 	membership := fs.String("membership", "1001234", "membership number")
 	eventID := fs.String("event", "ars-che", "event id")
 	n := fs.Int("n", 2000, "unaware agents (distinct logins)")

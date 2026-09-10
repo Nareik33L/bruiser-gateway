@@ -1,0 +1,24 @@
+title = "bruiser-gateway"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "bruiser-lab-secrets"
+description = "Well-known Bruiser lab secrets must not ship in deploy or example files"
+regex = '''(?i)(admin-secret-dev|edge-secret-dev|origin-lock-dev|operator-secret-dev|dev-secret-change-me)'''
+tags = ["bruiser", "secret"]
+
+[allowlist]
+description = "Lab-only sources that still name the refused placeholders"
+paths = [
+    '''(^|/)Makefile$''',
+    '''_test\.go$''',
+    '''(^|/)internal/testlab/''',
+    '''(^|/)internal/config/config\.go$''',
+    '''(^|/)internal/check/check\.go$''',
+    '''(^|/)cmd/simtix/main\.go$''',
+    '''(^|/)\.gitleaks\.toml$''',
+    '''(^|/)scripts/check-secrets\.sh$''',
+    '''(^|/)SECURITY\.md$''',
+]

@@ -64,7 +64,7 @@ func Load() Config {
 	c := Config{
 		HTTPAddr:          env("BRUISER_HTTP_ADDR", ":8080"),
 		DatabaseURL:       env("BRUISER_DATABASE_URL", "postgres://bruiser:bruiser@127.0.0.1:5432/bruiser?sslmode=disable"),
-		DevHMACSecret:     env("BRUISER_DEV_HMAC_SECRET", "dev-secret-change-me"),
+		DevHMACSecret:     lookupEnv("BRUISER_DEV_HMAC_SECRET"),
 		MerchantID:        env("BRUISER_MERCHANT_ID", "arsenal"),
 		MerchantName:      env("BRUISER_MERCHANT_NAME", "Arsenal FC"),
 		LeaseTTL:          envDuration("BRUISER_LEASE_TTL", 60*time.Second),
@@ -75,8 +75,8 @@ func Load() Config {
 		LogLevel:          env("BRUISER_LOG_LEVEL", "info"),
 		ReadyTimeout:      envDuration("BRUISER_READY_TIMEOUT", 2*time.Second),
 		SweepInterval:     envDuration("BRUISER_SWEEP_INTERVAL", 2*time.Second),
-		EdgeSecret:        env("BRUISER_EDGE_SECRET", "edge-secret-dev"),
-		OriginSecret:      env("BRUISER_ORIGIN_SECRET", "origin-lock-dev"),
+		EdgeSecret:        lookupEnv("BRUISER_EDGE_SECRET"),
+		OriginSecret:      lookupEnv("BRUISER_ORIGIN_SECRET"),
 		ProfilePath:       env("BRUISER_PROFILE", "configs/arsenal.yaml"),
 		ProxyAddr:         env("BRUISER_PROXY_ADDR", ""),
 		OriginURL:         env("BRUISER_ORIGIN_URL", ""),
@@ -129,6 +129,18 @@ func (c *Config) NormalizeListen() {
 	}
 	if strings.TrimSpace(c.OperatorSecret) == "" {
 		c.OperatorSecret = "operator-secret-dev"
+	}
+	if strings.TrimSpace(c.AdminSecret) == "" {
+		c.AdminSecret = "admin-secret-dev"
+	}
+	if strings.TrimSpace(c.EdgeSecret) == "" {
+		c.EdgeSecret = "edge-secret-dev"
+	}
+	if strings.TrimSpace(c.OriginSecret) == "" {
+		c.OriginSecret = "origin-lock-dev"
+	}
+	if strings.TrimSpace(c.DevHMACSecret) == "" {
+		c.DevHMACSecret = "dev-secret-change-me"
 	}
 }
 

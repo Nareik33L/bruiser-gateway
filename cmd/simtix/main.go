@@ -19,7 +19,7 @@ func main() {
 	originAddr := env("SIMTIX_HTTP_ADDR", ":8090")
 	edgeAddr := os.Getenv("SIMTIX_EDGE_ADDR")
 	originSecret := os.Getenv("SIMTIX_ORIGIN_SECRET")
-	hmac := env("BRUISER_DEV_HMAC_SECRET", "dev-secret-change-me")
+	hmac := env("BRUISER_DEV_HMAC_SECRET", "")
 	bruiserURL := env("SIMTIX_BRUISER_URL", "http://127.0.0.1:8080")
 	merchant := env("BRUISER_MERCHANT_ID", "arsenal")
 
@@ -42,8 +42,8 @@ func main() {
 		p, err := edge.New(edge.Config{
 			OriginURL:    env("SIMTIX_ORIGIN_URL", "http://127.0.0.1"+originAddr),
 			BruiserURL:   bruiserURL,
-			EdgeSecret:   env("BRUISER_EDGE_SECRET", "edge-secret-dev"),
-			OriginSecret: env("BRUISER_ORIGIN_SECRET", "origin-lock-dev"),
+			EdgeSecret:   env("BRUISER_EDGE_SECRET", ""),
+			OriginSecret: env("BRUISER_ORIGIN_SECRET", ""),
 			MaxInFlight:  2,
 		})
 		if err != nil {

@@ -14,6 +14,7 @@ func labConfig() Config {
 	c.OperatorSecret = "operator-secret-dev"
 	c.EdgeSecret = "edge-secret-dev"
 	c.OriginSecret = "origin-lock-dev"
+	c.DevHMACSecret = "dev-secret-change-me"
 	c.AdminAddr = "127.0.0.1:8082"
 	c.AllowUnsafeModes = false
 	c.FailClosed = true
@@ -34,6 +35,20 @@ func prodSecrets(c *Config) {
 	c.Issuer = "https://idp.example"
 	c.Audience = "bruiser"
 	c.DevAssertions = false
+}
+
+func TestProductionLoadDoesNotInventSecrets(t *testing.T) {
+	t.Setenv("BRUISER_ENV", "")
+	t.Setenv("BRUISER_ENVIRONMENT", "")
+	t.Setenv("BRUISER_ADMIN_SECRET", "")
+	t.Setenv("BRUISER_OPERATOR_SECRET", "")
+	t.Setenv("BRUISER_EDGE_SECRET", "")
+	t.Setenv("BRUISER_ORIGIN_SECRET", "")
+	t.Setenv("BRUISER_DEV_HMAC_SECRET", "")
+	c := Load()
+	if c.AdminSecret != "" || c.EdgeSecret != "" || c.OriginSecret != "" || c.DevHMACSecret != "" {
+		t.Fatalf("production Load invented secrets: admin=%q edge=%q origin=%q hmac=%q", c.AdminSecret, c.EdgeSecret, c.OriginSecret, c.DevHMACSecret)
+	}
 }
 
 func TestLoadUnsetEnvIsProduction(t *testing.T) {
@@ -284,5 +299,29 @@ func TestProductionRequiresAdminAddrAndDistinctOperator(t *testing.T) {
 	c.OperatorSecret = "operator-secret-dev"
 	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "BRUISER_OPERATOR_SECRET") {
 		t.Fatalf("lab operator secret: %v", err)
+	}
+}
+
+func TestShippedPlaceholdersFailProduction(t *testing.T) {
+	for _, secret := range []string{"", "change-me", "change-me-admin", "change-me-edge"} {
+		if !isLabSecret(secret) {
+			t.Fatalf("%q must fail production secret validation", secret)
+		}
+	}
+	c := labConfig()
+	c.Environment = "production"
+	c.DevAssertions = false
+	c.AdminSecret = "change-me"
+	c.OperatorSecret = "change-me-operator"
+	c.EdgeSecret = "change-me-edge"
+	c.OriginSecret = "change-me-origin"
+	c.DevHMACSecret = "change-me"
+	c.AdminAddr = "127.0.0.1:8082"
+	c.JWKSURL = "https://idp.example/.well-known/jwks.json"
+	c.Issuer = "https://idp.example"
+	c.Audience = "bruiser"
+	err := c.Validate()
+	if err == nil {
+		t.Fatal("shipped change-me placeholders must refuse production boot")
 	}
 }

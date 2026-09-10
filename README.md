@@ -13,11 +13,10 @@ scarce resource at a time.
 ```bash
 # Postgres must be reachable (docker compose or local).
 export BRUISER_DATABASE_URL=postgres://bruiser:bruiser@127.0.0.1:5432/bruiser?sslmode=disable
-export BRUISER_DEV_HMAC_SECRET=dev-secret-change-me
-make serve
+make serve   # sets BRUISER_ENV=lab and injects lab-only secrets
 ```
 
-Or: `docker compose -f deploy/compose/docker-compose.yml up --build`
+Or: `make demo-up` (compose interpolates lab secrets from the Makefile; do not commit them).
 
 ```bash
 # Dev customer assertion (HMAC JWT, membership number)
@@ -54,9 +53,8 @@ Dev assertions default to membership `1001234` (Alice in the Arsenal-like lab):
 `GET /healthz` liveness, `GET /readyz` store + signing key + mode, `GET /metrics` Prometheus.
 
 ```bash
-BRUISER_ENV=lab BRUISER_ADMIN_SECRET=admin-secret-dev \
-  ./bin/bruiser config validate configs/example.yaml
-BRUISER_ENV=lab ./bin/bruiser doctor --profile configs/example.yaml --skip-store
+make config-validate
+make doctor
 # Production path, observe only (refused unless acknowledged):
 BRUISER_ENV=production BRUISER_ALLOW_UNSAFE_MODES=1 BRUISER_MODE=dry-run make serve
 # PUT /v1/admin/controls {"enforce_percent":10}

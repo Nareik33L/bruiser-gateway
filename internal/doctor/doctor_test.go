@@ -17,6 +17,7 @@ func TestDoctorExampleProfile(t *testing.T) {
 	cfg.AdminAddr = "127.0.0.1:8082"
 	cfg.EdgeSecret = "edge-secret-dev"
 	cfg.OriginSecret = "origin-lock-dev"
+	cfg.DevHMACSecret = "dev-secret-change-me"
 	p, err := merchant.LoadFile("../../configs/example.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -51,6 +52,7 @@ func TestDoctorMissingRoutesFail(t *testing.T) {
 	cfg.OperatorSecret = "operator-secret-dev"
 	cfg.AdminAddr = "127.0.0.1:8082"
 	cfg.EdgeSecret = "edge-secret-dev"
+	cfg.DevHMACSecret = "dev-secret-change-me"
 	p := merchant.Empty("x")
 	rep := Run(Input{Config: cfg, Profile: p})
 	if rep.Overall != Fail {

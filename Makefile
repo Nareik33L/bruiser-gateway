@@ -18,7 +18,7 @@ LAB_ENV ?= BRUISER_ENV=lab \
 
 FUZZ_TIME ?= 10s
 
-.PHONY: all build test test-race lint fmt vet fuzz serve migrate tidy ci torture simtix authority-check eaf-demo eaf-nightly sdk-test doctor \
+.PHONY: all build test test-race lint fmt vet fuzz serve migrate tidy ci torture simtix authority-check eaf-demo eaf-nightly sdk-test doctor secrets-scan verify-mods \
 	demo-1x10000 demo-1000x10 demo-handoff demo-bypass demo-unaware demo-up v1-accept soak
 
 all: build
@@ -99,7 +99,7 @@ sdk-test:
 		|| echo "python cryptography not installed; skipped"
 
 demo-up:
-	docker compose -f deploy/compose/docker-compose.yml --profile demo up --build -d
+	$(LAB_ENV) docker compose -f deploy/compose/docker-compose.yml --profile demo up --build -d
 
 demo-1x10000: build
 	$(BIN) swarm --front http://127.0.0.1:8081 --profile 1xN --n 10000
@@ -122,4 +122,10 @@ migrate: build
 fuzz:
 	$(GO) test ./internal/resource -fuzz=FuzzCanonical -fuzztime=$(FUZZ_TIME)
 
-ci: vet test-race fuzz build sdk-test
+secrets-scan:
+	bash scripts/check-secrets.sh
+
+verify-mods:
+	$(GO) mod verify
+
+ci: secrets-scan verify-mods vet test-race fuzz build sdk-test
