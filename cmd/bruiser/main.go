@@ -76,9 +76,39 @@ func cmdMigrate(cfg config.Config, log *slog.Logger) error {
 }
 
 func cmdServe(cfg config.Config, log *slog.Logger) error {
+	profile, err := loadProfile(cfg, log)
+	if err != nil {
+		return err
+	}
+	if profile.Mode != "" && os.Getenv("BRUISER_MODE") == "" {
+		cfg.Mode = profile.Mode
+	}
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+	if cfg.Production() {
+		for _, i := range profile.SafetyIssues(merchant.SafetyOpts{
+			OriginSecret: cfg.OriginSecret,
+			OriginURL:    cfg.OriginURL,
+			Proxy:        cfg.ProxyAddr != "",
+			Production:   true,
+			JWKSURL:      cfg.JWKSURL,
+			Issuer:       cfg.Issuer,
+			Audience:     cfg.Audience,
+		}) {
+			if i.Level == "FAIL" {
+				return fmt.Errorf("%s: %s", i.Field, i.Message)
+			}
+		}
+	}
+	for _, w := range cfg.SecretWarnings() {
+		log.Warn("lab secret", "detail", w)
+	}
+	for _, w := range cfg.UnsafeModeWarnings() {
+		log.Warn("unsafe mode", "detail", w)
+	}
+	log.Info(cfg.StartupBanner())
+
 	ctx := context.Background()
 	store, err := pgstore.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -104,11 +134,6 @@ func cmdServe(cfg config.Config, log *slog.Logger) error {
 
 	sweeperStop := make(chan struct{})
 	go sweep(store, cfg, log, sweeperStop)
-
-	profile := loadProfile(cfg, log)
-	if profile.Mode != "" && os.Getenv("BRUISER_MODE") == "" {
-		cfg.Mode = profile.Mode
-	}
 
 	if !cfg.Telemetry {
 		log.Info("telemetry disabled (merchant-controlled; no vendor phone-home)")
@@ -239,17 +264,20 @@ func cmdPolicy() error {
 	return nil
 }
 
-func loadProfile(cfg config.Config, log *slog.Logger) merchant.Profile {
+func loadProfile(cfg config.Config, log *slog.Logger) (merchant.Profile, error) {
 	p, err := merchant.LoadFile(cfg.ProfilePath)
 	if err != nil {
+		if cfg.Production() {
+			return merchant.Profile{}, fmt.Errorf("production refuses an unconfigured identity: load profile %s: %w", cfg.ProfilePath, err)
+		}
 		log.Warn("profile file missing; using empty profile", "path", cfg.ProfilePath, "err", err)
-		return merchant.Empty(cfg.MerchantID)
+		return merchant.Empty(cfg.MerchantID), nil
 	}
 	if p.MerchantID == "" {
 		p.MerchantID = cfg.MerchantID
 	}
 	log.Info("loaded merchant profile", "merchant", p.MerchantID, "routes", len(p.Routes))
-	return p
+	return p, nil
 }
 
 func parseLevel(s string) slog.Level {

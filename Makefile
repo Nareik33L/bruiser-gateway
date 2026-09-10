@@ -5,8 +5,8 @@ SIMTIX    := bin/simtix
 DATABASE_URL ?= postgres://bruiser:bruiser@127.0.0.1:5432/bruiser?sslmode=disable
 TEST_DATABASE_URL ?= postgres://bruiser:bruiser@127.0.0.1:5432/bruiser_test?sslmode=disable
 
-# Lab posture for make serve / simtix / migrate. Production sets BRUISER_ENV
-# and generated secrets in the environment; these defaults are not silent HMAC.
+# Lab posture for make serve / simtix / migrate. Production is the default
+# when BRUISER_ENV is unset; these targets must ask for lab explicitly.
 LAB_ENV ?= BRUISER_ENV=lab \
 	BRUISER_ADMIN_SECRET=admin-secret-dev \
 	BRUISER_EDGE_SECRET=edge-secret-dev \

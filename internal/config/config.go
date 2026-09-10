@@ -54,6 +54,8 @@ type Config struct {
 	RateCustomer      float64
 	RatePrincipal     float64
 	RateIP            float64
+	FailClosed        bool
+	AllowUnsafeModes  bool
 }
 
 func Load() Config {
@@ -102,24 +104,30 @@ func Load() Config {
 		RateCustomer:      envFloat("BRUISER_RATE_CUSTOMER", 40),
 		RatePrincipal:     envFloat("BRUISER_RATE_PRINCIPAL", 20),
 		RateIP:            envFloat("BRUISER_RATE_IP", 0),
+		FailClosed:        envBool("BRUISER_FAIL_CLOSED", true) && !envBool("BRUISER_FAIL_OPEN", false),
+		AllowUnsafeModes:  envBool("BRUISER_ALLOW_UNSAFE_MODES", false),
 	}
-	c.DevAssertions = envBool("BRUISER_DEV_ASSERTIONS", c.Lab())
+	// HMAC dev assertions stay off unless the operator sets the flag.
+	// Validate refuses the flag outside explicit lab/dev/test.
+	c.DevAssertions = envBool("BRUISER_DEV_ASSERTIONS", false)
 	return c
 }
 
-// Production is true when the operator set BRUISER_ENV to a live environment.
-func (c Config) Production() bool {
+// Lab is true only when the operator asked for lab/dev/test. Unset and
+// unrecognised BRUISER_ENV values are production.
+func (c Config) Lab() bool {
 	switch strings.ToLower(strings.TrimSpace(c.Environment)) {
-	case "production", "prod", "live":
+	case "lab", "dev", "test":
 		return true
 	default:
 		return false
 	}
 }
 
-// Lab is true when the operator set an explicit lab posture.
-func (c Config) Lab() bool {
-	return strings.EqualFold(strings.TrimSpace(c.Environment), "lab")
+// Production is the fail-closed default: everything that is not an
+// explicit lab posture is production.
+func (c Config) Production() bool {
+	return !c.Lab()
 }
 
 func (c Config) Validate() error {
@@ -158,22 +166,17 @@ func (c Config) Validate() error {
 	if err := c.ValidateIdentity(); err != nil {
 		return err
 	}
+	if err := c.ValidateUnsafeModes(); err != nil {
+		return err
+	}
 	return nil
 }
 
-// ValidateEnvironment refuses a missing or unknown BRUISER_ENV so HMAC
-// lab mode cannot start because someone forgot the variable.
+// ValidateEnvironment allows unset/unknown values (they are production).
+// HMAC assertions are lab-only.
 func (c Config) ValidateEnvironment() error {
-	env := strings.ToLower(strings.TrimSpace(c.Environment))
-	switch env {
-	case "lab", "production", "prod", "live":
-	case "":
-		return fmt.Errorf("BRUISER_ENV must be lab or production (empty is not lab)")
-	default:
-		return fmt.Errorf("BRUISER_ENV=%q is not lab or production", c.Environment)
-	}
 	if c.DevAssertions && !c.Lab() {
-		return fmt.Errorf("BRUISER_DEV_ASSERTIONS requires BRUISER_ENV=lab; HMAC lab mode is not silent")
+		return fmt.Errorf("BRUISER_DEV_ASSERTIONS requires BRUISER_ENV=lab (or dev/test); HMAC lab mode is not silent")
 	}
 	return nil
 }
@@ -186,58 +189,178 @@ func (c Config) ValidateIdentity() error {
 	if c.DevAssertions {
 		return fmt.Errorf("BRUISER_DEV_ASSERTIONS is enabled; production refuses development HMAC assertion mode")
 	}
+	var missing []string
 	if strings.TrimSpace(c.JWKSURL) == "" {
-		return fmt.Errorf("BRUISER_JWKS_URL is required in production (asymmetric merchant identity)")
+		missing = append(missing, "BRUISER_JWKS_URL")
 	}
 	if strings.TrimSpace(c.Issuer) == "" {
-		return fmt.Errorf("BRUISER_ISSUER is required in production")
+		missing = append(missing, "BRUISER_ISSUER")
 	}
 	if strings.TrimSpace(c.Audience) == "" {
-		return fmt.Errorf("BRUISER_AUDIENCE is required in production")
+		missing = append(missing, "BRUISER_AUDIENCE")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("production identity is unconfigured; required: %s", strings.Join(missing, ", "))
 	}
 	return nil
 }
 
-// ValidateSecrets is the production gate for admin/edge/origin credentials.
+// ValidateSecrets always checks presence and distinctness. Production
+// hard-fails lab/placeholder secrets; lab callers should log SecretWarnings.
 func (c Config) ValidateSecrets() error {
-	return c.validateSecrets()
-}
-
-func (c Config) validateSecrets() error {
+	var problems []string
 	if strings.TrimSpace(c.AdminSecret) == "" {
-		return fmt.Errorf("BRUISER_ADMIN_SECRET is required and must not be empty")
+		problems = append(problems, "BRUISER_ADMIN_SECRET is required and must not be empty")
 	}
 	if strings.TrimSpace(c.EdgeSecret) == "" {
-		return fmt.Errorf("BRUISER_EDGE_SECRET is required and must not be empty")
+		problems = append(problems, "BRUISER_EDGE_SECRET is required and must not be empty")
 	}
-	if c.AdminSecret == c.EdgeSecret {
-		return fmt.Errorf("BRUISER_ADMIN_SECRET must be distinct from BRUISER_EDGE_SECRET")
+	if c.AdminSecret != "" && c.AdminSecret == c.EdgeSecret {
+		problems = append(problems, "BRUISER_ADMIN_SECRET must be distinct from BRUISER_EDGE_SECRET")
 	}
 	if c.OriginSecret != "" && c.AdminSecret == c.OriginSecret {
-		return fmt.Errorf("BRUISER_ADMIN_SECRET must be distinct from BRUISER_ORIGIN_SECRET")
+		problems = append(problems, "BRUISER_ADMIN_SECRET must be distinct from BRUISER_ORIGIN_SECRET")
 	}
 	if c.OriginSecret != "" && c.EdgeSecret == c.OriginSecret {
-		return fmt.Errorf("BRUISER_EDGE_SECRET must be distinct from BRUISER_ORIGIN_SECRET")
+		problems = append(problems, "BRUISER_EDGE_SECRET must be distinct from BRUISER_ORIGIN_SECRET")
 	}
 	if c.Production() {
-		for _, pair := range []struct{ name, val string }{
-			{"BRUISER_ADMIN_SECRET", c.AdminSecret},
-			{"BRUISER_EDGE_SECRET", c.EdgeSecret},
-			{"BRUISER_ORIGIN_SECRET", c.OriginSecret},
-			{"BRUISER_DEV_HMAC_SECRET", c.DevHMACSecret},
-		} {
-			if isLabSecret(pair.val) {
-				return fmt.Errorf("%s is a lab/placeholder value; production requires a dedicated secret", pair.name)
-			}
+		if hits := c.labSecretHits(); len(hits) > 0 {
+			problems = append(problems, "production refuses lab/placeholder secrets: "+strings.Join(hits, ", "))
 		}
 		if strings.TrimSpace(c.OriginSecret) == "" {
-			return fmt.Errorf("BRUISER_ORIGIN_SECRET is required in production (origin lockdown)")
-		}
-		if isLabSecret(c.OriginSecret) {
-			return fmt.Errorf("BRUISER_ORIGIN_SECRET is a lab/placeholder value; production requires a generated secret")
+			problems = append(problems, "BRUISER_ORIGIN_SECRET is required in production (origin lockdown)")
 		}
 	}
+	if len(problems) > 0 {
+		return fmt.Errorf("%s", strings.Join(problems, "; "))
+	}
 	return nil
+}
+
+// SecretWarnings lists lab/placeholder secrets. Production returns nil
+// because those are hard errors from ValidateSecrets.
+func (c Config) SecretWarnings() []string {
+	if c.Production() {
+		return nil
+	}
+	var out []string
+	for _, name := range c.labSecretHits() {
+		out = append(out, name+" is a lab/placeholder value")
+	}
+	return out
+}
+
+// ValidateUnsafeModes refuses dry-run, partial ramp, and fail-open in
+// production unless BRUISER_ALLOW_UNSAFE_MODES=1.
+func (c Config) ValidateUnsafeModes() error {
+	if !c.Production() {
+		return nil
+	}
+	reasons := c.unsafeReasons()
+	if len(reasons) == 0 {
+		return nil
+	}
+	if !c.AllowUnsafeModes {
+		return fmt.Errorf("production refuses %s without BRUISER_ALLOW_UNSAFE_MODES=1", strings.Join(reasons, ", "))
+	}
+	return nil
+}
+
+// UnsafeModeWarnings is the prominent log when production acknowledged
+// dry-run / ramp / fail-open via BRUISER_ALLOW_UNSAFE_MODES.
+func (c Config) UnsafeModeWarnings() []string {
+	if !c.Production() || !c.AllowUnsafeModes {
+		return nil
+	}
+	reasons := c.unsafeReasons()
+	if len(reasons) == 0 {
+		return nil
+	}
+	return []string{"BRUISER_ALLOW_UNSAFE_MODES=1 acknowledged: " + strings.Join(reasons, ", ")}
+}
+
+func (c Config) unsafeReasons() []string {
+	var reasons []string
+	if strings.EqualFold(strings.TrimSpace(c.Mode), "dry-run") {
+		reasons = append(reasons, "BRUISER_MODE=dry-run")
+	}
+	if c.EnforcePercent >= 0 && c.EnforcePercent < 100 {
+		reasons = append(reasons, fmt.Sprintf("BRUISER_ENFORCE_PERCENT=%d", c.EnforcePercent))
+	}
+	if !c.Enforcement {
+		reasons = append(reasons, "BRUISER_ENFORCEMENT=false")
+	}
+	if !c.FailClosed {
+		reasons = append(reasons, "fail-open")
+	}
+	return reasons
+}
+
+func (c Config) labSecretHits() []string {
+	var names []string
+	for _, pair := range []struct{ name, val string }{
+		{"BRUISER_ADMIN_SECRET", c.AdminSecret},
+		{"BRUISER_EDGE_SECRET", c.EdgeSecret},
+		{"BRUISER_ORIGIN_SECRET", c.OriginSecret},
+		{"BRUISER_DEV_HMAC_SECRET", c.DevHMACSecret},
+	} {
+		if isLabSecret(pair.val) {
+			names = append(names, pair.name)
+		}
+	}
+	return names
+}
+
+func (c Config) IdentityMode() string {
+	if c.DevAssertions {
+		return "hmac-dev-assertions"
+	}
+	if strings.TrimSpace(c.JWKSURL) != "" {
+		return "jwks"
+	}
+	return "unconfigured"
+}
+
+func (c Config) effectiveMode() string {
+	if strings.EqualFold(strings.TrimSpace(c.Mode), "dry-run") {
+		return "dry-run"
+	}
+	return "enforce"
+}
+
+func (c Config) effectivePercent() int {
+	if strings.EqualFold(strings.TrimSpace(c.Mode), "dry-run") || !c.Enforcement {
+		return 0
+	}
+	if c.EnforcePercent < 0 {
+		return 100
+	}
+	return c.EnforcePercent
+}
+
+func (c Config) failOpen() bool {
+	return !c.FailClosed || !c.Enforcement
+}
+
+func (c Config) envName() string {
+	if c.Lab() {
+		if e := strings.ToLower(strings.TrimSpace(c.Environment)); e != "" {
+			return e
+		}
+		return "lab"
+	}
+	if e := strings.ToLower(strings.TrimSpace(c.Environment)); e != "" {
+		return e
+	}
+	return "production"
+}
+
+// StartupBanner is one operator-visible line: effective mode, enforce
+// percent, fail-open posture, and identity mode.
+func (c Config) StartupBanner() string {
+	return fmt.Sprintf("bruiser startup env=%s mode=%s enforce_percent=%d fail_open=%t identity=%s",
+		c.envName(), c.effectiveMode(), c.effectivePercent(), c.failOpen(), c.IdentityMode())
 }
 
 func isLabSecret(s string) bool {
@@ -246,7 +369,8 @@ func isLabSecret(s string) bool {
 		return true
 	}
 	switch s {
-	case "change-me", "edge-secret-dev", "origin-lock-dev", "admin-secret-dev", "dev-secret-change-me":
+	case "change-me", "edge-secret-dev", "origin-lock-dev", "admin-secret-dev",
+		"dev-secret-change-me", "jwt-secret-dev", "signing-key-dev", "hmac-secret-dev":
 		return true
 	}
 	return strings.HasPrefix(s, "change-me")

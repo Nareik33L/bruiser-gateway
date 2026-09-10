@@ -465,9 +465,9 @@ func env(key, def string) string {
 
 func productionEnv(env string) bool {
 	switch strings.ToLower(strings.TrimSpace(env)) {
-	case "production", "prod", "live":
-		return true
-	default:
+	case "lab", "dev", "test":
 		return false
+	default:
+		return true
 	}
 }

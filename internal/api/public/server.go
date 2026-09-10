@@ -953,6 +953,7 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 
 func (s *Server) initControls() {
 	c := ops.FromEnv(s.cfg.Mode, s.cfg.Enforcement, s.cfg.QueueEnabled, s.cfg.EnforcePercent)
+	c.FailClosed = s.cfg.FailClosed
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if db, found, err := s.store.GetControls(ctx, s.cfg.MerchantID); err == nil && found {
@@ -965,7 +966,9 @@ func (s *Server) currentControls() ops.Controls {
 	if p := s.controls.Load(); p != nil {
 		return *p
 	}
-	return ops.FromEnv(s.cfg.Mode, s.cfg.Enforcement, s.cfg.QueueEnabled, s.cfg.EnforcePercent)
+	c := ops.FromEnv(s.cfg.Mode, s.cfg.Enforcement, s.cfg.QueueEnabled, s.cfg.EnforcePercent)
+	c.FailClosed = s.cfg.FailClosed
+	return c
 }
 
 func (s *Server) applyControls(d policy.Decision, action string) (policy.Decision, ops.Controls) {
