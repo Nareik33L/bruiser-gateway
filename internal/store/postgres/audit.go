@@ -40,6 +40,28 @@ func (s *Store) WriteAudit(ctx context.Context, merchantID, typ, reason, request
 	return s.WriteActorAudit(ctx, merchantID, typ, "", "", reason, requestID, attrs)
 }
 
+func (s *Store) writeAdminAction(ctx context.Context, merchantID, typ, reason, requestID string, audit AdminAudit, attrs map[string]any) error {
+	if attrs == nil {
+		attrs = map[string]any{}
+	}
+	if audit.Actor != "" {
+		attrs["actor"] = audit.Actor
+	}
+	if audit.Role != "" {
+		attrs["role"] = audit.Role
+	}
+	if audit.Auth != "" {
+		attrs["auth"] = audit.Auth
+	}
+	if audit.IP != "" {
+		attrs["ip"] = audit.IP
+	}
+	if requestID == "" {
+		requestID = audit.RequestID
+	}
+	return s.WriteActorAudit(ctx, merchantID, typ, audit.Role, audit.Actor, reason, requestID, attrs)
+}
+
 func (s *Store) WriteActorAudit(ctx context.Context, merchantID, typ, role, actor, reason, requestID string, attrs map[string]any) error {
 	if merchantID == "" || typ == "" {
 		return lease.ErrInvalidInput

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Nareik33L/bruiser-gateway/internal/auth"
+	pgstore "github.com/Nareik33L/bruiser-gateway/internal/store/postgres"
 )
 
 const (
@@ -83,6 +84,16 @@ func (s *Server) requireRole(w http.ResponseWriter, r *http.Request, need string
 
 func (s *Server) mintAccess(role, actor string, ttl time.Duration) (string, error) {
 	return s.signer.SignAccess(role, actor, ttl)
+}
+
+func actorAudit(r *http.Request, actor adminActor) pgstore.AdminAudit {
+	return pgstore.AdminAudit{
+		Actor:     actor.Actor,
+		Role:      actor.Role,
+		IP:        clientIP(r),
+		Auth:      actor.Source,
+		RequestID: requestID(r),
+	}
 }
 
 func (s *Server) writeAdminAudit(ctx context.Context, r *http.Request, actor adminActor, typ, reason string, attrs map[string]any) {

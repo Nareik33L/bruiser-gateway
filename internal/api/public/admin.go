@@ -385,17 +385,12 @@ func (s *Server) adminPutControls(w http.ResponseWriter, r *http.Request) {
 		c.UpdatedBy = actor.Actor
 	}
 	c = ops.Normalize(c)
-	saved, err := s.store.PutControls(r.Context(), s.cfg.MerchantID, c)
+	saved, err := s.store.PutControls(r.Context(), s.cfg.MerchantID, c, actorAudit(r, actor))
 	if err != nil {
 		s.storeError(w, err)
 		return
 	}
 	s.controls.Store(&saved)
-	s.writeAdminAudit(r.Context(), r, actor, "CONTROLS_CHANGED", saved.Mode, map[string]any{
-		"enforce_percent": saved.EnforcePercent,
-		"enforcement":     saved.Enforcement,
-		"mode":            saved.Mode,
-	})
 	writeJSON(w, http.StatusOK, saved)
 }
 
@@ -404,12 +399,11 @@ func (s *Server) adminDrain(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	n, err := s.store.DrainWaiters(r.Context(), s.cfg.MerchantID, requestID(r))
+	n, err := s.store.DrainWaiters(r.Context(), s.cfg.MerchantID, requestID(r), actorAudit(r, actor))
 	if err != nil {
 		s.storeError(w, err)
 		return
 	}
-	s.writeAdminAudit(r.Context(), r, actor, "QUEUE_DRAINED", "drain", map[string]any{"drained": n})
 	writeJSON(w, http.StatusOK, map[string]any{"drained": n})
 }
 
@@ -418,7 +412,7 @@ func (s *Server) adminRevokeAll(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	n, err := s.store.RevokeActive(r.Context(), s.cfg.MerchantID, requestID(r), "emergency")
+	n, err := s.store.RevokeActive(r.Context(), s.cfg.MerchantID, requestID(r), "emergency", actorAudit(r, actor))
 	if err != nil {
 		s.storeError(w, err)
 		return
@@ -427,7 +421,6 @@ func (s *Server) adminRevokeAll(w http.ResponseWriter, r *http.Request) {
 		cache.Reset()
 	}
 	revokeTotal.Add(float64(n))
-	s.writeAdminAudit(r.Context(), r, actor, "REVOKE_ALL", "emergency", map[string]any{"revoked": n})
 	writeJSON(w, http.StatusOK, map[string]any{"revoked": n})
 }
 
