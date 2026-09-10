@@ -313,6 +313,13 @@ table.feed th{color:var(--muted);font-weight:600}
 #toast.show{display:block}
 #resetStatus:not(:empty){color:var(--lime);font-weight:700;margin:0}
 .mem-field.hidden{display:none}
+.limit-block{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.limit-label{font-weight:700}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.seg button{border:0;border-radius:0;margin:0}
+.seg button.on{background:var(--lime);color:#111;font-weight:800}
+details.advanced{margin:0 0 16px;max-width:640px}
+details.advanced summary{cursor:pointer;color:var(--muted);font-size:13px}
 </style></head><body>
 <header><strong>Bruiser</strong><span>Harchester United · operations</span></header>
 <main>%s</main><div id="toast"></div></body></html>`, title, body)
@@ -325,19 +332,29 @@ const dashboardHTML = `
 <div class="row">
   <button class="primary" onclick="resetDemo()">Reset demo</button>
   <span class="hint" id="resetStatus"></span>
-  <select id="enf" onchange="setEnf()" title="Per-customer rollout">
-    <option value="off">Off</option>
-    <option value="dry-run">Dry Run</option>
+  <div class="limit-block">
+    <span class="limit-label">Per-customer limit</span>
+    <div class="seg" id="limitSeg">
+      <button type="button" data-limit="off" onclick="setLimit('off')">Off</button>
+      <button type="button" data-limit="dry-run" onclick="setLimit('dry-run')">Dry run</button>
+      <button type="button" data-limit="on" class="on" onclick="setLimit('on')">On</button>
+    </div>
+  </div>
+  <button onclick="runCheck()">Run Authority Check</button>
+  <button onclick="loadAudit()">Refresh audit</button>
+</div>
+<p class="hint" id="enfHint">On = one customer, one execution. Off = no limit.</p>
+<details class="advanced">
+  <summary>Rollout % (advanced)</summary>
+  <select id="enf" onchange="setRollout()" title="Per-customer rollout">
     <option value="10">10%</option>
     <option value="25">25%</option>
     <option value="50">50%</option>
     <option value="75">75%</option>
     <option value="100" selected>100%</option>
   </select>
-  <button onclick="runCheck()">Run Authority Check</button>
-  <button onclick="loadAudit()">Refresh audit</button>
-</div>
-<p class="hint" id="enfHint">Percent is <strong>per-customer rollout</strong> (some customers fully enforced, others dry-run) — not “let through X% of an agent swarm.” Off skips Bruiser <em>and</em> lifts the SimTix per-account cap so one membership can fill the stand. Dry Run keeps the origin cap at 4. 100% restores cap 4 and one allow per customer.</p>
+  <p class="hint">Percent is <strong>per-customer rollout</strong> (some customers fully enforced, others dry-run) — not “let through X% of an agent swarm.”</p>
+</details>
 <h2>Agent Lab</h2>
 <div class="row">
   <label class="mem-field" id="memWrap">Membership <input id="mem" value="1001234" placeholder="Membership"></label>
@@ -420,7 +437,7 @@ es.addEventListener('snapshot', (e) => {
     ['Downstream EAF', eaf.downstream_eaf, 'gateway operator / EAF', false],
     ['Active executions', g.active_executions, 'gateway operator', false],
     ['Would-have-blocked', est.would_block, 'SimTix edge', false],
-    ['Enforcement', (edge.mode||'')+' '+(edge.percent||'')+'%', 'SimTix edge', false],
+    ['Per-customer limit', limitLabel(edge), 'SimTix edge', false],
     ['Agents finished', sum.finished||0, 'load-lab', false]
   ];
   tiles.innerHTML = items.map(([k,v,s,hot]) => '<div class="tile'+(hot?' hot':'')+'"><span>'+k+'</span><b>'+(v??'—')+'</b><span>'+s+'</span></div>').join('');
@@ -438,7 +455,40 @@ es.addEventListener('snapshot', (e) => {
     }).join('');
   }
   log.textContent = JSON.stringify({loadlab: {running: lab.running, done: lab.done, preset: lab.preset, summary: sum}, edge, eaf}, null, 2);
+  paintLimit(limitKey(edge.mode));
 });
+function limitKey(mode){
+  mode = (mode||'').toLowerCase();
+  if (mode === 'off') return 'off';
+  if (mode === 'dry-run') return 'dry-run';
+  return 'on';
+}
+function limitLabel(edge){
+  const mode = (edge.mode||'').toLowerCase();
+  if (mode === 'off') return 'Off';
+  if (mode === 'dry-run') return 'Dry run';
+  const p = edge.percent;
+  if (p && p !== 100) return 'On ('+p+'%)';
+  return 'On';
+}
+function paintLimit(which){
+  document.querySelectorAll('#limitSeg button').forEach(b => b.classList.toggle('on', b.getAttribute('data-limit')===which));
+}
+async function applyEnf(mode, percent){
+  await fetch('/enforcement', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mode, percent})});
+}
+async function setLimit(which){
+  paintLimit(which);
+  if (which === 'off') return applyEnf('off', 0);
+  if (which === 'dry-run') return applyEnf('dry-run', 0);
+  document.getElementById('enf').value = '100';
+  return applyEnf('enforce', 100);
+}
+async function setRollout(){
+  paintLimit('on');
+  const percent = parseInt(document.getElementById('enf').value, 10) || 100;
+  return applyEnf('enforce', percent);
+}
 async function resetDemo(){
   toast('Resetting…');
   try {
@@ -450,14 +500,6 @@ async function resetDemo(){
   } catch (err) {
     toast('Reset failed: '+(err && err.message ? err.message : err));
   }
-}
-async function setEnf(){
-  const v = document.getElementById('enf').value;
-  let mode='enforce', percent=100;
-  if(v==='off') mode='off', percent=0;
-  else if(v==='dry-run') mode='dry-run', percent=0;
-  else { percent=parseInt(v,10); }
-  await fetch('/enforcement', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mode, percent})});
 }
 async function launch(){
   const n = parseInt(document.getElementById('n').value,10);

@@ -8,7 +8,7 @@ DDoS.
 ## Before the room
 
 - [ ] `make demo-up-local` (or Compose) is healthy: club `:8100`, tickets `:8091`, admin `:8110`.
-- [ ] Admin password `harchester`. Enforcement **100 %**. Control is Off · Dry Run · 10/25/50/75/100 % — percent is **per-customer rollout**, not “X% of the swarm.” Off lifts Bruiser **and** the SimTix per-account cap.
+- [ ] Admin password `harchester`. **Per-customer limit On**. Control is Off · Dry run · On. On = one customer, one execution. Off = no limit.
 - [ ] **Reset demo** so Scenario 1 starts clean. Confirm the toast: seats remaining + executions cleared.
 - [ ] Browser windows: club (supporter), admin (operator). Do not show the gateway port.
 - [ ] Confirm club home has no Bruiser branding.
@@ -31,14 +31,14 @@ DDoS.
 ## Scenario Off — burn seats (~2 min)
 
 - [ ] **Reset demo** (toast confirms seats/executions cleared; feed empty).
-- [ ] Enforcement **Off**. Preset **Single supporter**, N = 200. Launch.
+- [ ] **Per-customer limit Off**. Preset **Single supporter**, N = 200. Launch.
 - [ ] Watch **Seats remaining** drop well past 4 and **Orders** rise toward inventory. Off lifts Bruiser hold-back **and** the SimTix per-account cap.
 - [ ] Origin 409 is sold out, not Bruiser BUSY.
-- [ ] **Reset** and set **100 %** before the next scenario (cap 4 + one execution).
+- [ ] **Reset** and set **Per-customer limit On** before the next scenario (cap 4 + one execution).
 
 ## Scenario 10×N enforce (~2 min)
 
-- [ ] **Reset demo**. Enforcement **100 %**. Preset **10 × N**. Launch.
+- [ ] **Reset demo**. **Per-customer limit On**. Preset **10 × N**. Launch.
 - [ ] Expect **10 orders**, rest **BUSY**. One purchase per customer. Live feed: ten memberships.
 - [ ] **Reset** before Dry Run / rollout.
 
@@ -55,7 +55,7 @@ DDoS.
 
 ## Close — Authority Check (~1 min)
 
-- [ ] Enforcement 100 %. Run Authority Check.
+- [ ] Enforcement **On**. Run Authority Check.
 - [ ] Overall **PASS**, including direct allocation bypass blocked.
 - [ ] Show the certificate (probes), not a screenshot of Prometheus.
 

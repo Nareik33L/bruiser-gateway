@@ -4,19 +4,17 @@ Vocabulary (ADR-020): Bruiser is the **authoritative control layer** that
 ensures one customer remains one customer. Never: middleware, proxy, API
 gateway, bot detection, Redis lock, DDoS.
 
-Start from **Reset demo**, enforcement **100 %**. Hosted:
+Start from **Reset demo**, **Per-customer limit On**. Hosted:
 https://club.bruiser-gateway.com · https://tickets.bruiser-gateway.com ·
 https://admin.bruiser-gateway.com (Access: `kiedl33@outlook.com`).
 
 Reset between every scenario. The admin toast confirms seats restored and
 executions cleared.
 
-Enforcement control stays **Off · Dry Run · 10 / 25 / 50 / 75 / 100 %**.
-Percent is **per-customer rollout** (stable hash: some customers fully
-enforced, others dry-run), not “let through X% of an agent swarm.” Off
-skips Bruiser **and** lifts the SimTix per-account cap (0 = unlimited) so
-one membership can fill the stand. Dry Run keeps the origin cap at 4.
-100% restores cap 4 and one allow per customer.
+**Per-customer limit: Off · Dry run · On** is the presenter control.
+On = one customer, one execution (Enforce 100%). Off = no Bruiser hold-back
+and no SimTix per-account cap (agents buy until seats run out). Dry run
+observes would-block without blocking. Rollout % stays under Advanced.
 
 ## Scenario 1 — Normal purchase (~2 min)
 
@@ -38,7 +36,7 @@ and `busy` for the rest. Path is club → Edge hold/order.
 
 ## Scenario Off — burn seats (no guardrails, ~2 min)
 
-Reset demo → enforcement **Off** → Agent Lab **Single supporter**
+Reset demo → **Per-customer limit Off** → Agent Lab **Single supporter**
 (N = 200). Bruiser is not asked. The SimTix per-account cap is lifted, so
 agents that reach origin complete holds **and orders** until the stand
 sells out (500 seats).
@@ -48,12 +46,12 @@ inventory (not stuck at the old 4-ticket cap). Origin 409 is **sold out**,
 not Bruiser BUSY. Live feed shows `order` rows for membership `1001234`.
 
 **10 × N** Off still works and burns faster (ten memberships, no cap).
-Reset and switch enforcement back to **100 %** before the next beat
+Reset and switch **Per-customer limit On** before the next beat
 (that restores origin cap 4 and Bruiser one-execution).
 
 ## Scenario 10×N enforce (~2 min)
 
-Reset demo → **100 %** → Agent Lab **10 × N** (N = 50 or 200).
+Reset demo → **Per-customer limit On** → Agent Lab **10 × N** (N = 50 or 200).
 
 Expect: **exactly 10 orders** (one agent per customer purchases) and the
 rest **BUSY**. Live feed shows ten membership IDs; one `order` each, others
@@ -63,7 +61,7 @@ This is the same one-customer-one-purchase rule as Single, times ten.
 
 ## Scenario 3 — Dry Run (~2 min)
 
-Reset demo → Dry Run → Single 10,000 (or 10×N).
+Reset demo → **Dry run** → Single 10,000 (or 10×N).
 
 Expect: attempts forwarded; would-have-blocked high; seats churn on SimTix.
 Authority Check → **FAIL** (open path). Reset.
@@ -76,7 +74,7 @@ executions and seats between runs. Same supporter stays in the same bucket
 
 ## Close — Authority Check (~1 min)
 
-At 100 %, Run Authority Check → PASS including "Direct allocation bypass
+At **On**, Run Authority Check → PASS including "Direct allocation bypass
 blocked" → show the JSON certificate.
 
 Presenter checklist: [demo-presenter-checklist.md](demo-presenter-checklist.md).
