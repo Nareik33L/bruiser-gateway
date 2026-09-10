@@ -78,7 +78,7 @@ jobs:
           subject-digest: ${{ steps.image.outputs.digest }}
       - name: Publish GitHub release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             dist/bruiser
