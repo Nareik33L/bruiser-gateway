@@ -25,7 +25,7 @@ func main() {
 		addr:           shared.Env("ADMIN_HTTP_ADDR", ":8110"),
 		password:       shared.Env("DEMO_ADMIN_PASSWORD", "harchester"),
 		adminSecret:    shared.Env("DEMO_ADMIN_SECRET", "demo-admin-dev"),
-		operatorSecret: shared.Env("BRUISER_OPERATOR_SECRET", "operator-secret-dev"),
+		operatorSecret: shared.Env("BRUISER_OPERATOR_SECRET", ""),
 		gateway:        shared.Env("BRUISER_URL", "http://127.0.0.1:8080"),
 		simtixOrigin:   shared.Env("SIMTIX_ORIGIN_URL", "http://127.0.0.1:8090"),
 		simtixEdge:     shared.Env("SIMTIX_EDGE_URL", "http://127.0.0.1:8091"),
@@ -229,7 +229,7 @@ func (c *console) swarmStop(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (c *console) authority(w http.ResponseWriter, _ *http.Request) {
-	hmac := shared.Env("BRUISER_DEV_HMAC_SECRET", "dev-secret-change-me")
+	hmac := shared.Env("BRUISER_DEV_HMAC_SECRET", "")
 	cmd := exec.Command(c.bruiserBin, "authority-check",
 		"--edge", c.simtixEdge, "--origin", c.simtixOrigin,
 		"--control", c.gateway, "--admin", shared.Env("BRUISER_ADMIN_URL", "http://127.0.0.1:8082"),
@@ -322,7 +322,7 @@ const dashboardHTML = `
   <button onclick="runCheck()">Run Authority Check</button>
   <button onclick="loadAudit()">Refresh audit</button>
 </div>
-<p class="hint" id="enfHint">Percent is <strong>per-customer rollout</strong> (a stable hash: some customers fully enforced, others dry-run) — not “let through X% of an agent swarm.” Off skips Bruiser. Dry Run observes and forwards. 100% is one allow per customer.</p>
+<p class="hint" id="enfHint">Percent is <strong>per-customer rollout</strong> (some customers fully enforced, others dry-run) — not “let through X% of an agent swarm.”</p>
 <h2>Agent Lab</h2>
 <div class="row">
   <label class="mem-field" id="memWrap">Membership <input id="mem" value="1001234" placeholder="Membership"></label>
