@@ -1,0 +1,9 @@
+harchester.localhost {
+	reverse_proxy harchester:8100
+}
+tickets.localhost {
+	reverse_proxy simtix:8091
+}
+admin.localhost {
+	reverse_proxy admin:8110
+}

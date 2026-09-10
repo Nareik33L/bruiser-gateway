@@ -301,3 +301,29 @@ remains useful for clubs that look like a simpler version of the same model.
 **Revisit when.** First Stage A questionnaire comes back; replace or fork the
 profile rather than silently drifting.
 
+## ADR-023 — Harchester United is a reference Edge deployment, not product code
+
+**Decision.** The Harchester United / SimTix demonstration environment lives
+under `demos/` in this repository. Demo packages must not import `internal/`.
+They talk to the gateway over HTTP (`POST /v1/authorize`, `GET /metrics`,
+operator endpoints). Operator endpoints (`/v1/operator/*`, gated by
+`BRUISER_OPERATOR_SECRET`) are the first slice of M7: they revoke live
+executions through the store (so the busy cache forgets), list active
+executions and audit, and reset in-process EAF accumulators. They never delete
+`audit_events`. Demo supporter passwords are plaintext by design, in a
+separate `harchester` database, and must never be copied into production
+schema.
+
+**Why.** The demo is a reference Edge deployment of the product, not a mock.
+Keeping demo code out of `internal/` preserves the product/demo boundary the
+sales story depends on (club site and platform do not contain Bruiser). Reset
+has to go through `Revoke` because a SQL delete of `executions` leaves stale
+BUSY answers in the in-memory busy cache for up to the lease TTL.
+
+**Consequences.** `configs/harchester.yaml` is the merchant profile the demo
+gateway loads. Percentage rollout is an Edge setting, not a lease-core policy.
+See `docs/08-harchester-demo-scope.md`.
+
+**Revisit when.** M7 admin UI lands and subsumes the operator endpoints, or a
+design partner replaces Harchester as the standing demo merchant.
+

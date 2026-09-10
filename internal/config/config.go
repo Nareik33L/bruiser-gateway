@@ -8,40 +8,42 @@ import (
 )
 
 type Config struct {
-	HTTPAddr      string
-	DatabaseURL   string
-	DevHMACSecret string
-	MerchantID    string
-	MerchantName  string
-	LeaseTTL      time.Duration
-	MaxLifetime   time.Duration
-	MaxActive     int
-	SessionTTL    time.Duration
-	LogLevel      string
-	ReadyTimeout  time.Duration
-	SweepInterval time.Duration
-	EdgeSecret    string
-	OriginSecret  string
-	ProfilePath   string
+	HTTPAddr       string
+	DatabaseURL    string
+	DevHMACSecret  string
+	MerchantID     string
+	MerchantName   string
+	LeaseTTL       time.Duration
+	MaxLifetime    time.Duration
+	MaxActive      int
+	SessionTTL     time.Duration
+	LogLevel       string
+	ReadyTimeout   time.Duration
+	SweepInterval  time.Duration
+	EdgeSecret     string
+	OriginSecret   string
+	ProfilePath    string
+	OperatorSecret string
 }
 
 func Load() Config {
 	return Config{
-		HTTPAddr:      env("BRUISER_HTTP_ADDR", ":8080"),
-		DatabaseURL:   env("BRUISER_DATABASE_URL", "postgres://bruiser:bruiser@127.0.0.1:5432/bruiser?sslmode=disable"),
-		DevHMACSecret: env("BRUISER_DEV_HMAC_SECRET", "dev-secret-change-me"),
-		MerchantID:    env("BRUISER_MERCHANT_ID", "arsenal"),
-		MerchantName:  env("BRUISER_MERCHANT_NAME", "Arsenal FC"),
-		LeaseTTL:      envDuration("BRUISER_LEASE_TTL", 60*time.Second),
-		MaxLifetime:   envDuration("BRUISER_MAX_LIFETIME", 15*time.Minute),
-		MaxActive:     envInt("BRUISER_MAX_ACTIVE", 1),
-		SessionTTL:    envDuration("BRUISER_SESSION_TTL", time.Hour),
-		LogLevel:      env("BRUISER_LOG_LEVEL", "info"),
-		ReadyTimeout:  envDuration("BRUISER_READY_TIMEOUT", 2*time.Second),
-		SweepInterval: envDuration("BRUISER_SWEEP_INTERVAL", 2*time.Second),
-		EdgeSecret:    env("BRUISER_EDGE_SECRET", "edge-secret-dev"),
-		OriginSecret:  env("BRUISER_ORIGIN_SECRET", "origin-lock-dev"),
-		ProfilePath:   env("BRUISER_PROFILE", "configs/arsenal.yaml"),
+		HTTPAddr:       env("BRUISER_HTTP_ADDR", ":8080"),
+		DatabaseURL:    env("BRUISER_DATABASE_URL", "postgres://bruiser:bruiser@127.0.0.1:5432/bruiser?sslmode=disable"),
+		DevHMACSecret:  env("BRUISER_DEV_HMAC_SECRET", "dev-secret-change-me"),
+		MerchantID:     env("BRUISER_MERCHANT_ID", "arsenal"),
+		MerchantName:   env("BRUISER_MERCHANT_NAME", "Arsenal FC"),
+		LeaseTTL:       envDuration("BRUISER_LEASE_TTL", 60*time.Second),
+		MaxLifetime:    envDuration("BRUISER_MAX_LIFETIME", 15*time.Minute),
+		MaxActive:      envInt("BRUISER_MAX_ACTIVE", 1),
+		SessionTTL:     envDuration("BRUISER_SESSION_TTL", time.Hour),
+		LogLevel:       env("BRUISER_LOG_LEVEL", "info"),
+		ReadyTimeout:   envDuration("BRUISER_READY_TIMEOUT", 2*time.Second),
+		SweepInterval:  envDuration("BRUISER_SWEEP_INTERVAL", 2*time.Second),
+		EdgeSecret:     env("BRUISER_EDGE_SECRET", "edge-secret-dev"),
+		OriginSecret:   env("BRUISER_ORIGIN_SECRET", "origin-lock-dev"),
+		ProfilePath:    env("BRUISER_PROFILE", "configs/arsenal.yaml"),
+		OperatorSecret: env("BRUISER_OPERATOR_SECRET", ""),
 	}
 }
 

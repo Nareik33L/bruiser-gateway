@@ -41,6 +41,11 @@ func ArsenalProfile(t testing.TB) merchant.Profile {
 
 func Gateway(t testing.TB, profile merchant.Profile) (*httptest.Server, config.Config) {
 	t.Helper()
+	return GatewayWith(t, profile, nil)
+}
+
+func GatewayWith(t testing.TB, profile merchant.Profile, tweak func(*config.Config)) (*httptest.Server, config.Config) {
+	t.Helper()
 	url := os.Getenv("BRUISER_TEST_DATABASE_URL")
 	if url == "" {
 		t.Skip("BRUISER_TEST_DATABASE_URL not set")
@@ -60,6 +65,10 @@ func Gateway(t testing.TB, profile merchant.Profile) (*httptest.Server, config.C
 	cfg.LeaseTTL = 30 * time.Second
 	cfg.EdgeSecret = "edge-secret-dev"
 	cfg.OriginSecret = "origin-lock-dev"
+	cfg.OperatorSecret = "operator-secret-dev"
+	if tweak != nil {
+		tweak(&cfg)
+	}
 	if profile.MerchantID == "" {
 		profile = merchant.Empty(cfg.MerchantID)
 	}

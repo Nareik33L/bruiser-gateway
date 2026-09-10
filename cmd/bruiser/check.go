@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -15,6 +16,7 @@ func cmdAuthorityCheck() error {
 	secret := fs.String("hmac-secret", env("BRUISER_DEV_HMAC_SECRET", "dev-secret-change-me"), "HMAC used to mint box-office cookies")
 	membership := fs.String("membership", "1001234", "7-digit membership number analogue")
 	eventID := fs.String("event", "ars-che", "event id")
+	asJSON := fs.Bool("json", false, "print the report as JSON")
 	if err := fs.Parse(os.Args[2:]); err != nil {
 		return err
 	}
@@ -28,7 +30,15 @@ func cmdAuthorityCheck() error {
 	if err != nil {
 		return err
 	}
-	fmt.Print(rep.String())
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(rep); err != nil {
+			return err
+		}
+	} else {
+		fmt.Print(rep.String())
+	}
 	if !rep.Passed() {
 		return fmt.Errorf("authority check FAIL")
 	}

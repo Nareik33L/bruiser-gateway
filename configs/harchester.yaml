@@ -1,0 +1,29 @@
+merchant_id: harchester
+name: Harchester United FC
+profile: demo-premier-league-club
+assumptions: fictional-club-reference-deployment
+
+identity:
+  extractor: cookie-jwt
+  cookie: boxoffice_session
+  subject_claim: sub
+  hmac_secret_env: BRUISER_DEV_HMAC_SECRET
+
+routes:
+  - match: { method: GET, path: "/api/events" }
+    action: search
+  - match: { method: GET, path: "/api/events/{event}" }
+    action: search
+  - match: { method: POST, path: "/api/events/{event}/holds" }
+    resource: "event:{event}"
+    action: hold
+  - match: { method: POST, path: "/api/orders" }
+    resource_from: event_id
+    resource_prefix: "event:"
+    action: purchase
+
+policy:
+  rule_name: purchase-per-event
+  max_active: 1
+  lease_ttl: 60s
+  max_lifetime: 15m

@@ -1,0 +1,122 @@
+# Harchester United demonstration environment.
+# Club site, SimTix (origin+edge), Bruiser gateway, admin console, load-lab.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: bruiser
+      POSTGRES_PASSWORD: bruiser
+      POSTGRES_DB: bruiser
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bruiser"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - bruiser-demo-pg:/var/lib/postgresql/data
+      - ./init-demo-db.sql:/docker-entrypoint-initdb.d/02-demo.sql:ro
+
+  gateway:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: gateway
+    environment:
+      BRUISER_DATABASE_URL: postgres://bruiser:bruiser@postgres:5432/bruiser?sslmode=disable
+      BRUISER_HTTP_ADDR: ":8080"
+      BRUISER_DEV_HMAC_SECRET: dev-secret-change-me
+      BRUISER_MERCHANT_ID: harchester
+      BRUISER_MERCHANT_NAME: Harchester United FC
+      BRUISER_PROFILE: /configs/harchester.yaml
+      BRUISER_EDGE_SECRET: edge-secret-dev
+      BRUISER_ORIGIN_SECRET: origin-lock-dev
+      BRUISER_OPERATOR_SECRET: operator-secret-dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["serve"]
+
+  harchester:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: harchester
+    environment:
+      HARCHESTER_HTTP_ADDR: ":8100"
+      HARCHESTER_DATABASE_URL: postgres://bruiser:bruiser@postgres:5432/harchester?sslmode=disable
+      HARCHESTER_SSO_SECRET: harchester-sso-dev
+      SIMTIX_PUBLIC_URL: http://tickets.localhost:8091
+      SIMTIX_ORIGIN_URL: http://simtix:8090
+      DEMO_OPPONENT: Arsenal
+      DEMO_ADMIN_SECRET: demo-admin-dev
+    ports:
+      - "8100:8100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  simtix:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: simtix-demo
+    environment:
+      SIMTIX_HTTP_ADDR: ":8090"
+      SIMTIX_EDGE_ADDR: ":8091"
+      SIMTIX_BRUISER_URL: http://gateway:8080
+      SIMTIX_ORIGIN_SECRET: origin-lock-dev
+      SIMTIX_PUBLIC_URL: http://tickets.localhost:8091
+      BRUISER_EDGE_SECRET: edge-secret-dev
+      BRUISER_DEV_HMAC_SECRET: dev-secret-change-me
+      HARCHESTER_SSO_SECRET: harchester-sso-dev
+      DEMO_ADMIN_SECRET: demo-admin-dev
+      DEMO_OPPONENT: Arsenal
+    ports:
+      - "8090:8090"
+      - "8091:8091"
+    depends_on:
+      - gateway
+
+  loadlab:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: loadlab
+    environment:
+      LOADLAB_HTTP_ADDR: ":8120"
+      LOADLAB_MAX_AGENTS: "10000"
+      HARCHESTER_URL: http://harchester:8100
+      SIMTIX_EDGE_URL: http://simtix:8091
+      DEMO_ADMIN_SECRET: demo-admin-dev
+    depends_on:
+      - harchester
+      - simtix
+
+  admin:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: admin
+    environment:
+      ADMIN_HTTP_ADDR: ":8110"
+      DEMO_ADMIN_PASSWORD: harchester
+      DEMO_ADMIN_SECRET: demo-admin-dev
+      BRUISER_OPERATOR_SECRET: operator-secret-dev
+      BRUISER_URL: http://gateway:8080
+      SIMTIX_ORIGIN_URL: http://simtix:8090
+      SIMTIX_EDGE_URL: http://simtix:8091
+      LOADLAB_URL: http://loadlab:8120
+      HARCHESTER_URL: http://harchester:8100
+      BRUISER_BIN: /bruiser
+    ports:
+      - "8110:8110"
+    depends_on:
+      - gateway
+      - simtix
+      - loadlab
+      - harchester
+
+volumes:
+  bruiser-demo-pg:

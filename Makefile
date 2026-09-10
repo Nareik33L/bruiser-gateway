@@ -5,7 +5,7 @@ SIMTIX    := bin/simtix
 DATABASE_URL ?= postgres://bruiser:bruiser@127.0.0.1:5432/bruiser?sslmode=disable
 TEST_DATABASE_URL ?= postgres://bruiser:bruiser@127.0.0.1:5432/bruiser_test?sslmode=disable
 
-.PHONY: all build test test-race lint fmt vet serve migrate tidy ci torture simtix authority-check
+.PHONY: all build test test-race lint fmt vet serve migrate tidy ci torture simtix authority-check check-demo-boundary demo-build demo-up-local demo-down-local demo-reset demo-check demo-nuke
 
 all: build
 
@@ -16,6 +16,17 @@ build:
 	mkdir -p bin
 	$(GO) build -o $(BIN) ./cmd/bruiser
 	$(GO) build -o $(SIMTIX) ./cmd/simtix
+
+demo-build:
+	mkdir -p bin
+	$(GO) build -o $(BIN) ./cmd/bruiser
+	$(GO) build -o bin/harchester ./demos/harchester-web
+	$(GO) build -o bin/simtix-demo ./demos/simtix
+	$(GO) build -o bin/admin ./demos/admin-console
+	$(GO) build -o bin/loadlab ./demos/load-lab
+
+check-demo-boundary:
+	bash scripts/check-demo-boundary.sh
 
 test:
 	BRUISER_TEST_DATABASE_URL="$(TEST_DATABASE_URL)" $(GO) test $(PKG) -count=1
@@ -47,7 +58,23 @@ simtix: build
 authority-check: build
 	$(BIN) authority-check --edge http://127.0.0.1:8091 --origin http://127.0.0.1:8090
 
+demo-check: demo-build
+	$(BIN) authority-check --edge http://127.0.0.1:8091 --origin http://127.0.0.1:8090 \
+		--membership 1001234 --event hfc-ars --json
+
+demo-reset:
+	curl -sS -X POST http://127.0.0.1:8110/reset -H 'Cookie: admin_session=harchester-ok' || true
+
+demo-up-local: demo-build
+	bash scripts/demo-up-local.sh
+
+demo-down-local:
+	bash scripts/demo-down-local.sh
+
+demo-nuke:
+	@echo "Refusing to drop databases from Make. Use psql DROP DATABASE harchester / bruiser if you mean it."
+
 migrate: build
 	BRUISER_DATABASE_URL="$(DATABASE_URL)" $(BIN) migrate
 
-ci: vet test-race build
+ci: vet test-race build check-demo-boundary demo-build

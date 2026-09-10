@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -57,6 +58,7 @@ type eafAcc struct {
 	attempts  map[string]float64
 	forwarded map[string]float64
 	customers map[string]map[string]struct{}
+	outcomes  map[string]map[string]float64
 }
 
 func newEAFAcc() *eafAcc {
@@ -64,6 +66,7 @@ func newEAFAcc() *eafAcc {
 		attempts:  map[string]float64{},
 		forwarded: map[string]float64{},
 		customers: map[string]map[string]struct{}{},
+		outcomes:  map[string]map[string]float64{},
 	}
 }
 
@@ -74,6 +77,10 @@ func (a *eafAcc) record(resource, customer, outcome string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.attempts[resource]++
+	if a.outcomes[resource] == nil {
+		a.outcomes[resource] = map[string]float64{}
+	}
+	a.outcomes[resource][outcome]++
 	allocationAttempts.WithLabelValues(resource, outcome).Inc()
 	if outcome == "allow" {
 		a.forwarded[resource]++
@@ -97,24 +104,51 @@ func (a *eafAcc) record(resource, customer, outcome string) {
 }
 
 type Server struct {
-	cfg     config.Config
-	store   *pgstore.Store
-	leases  lease.Store
-	signer  auth.Signer
-	log     *slog.Logger
-	profile merchant.Profile
-	eaf     *eafAcc
+	cfg       config.Config
+	store     *pgstore.Store
+	leases    lease.Store
+	busyCache *lease.BusyCache
+	signer    auth.Signer
+	log       *slog.Logger
+	profile   merchant.Profile
+	eaf       *eafAcc
+}
+
+// currentBusyCache backs the busy-cache Prometheus counters. Tests construct
+// several servers per process; the most recent one is the one reported.
+var currentBusyCache atomic.Pointer[lease.BusyCache]
+
+func init() {
+	read := func(f func(*lease.BusyCache) uint64) func() float64 {
+		return func() float64 {
+			if c := currentBusyCache.Load(); c != nil {
+				return float64(f(c))
+			}
+			return 0
+		}
+	}
+	promauto.NewCounterFunc(prometheus.CounterOpts{
+		Name: "bruiser_busy_cache_hits_total",
+		Help: "Acquire requests answered BUSY from the in-memory busy cache without touching the store.",
+	}, read((*lease.BusyCache).Hits))
+	promauto.NewCounterFunc(prometheus.CounterOpts{
+		Name: "bruiser_busy_cache_misses_total",
+		Help: "Acquire requests that consulted the store.",
+	}, read((*lease.BusyCache).Misses))
 }
 
 func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.Logger, profile merchant.Profile) http.Handler {
+	cache := lease.NewBusyCache(store, 50)
+	currentBusyCache.Store(cache)
 	s := &Server{
-		cfg:     cfg,
-		store:   store,
-		leases:  lease.NewBusyCache(store, 50),
-		signer:  signer,
-		log:     log,
-		profile: profile,
-		eaf:     newEAFAcc(),
+		cfg:       cfg,
+		store:     store,
+		leases:    cache,
+		busyCache: cache,
+		signer:    signer,
+		log:       log,
+		profile:   profile,
+		eaf:       newEAFAcc(),
 	}
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -136,6 +170,9 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 			r.Get("/executions/{id}", s.get)
 			r.Get("/executions/{id}/watch", s.watch)
 		})
+		if cfg.OperatorSecret != "" {
+			s.mountOperator(r)
+		}
 	})
 	return r
 }
