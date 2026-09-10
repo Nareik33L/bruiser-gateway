@@ -20,7 +20,7 @@ func cmdAuthorityCheck() error {
 	originURL := fs.String("origin", env("SIMTIX_ORIGIN_URL", "http://127.0.0.1:8090"), "box-office origin URL")
 	controlURL := fs.String("control", env("BRUISER_HTTP_URL", ""), "optional Bruiser control-plane URL for /v1/authorize probes")
 	adminURL := fs.String("admin", env("BRUISER_ADMIN_URL", ""), "Bruiser admin listener URL (policy/admin); not the public control URL")
-	secret := fs.String("hmac-secret", env("BRUISER_DEV_HMAC_SECRET", "dev-secret-change-me"), "HMAC used to mint box-office cookies")
+	secret := fs.String("hmac-secret", env("BRUISER_DEV_HMAC_SECRET", ""), "HMAC used to mint box-office cookies")
 	membership := fs.String("membership", "1001234", "7-digit membership number analogue")
 	eventID := fs.String("event", "ars-che", "event id")
 	if err := fs.Parse(os.Args[2:]); err != nil {

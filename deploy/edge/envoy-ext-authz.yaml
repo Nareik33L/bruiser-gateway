@@ -1,6 +1,7 @@
 # Envoy ext_authz calling Bruiser POST /v1/authorize (Edge deployment method).
 # Lab analogue: cmd/simtix SIMTIX_EDGE_ADDR. Paths are the unverified Arsenal-like
 # routes in configs/arsenal.yaml.
+# Replace X-Bruiser-Edge-Secret "change-me" from a secret; production refuses it.
 
 static_resources:
   listeners:
@@ -29,7 +30,7 @@ static_resources:
                               - exact: authorization
                           headers_to_add:
                             - key: X-Bruiser-Edge-Secret
-                              value: edge-secret-dev
+                              value: change-me
                         authorization_response:
                           allowed_upstream_headers:
                             patterns:

@@ -84,3 +84,12 @@ An older binary ignores them.
 Set `BRUISER_RATE_*` for sessions, acquire, renew, release, authorize,
 merchant, customer, principal, and optional IP. Metrics:
 `bruiser_rate_limited_total{class=…}`.
+
+## 7. Release integrity
+
+Tagged `v*` builds (`/.github/workflows/release.yml`) are reproducible
+against Go 1.25.0, `go mod verify`, and `GOPROXY=off` after download.
+Binaries and images are cosign-signed with GitHub build attestations.
+Verify before promoting an image to origin. See [SECURITY.md](../SECURITY.md).
+
+A third-party pentest is required before go-live.

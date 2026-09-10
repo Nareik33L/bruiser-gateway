@@ -5,7 +5,25 @@ on:
     branches: [main, "cursor/**"]
   pull_request:
 
+env:
+  GOTOOLCHAIN: local
+  GOPROXY: https://proxy.golang.org,direct
+  GOSUMDB: sum.golang.org
+
 jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Allowlist scan
+        run: bash scripts/check-secrets.sh
+      - name: gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.28.0/gitleaks_8.28.0_linux_x64.tar.gz | tar -xz gitleaks
+          ./gitleaks detect --no-git --source . --verbose --redact
+
   test:
     runs-on: ubuntu-latest
     services:
@@ -26,7 +44,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25.x"
+          go-version: "1.25.0"
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -35,18 +53,24 @@ jobs:
           python-version: "3.12"
       - name: Python SDK deps
         run: pip install cryptography
+      - name: go mod verify
+        run: go mod download && go mod verify
       - name: Test
         env:
           BRUISER_TEST_DATABASE_URL: postgres://bruiser:bruiser@127.0.0.1:5432/bruiser_test?sslmode=disable
         run: make ci
 
+  # Product builds stay on Go 1.25 + GOTOOLCHAIN=local. Scanner tools currently
+  # require Go 1.26 to compile; those jobs may fetch that toolchain only.
   sbom:
     runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: auto
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25.x"
+          go-version: "1.25.0"
       - name: CycloneDX SBOM
         run: |
           go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0
@@ -55,13 +79,15 @@ jobs:
 
   govulncheck:
     runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: auto
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25.x"
+          go-version: "1.25.0"
       - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
   image:
     runs-on: ubuntu-latest

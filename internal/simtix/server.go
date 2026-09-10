@@ -97,7 +97,7 @@ type hold struct {
 
 func New(cfg Config) *Server {
 	if cfg.HMACSecret == "" {
-		cfg.HMACSecret = env("BRUISER_DEV_HMAC_SECRET", "dev-secret-change-me")
+		cfg.HMACSecret = os.Getenv("BRUISER_DEV_HMAC_SECRET")
 	}
 	if cfg.Seats <= 0 {
 		cfg.Seats = 50

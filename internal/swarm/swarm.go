@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,11 +19,11 @@ import (
 type Profile string
 
 const (
-	Profile1xN      Profile = "1xN"
-	ProfileNxK      Profile = "NxK"
-	ProfileHandoff  Profile = "handoff"
-	ProfileBypass   Profile = "bypass"
-	ProfileUnaware  Profile = "unaware"
+	Profile1xN     Profile = "1xN"
+	ProfileNxK     Profile = "NxK"
+	ProfileHandoff Profile = "handoff"
+	ProfileBypass  Profile = "bypass"
+	ProfileUnaware Profile = "unaware"
 )
 
 type Config struct {
@@ -37,15 +38,15 @@ type Config struct {
 }
 
 type Result struct {
-	Profile      string `json:"profile"`
-	Allow        int64  `json:"allow"`
-	Busy         int64  `json:"busy"`
-	Other        int64  `json:"other"`
-	ObservedEAF  float64 `json:"observed_eaf"`
+	Profile       string  `json:"profile"`
+	Allow         int64   `json:"allow"`
+	Busy          int64   `json:"busy"`
+	Other         int64   `json:"other"`
+	ObservedEAF   float64 `json:"observed_eaf"`
 	DownstreamEAF float64 `json:"downstream_eaf"`
-	ElapsedMS    int64  `json:"elapsed_ms"`
-	Detail       string `json:"detail,omitempty"`
-	OK           bool   `json:"ok"`
+	ElapsedMS     int64   `json:"elapsed_ms"`
+	Detail        string  `json:"detail,omitempty"`
+	OK            bool    `json:"ok"`
 }
 
 func Run(cfg Config, profile Profile) (Result, error) {
@@ -53,7 +54,7 @@ func Run(cfg Config, profile Profile) (Result, error) {
 		cfg.EventID = simtix.DefaultEvent
 	}
 	if cfg.HMACSecret == "" {
-		cfg.HMACSecret = "dev-secret-change-me"
+		cfg.HMACSecret = os.Getenv("BRUISER_DEV_HMAC_SECRET")
 	}
 	if cfg.N < 1 {
 		cfg.N = 50

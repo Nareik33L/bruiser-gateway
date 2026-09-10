@@ -6,6 +6,7 @@
 .env
 .env.*
 !.env.example
+dist/
 *.exe
 .idea/
 *.out
