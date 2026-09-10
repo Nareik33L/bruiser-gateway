@@ -16,7 +16,9 @@ LAB_ENV ?= BRUISER_ENV=lab \
 	BRUISER_DEV_HMAC_SECRET=dev-secret-change-me \
 	BRUISER_PROFILE=configs/arsenal.yaml
 
-.PHONY: all build test test-race lint fmt vet serve migrate tidy ci torture simtix authority-check eaf-demo eaf-nightly sdk-test doctor \
+FUZZ_TIME ?= 10s
+
+.PHONY: all build test test-race lint fmt vet fuzz serve migrate tidy ci torture simtix authority-check eaf-demo eaf-nightly sdk-test doctor \
 	demo-1x10000 demo-1000x10 demo-handoff demo-bypass demo-unaware demo-up v1-accept soak
 
 all: build
@@ -117,4 +119,7 @@ demo-unaware: build
 migrate: build
 	$(LAB_ENV) BRUISER_DATABASE_URL="$(DATABASE_URL)" $(BIN) migrate
 
-ci: vet test-race build sdk-test
+fuzz:
+	$(GO) test ./internal/resource -fuzz=FuzzCanonical -fuzztime=$(FUZZ_TIME)
+
+ci: vet test-race fuzz build sdk-test

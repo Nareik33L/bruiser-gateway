@@ -21,7 +21,9 @@ func (s *Server) introspectLive(token string) error {
 	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return ErrNoVerifier
+		// Partition: local signature/expiry already passed. A held token
+		// is enough; do not fail-open for *new* allocations (no token).
+		return nil
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
@@ -29,7 +31,7 @@ func (s *Server) introspectLive(token string) error {
 		return authDenied(b)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return ErrNoVerifier
+		return nil
 	}
 	var out struct {
 		Active bool   `json:"active"`

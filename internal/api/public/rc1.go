@@ -62,14 +62,15 @@ func subtleEqual(got, want string) bool {
 }
 
 // stripInboundBruiser drops client-supplied control headers. Edge/admin/
-// operator credentials and the event hint are the only inbound X-Bruiser-*
-// accepted.
+// operator credentials, the replay nonce, and the event hint are the only
+// inbound X-Bruiser-* accepted.
 func stripInboundBruiser(next http.Handler) http.Handler {
 	keep := map[string]bool{
 		"X-Bruiser-Edge-Secret":     true,
 		"X-Bruiser-Admin-Secret":    true,
 		"X-Bruiser-Operator-Secret": true,
 		"X-Bruiser-Event-Id":        true,
+		"X-Bruiser-Nonce":           true,
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for name := range r.Header {
