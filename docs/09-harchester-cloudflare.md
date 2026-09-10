@@ -51,8 +51,10 @@ In the `bruiser-gateway.com` zone, **orange-cloud (Proxied)**:
 | CNAME | `admin` | `<app>.fly.dev` | Proxied |
 
 Replace `<app>` with the Fly app name from `deploy/fly/fly.toml` (default
-`bruiser-harchester-demo`). Do not create A/AAAA for club/tickets/admin that
-bypass Cloudflare. Do not add DNS for gateway or load-lab.
+`bruiser-harchester-demo`). Proxied **A/AAAA** to the Fly anycast addresses is
+an equivalent if CNAME is unused; still orange-cloud. Do not grey-cloud except
+briefly for `fly certs add`. Do not add DNS for gateway or load-lab. Do not
+point `@` or `www` at Fly.
 
 SSL/TLS mode for the zone (or a configuration rule scoped to the three
 hostnames): **Full (strict)** once the origin presents a valid certificate

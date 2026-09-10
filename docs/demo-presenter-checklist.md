@@ -44,13 +44,15 @@ DDoS.
 - [ ] Overall **PASS**, including direct allocation bypass blocked.
 - [ ] Show the certificate (probes), not a screenshot of Prometheus.
 
-## Hosting (if asked)
+## Hosted URLs (locked)
 
-**Hosted URLs (locked):** https://club.bruiser-gateway.com ·
-https://tickets.bruiser-gateway.com · https://admin.bruiser-gateway.com
-(Access allowlist `kiedl33@outlook.com`, then console password).
+| Role | URL |
+|------|-----|
+| Club | https://club.bruiser-gateway.com |
+| SimTix | https://tickets.bruiser-gateway.com |
+| Admin | https://admin.bruiser-gateway.com (Access: `kiedl33@outlook.com`, then password `harchester`) |
 
-Cloudflare is DNS + proxy in front of the Fly origin running this Compose
-stack. Apex/`www` stay on the marketing Worker. A Worker Edge is stretch, not
-this demo. See [09-harchester-cloudflare.md](09-harchester-cloudflare.md) and
-[10-harchester-fly.md](10-harchester-fly.md).
+Apex and `www.bruiser-gateway.com` stay on Worker `bruiser-gateway` (marketing).
+Gateway and load-lab are not published. Cloudflare is DNS + proxy in front of
+the Fly/Compose origin. A Worker Edge is stretch, not this demo. See
+[09-harchester-cloudflare.md](09-harchester-cloudflare.md).
