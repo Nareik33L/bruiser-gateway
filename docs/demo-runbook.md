@@ -4,7 +4,9 @@ Vocabulary (ADR-020): Bruiser is the **authoritative control layer** that
 ensures one customer remains one customer. Never: middleware, proxy, API
 gateway, bot detection, Redis lock, DDoS.
 
-Start from **Reset demo**, enforcement **100 %**.
+Start from **Reset demo**, enforcement **100 %**. Hosted:
+https://club.bruiser-gateway.com · https://tickets.bruiser-gateway.com ·
+https://admin.bruiser-gateway.com (Access: `kiedl33@outlook.com`).
 
 ## Scenario 1 — Normal purchase (~2 min)
 

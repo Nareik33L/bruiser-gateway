@@ -9,7 +9,22 @@ would deploy it.
 Full scope: [docs/08-harchester-demo-scope.md](docs/08-harchester-demo-scope.md).
 Runbook: [docs/demo-runbook.md](docs/demo-runbook.md).
 Presenter checklist: [docs/demo-presenter-checklist.md](docs/demo-presenter-checklist.md).
-Hosting (VM origin; Cloudflare DNS/proxy only): [docs/09-harchester-cloudflare.md](docs/09-harchester-cloudflare.md).
+Hosting (Fly origin; Cloudflare DNS/proxy + Access on admin):
+[docs/09-harchester-cloudflare.md](docs/09-harchester-cloudflare.md) ·
+[docs/10-harchester-fly.md](docs/10-harchester-fly.md).
+
+## Hosted URLs (locked)
+
+Zone `bruiser-gateway.com`. Apex and `www` stay on Worker `bruiser-gateway`
+(marketing — not this stack).
+
+| Role | URL |
+|------|-----|
+| Club | https://club.bruiser-gateway.com |
+| SimTix | https://tickets.bruiser-gateway.com |
+| Admin | https://admin.bruiser-gateway.com (Cloudflare Access: `kiedl33@outlook.com`, then password `harchester`) |
+
+Gateway and load-lab are not published. Local Compose still uses `:8100` / `:8091` / `:8110`.
 
 ## DEMO ONLY — plaintext passwords
 

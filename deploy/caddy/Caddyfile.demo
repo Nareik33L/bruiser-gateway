@@ -1,7 +1,11 @@
-# Origin routing for the Harchester Compose demo (on the VM).
-# Public hosting puts Cloudflare DNS + proxy in front of this origin.
-# Optional Cloudflare Access belongs on the admin hostname, not here.
+# Origin routing for the Harchester Compose demo (on the VM / Fly-equivalent host).
+# Public hosting: Cloudflare DNS + orange-cloud proxy in front of this origin.
+# Cloudflare Access belongs on admin.bruiser-gateway.com only, not here.
 # Gateway and load-lab stay unpublished.
+#
+# Local: docker compose --profile hostnames
+# Hosted: same file; production server blocks use locked zone bruiser-gateway.com.
+# Apex and www stay on Worker bruiser-gateway — do not add them here.
 
 harchester.localhost {
 	reverse_proxy harchester:8100
@@ -10,5 +14,15 @@ tickets.localhost {
 	reverse_proxy simtix:8091
 }
 admin.localhost {
+	reverse_proxy admin:8110
+}
+
+club.bruiser-gateway.com {
+	reverse_proxy harchester:8100
+}
+tickets.bruiser-gateway.com {
+	reverse_proxy simtix:8091
+}
+admin.bruiser-gateway.com {
 	reverse_proxy admin:8110
 }

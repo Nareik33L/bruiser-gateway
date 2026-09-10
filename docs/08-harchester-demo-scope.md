@@ -69,7 +69,7 @@ Each row is a correction the build would otherwise have discovered late.
 | C9 | Both "Dry Run" and "0 %" as controls | Identical behaviour. | One control with states **Off · Dry Run · 10 · 25 · 50 · 75 · 100 %**. Off means the Edge does not call Bruiser at all (the "before" picture, no observation). |
 | C10 | Reset must clear "logs" | Bruiser's audit log is append-only and is part of the pitch. | Reset clears **demo** logs (SimTix request log, load-lab run log). Bruiser `audit_events` are retained; `make demo-nuke` is the only thing that drops them. |
 | C11 | Passwords plaintext, no guard | Acceptable for the reasons given, but needs a mechanical guard, not just a note. | Seed lives in a separate database (`harchester`), never in the Bruiser database; table comment, README banner and a CI check that `demos/` imports nothing from `internal/` (§3.2). |
-| C12 | Domains `*.demo.bruisergateway.com` | Existing docs use `sandbox.bruiser-gateway.com` (ADR-016). | Decision needed: one domain family. This document uses the brief's names as placeholders; the compose file works with `*.localhost` regardless. |
+| C12 | Domains `*.demo.bruisergateway.com` | Existing docs use `sandbox.bruiser-gateway.com` (ADR-016). | **Locked:** Harchester public hostnames are `club.bruiser-gateway.com`, `tickets.bruiser-gateway.com`, `admin.bruiser-gateway.com` (Cloudflare orange-cloud → Fly origin). Apex and `www.bruiser-gateway.com` stay on Worker `bruiser-gateway` (marketing). ADR-016 `sandbox.bruiser-gateway.com` remains the product sandbox, not this club demo. Compose locally still uses `*.localhost`. Hostnames are env (`DEMO_*_HOST`). |
 | C13 | Club "inspired by Dream Team's Harchester United", stadium "Dragon's Lair", opponent "Arsenal" | Harchester United / Dragon's Lair are Sky's fictional IP; Arsenal is a real club's mark. Low risk in private demos, higher once hosted publicly. | Keep the names (the brief is explicit) but ship **original** crest, colours and copy, no Dream Team characters or assets, and make the opponent a config value (`DEMO_OPPONENT`, default `Arsenal`) so it can be swapped before public hosting. Flagged for the founder, not decided here. |
 
 Not changed: four applications, one compose file, real gateway, real SimTix, no
@@ -156,8 +156,8 @@ agents from one process. "Cloudflare-ready" is satisfied at the deployment layer
 
 ### 4.1 Harchester United FC (`demos/harchester-web`)
 
-Public hostname: `demo.bruisergateway.com` (placeholder, C12). Locally
-`harchester.localhost`.
+Public hostname: `club.bruiser-gateway.com` (C12). Locally
+`harchester.localhost` or `http://127.0.0.1:8100`.
 
 A believable club site. Zero Bruiser branding, no Bruiser HTTP calls, no Bruiser
 cookies. It does not know Bruiser exists.
@@ -192,7 +192,8 @@ Identity and session:
 
 ### 4.2 SimTix (`demos/simtix`)
 
-Public hostname: `tickets.demo.bruisergateway.com`. Locally `tickets.localhost`.
+Public hostname: `tickets.bruiser-gateway.com`. Locally `tickets.localhost`
+or `http://127.0.0.1:8091`.
 
 A fictional ticketing platform that visibly is a different company: its own
 name, logo, navigation, colour system (cool neutrals, one strong brand colour that
@@ -237,9 +238,10 @@ another device") and polls `Retry-After`. It never says "Bruiser".
 
 ### 4.3 Admin Console (`demos/admin-console`)
 
-Public hostname: `admin.demo.bruisergateway.com`. Locally `admin.localhost`.
+Public hostname: `admin.bruiser-gateway.com`. Locally `admin.localhost` or
+`http://127.0.0.1:8110`.
 Password protected (single shared operator password in the demo; Cloudflare
-Access in front when hosted, §9).
+Access allowlist `kiedl33@outlook.com` in front when hosted, §9).
 
 The only place Bruiser is named. Audience: CTOs, platform engineers, security
 teams, sales.
@@ -528,7 +530,7 @@ D5 needs D3+D4. D6 needs everything.
   script), `gateway` (profile `harchester`, no published port), `harchester-web`,
   `simtix`, `admin-console`, `load-lab` (no published port), `caddy` routing
   `harchester.localhost`, `tickets.localhost`, `admin.localhost` and the
-  production hostnames from one Caddyfile.
+  locked production names `club` / `tickets` / `admin.bruiser-gateway.com`.
 - `configs/harchester.yaml`; `Dockerfile` targets (P4).
 - `make demo-up | demo-down | demo-reset | demo-swarm | demo-check | demo-nuke |
   check-demo-boundary`; `check-demo-boundary` added to `make ci`.
@@ -610,30 +612,34 @@ solved).
 - Stretch only (not a substitute for this environment): a Cloudflare Worker
   reference Edge in `deploy/edge/cloudflare-worker/` that implements the same
   `POST /v1/authorize` contract as the Go Edge. Hosted demos still run the full
-  Compose stack on a VM; Cloudflare in front is DNS + proxy, not the app.
+  Compose stack on Fly; Cloudflare in front is DNS + proxy, not the app.
 
 Exit: someone outside the team runs the demo from `README-demo.md` without help;
-hosted URLs (when a domain exists) live behind Cloudflare DNS/proxy with the
-console behind optional Access; CI asserts the headline numbers.
+hosted URLs (`club` / `tickets` / `admin.bruiser-gateway.com`) live behind
+Cloudflare DNS/proxy with the console behind Access (`kiedl33@outlook.com`);
+CI asserts the headline numbers.
 
 ---
 
 ## 9. Hosting and "Cloudflare-ready"
 
-Hosted form is **the Compose demo on a VM**, with Cloudflare as DNS and proxy
+Hosted form is **the Compose demo on Fly** (packed Machine; see
+[10-harchester-fly.md](10-harchester-fly.md)), with Cloudflare as DNS and proxy
 in front of that origin — not a Worker rewrite of the applications. Details:
 [09-harchester-cloudflare.md](09-harchester-cloudflare.md).
 
-- One VM running `deploy/compose/docker-compose.demo.yml` (or `make demo-up-local`).
-- Cloudflare DNS proxied records for the three public hostnames; origin
-  certificate or Caddy ACME on the VM.
-- **Optional Cloudflare Access** on the admin hostname, in addition to the
-  console password.
+- One origin running `deploy/compose/docker-compose.demo.yml` or the Fly
+  equivalent `deploy/fly` (same processes, volume-backed Postgres).
+- Cloudflare DNS proxied records for `club` / `tickets` / `admin.bruiser-gateway.com`.
+  Apex and `www` stay on Worker `bruiser-gateway`.
+- Origin TLS: Fly certs or Cloudflare Origin CA on Caddy. Do not use Flexible SSL.
+- **Cloudflare Access** on `admin.bruiser-gateway.com` only, allow email
+  `kiedl33@outlook.com`, in addition to the console password.
 - Gateway and load-lab have no DNS records and no published ports.
 - Stretch only: a Worker Edge in `deploy/edge/cloudflare-worker/` calling
   `POST /v1/authorize` in front of `tickets.*`, same contract as the Go Edge.
 
-Nightly `Reset demo` via cron on the VM so the hosted environment is always in
+Nightly `Reset demo` on the origin so the hosted environment is always in
 Scenario 1 state.
 
 ---

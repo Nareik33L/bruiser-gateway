@@ -1,5 +1,7 @@
 # Harchester United demonstration environment.
 # Club site, SimTix (origin+edge), Bruiser gateway, admin console, load-lab.
+# Local hostnames: *.localhost. Hosted names are config; production lock is
+# club/tickets/admin.bruiser-gateway.com (see docs/09 and harchester.hosted.env.example).
 services:
   postgres:
     image: postgres:16

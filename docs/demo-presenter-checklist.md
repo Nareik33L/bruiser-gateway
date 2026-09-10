@@ -46,6 +46,11 @@ DDoS.
 
 ## Hosting (if asked)
 
-Cloudflare is DNS + proxy in front of the VM running this Compose stack.
-Optional Access on the admin hostname. A Worker Edge is stretch, not this demo.
-See [09-harchester-cloudflare.md](09-harchester-cloudflare.md).
+**Hosted URLs (locked):** https://club.bruiser-gateway.com ·
+https://tickets.bruiser-gateway.com · https://admin.bruiser-gateway.com
+(Access allowlist `kiedl33@outlook.com`, then console password).
+
+Cloudflare is DNS + proxy in front of the Fly origin running this Compose
+stack. Apex/`www` stay on the marketing Worker. A Worker Edge is stretch, not
+this demo. See [09-harchester-cloudflare.md](09-harchester-cloudflare.md) and
+[10-harchester-fly.md](10-harchester-fly.md).

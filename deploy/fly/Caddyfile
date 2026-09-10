@@ -1,0 +1,31 @@
+# Origin Caddy for the packed Fly Machine (HTTP; Fly + Cloudflare terminate TLS).
+# Hostnames are config; production lock is club/tickets/admin.bruiser-gateway.com.
+
+{
+	auto_https off
+}
+
+http://:8080 {
+	handle /healthz {
+		respond "ok" 200
+	}
+
+	@club host {$DEMO_CLUB_HOST:club.bruiser-gateway.com}
+	handle @club {
+		reverse_proxy 127.0.0.1:8100
+	}
+
+	@tickets host {$DEMO_TICKETS_HOST:tickets.bruiser-gateway.com}
+	handle @tickets {
+		reverse_proxy 127.0.0.1:8091
+	}
+
+	@admin host {$DEMO_ADMIN_HOST:admin.bruiser-gateway.com}
+	handle @admin {
+		reverse_proxy 127.0.0.1:8110
+	}
+
+	handle {
+		respond "Harchester origin — set Host to club, tickets, or admin hostname" 404
+	}
+}
