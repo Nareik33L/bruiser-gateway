@@ -64,4 +64,21 @@ func TestProtectAndStaleFence(t *testing.T) {
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("stale %d", rec.Code)
 	}
+
+	req = httptest.NewRequest(http.MethodPost, "/holds", nil)
+	req.Header.Set("X-Bruiser-Execution", "forged.not.signed")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("garbage %d", rec.Code)
+	}
+
+	h = Protect(ProtectConfig{Public: pub, Fences: &FenceCache{}, Resource: "event:ars-che."})(inner)
+	req = httptest.NewRequest(http.MethodPost, "/holds", nil)
+	req.Header.Set("X-Bruiser-Execution", okTok)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("canonical resource %d", rec.Code)
+	}
 }

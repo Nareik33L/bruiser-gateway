@@ -416,8 +416,8 @@ func proveOriginLockdown(t *testing.T, d deployLab) {
 		if resp.StatusCode != http.StatusUnauthorized {
 			t.Fatalf("embedded origin without token want 401 got %d %s", resp.StatusCode, b)
 		}
-		if code := d.holdOrigin(t, "not-a-jwt"); code != http.StatusUnauthorized {
-			t.Fatalf("tampered token want 401 got %d", code)
+		if code := d.holdOrigin(t, "not-a-jwt"); code != http.StatusForbidden {
+			t.Fatalf("tampered token want 403 got %d", code)
 		}
 		return
 	}
@@ -559,7 +559,7 @@ func proveAuthority(t *testing.T, d deployLab) {
 	if code := d.holdOrigin(t, ""); code != http.StatusUnauthorized {
 		t.Fatalf("missing token %d", code)
 	}
-	if code := d.holdOrigin(t, "not-a-jwt"); code != http.StatusUnauthorized {
+	if code := d.holdOrigin(t, "not-a-jwt"); code != http.StatusForbidden {
 		t.Fatalf("tampered token %d", code)
 	}
 	tok := d.session(t, cust, "agent", "ok")

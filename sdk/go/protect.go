@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/Nareik33L/bruiser-gateway/internal/auth"
+	"github.com/Nareik33L/bruiser-gateway/internal/resource"
 )
 
 var (
@@ -83,16 +84,20 @@ func Protect(cfg ProtectConfig) func(http.Handler) http.Handler {
 			}
 			claims, err := Verify(raw, cfg.Public)
 			if err != nil {
-				http.Error(w, `{"error":"invalid execution token"}`, http.StatusUnauthorized)
+				http.Error(w, `{"error":"invalid execution token"}`, http.StatusForbidden)
 				return
 			}
 			if cfg.MerchantID != "" && claims.MerchantID != cfg.MerchantID {
 				http.Error(w, `{"error":"wrong merchant"}`, http.StatusUnauthorized)
 				return
 			}
-			if cfg.Resource != "" && claims.Resource != cfg.Resource {
-				http.Error(w, `{"error":"resource mismatch"}`, http.StatusForbidden)
-				return
+			if cfg.Resource != "" {
+				want, werr := resource.Canonical(cfg.Resource)
+				got, gerr := resource.Canonical(claims.Resource)
+				if werr != nil || gerr != nil || want != got {
+					http.Error(w, `{"error":"resource mismatch"}`, http.StatusForbidden)
+					return
+				}
 			}
 			if err := cfg.Fences.Accept(claims.Domain, claims.Fence); err != nil {
 				http.Error(w, `{"error":"stale fence"}`, http.StatusForbidden)

@@ -16,6 +16,7 @@ import (
 	"github.com/Nareik33L/bruiser-gateway/internal/lease"
 	"github.com/Nareik33L/bruiser-gateway/internal/merchant"
 	"github.com/Nareik33L/bruiser-gateway/internal/policy"
+	rescanon "github.com/Nareik33L/bruiser-gateway/internal/resource"
 	pgstore "github.com/Nareik33L/bruiser-gateway/internal/store/postgres"
 )
 
@@ -111,8 +112,12 @@ func (s *Server) admit(ctx context.Context, method, path, eventID string, r *htt
 	if resource == "" {
 		return admitResult{status: http.StatusBadRequest, body: map[string]string{"error": "could not derive resource"}}
 	}
-	if canon, err := canonicalizeResource(resource); err != nil {
-		return admitResult{status: http.StatusBadRequest, body: map[string]string{"error": "malformed resource"}}
+	if canon, err := s.canonicalizeResource(resource); err != nil {
+		msg := "malformed resource"
+		if err == rescanon.ErrUnknownResource {
+			msg = "unknown resource"
+		}
+		return admitResult{status: http.StatusBadRequest, body: map[string]string{"error": msg}}
 	} else if canon != "" {
 		resource = canon
 	}

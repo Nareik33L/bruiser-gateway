@@ -462,9 +462,9 @@ func Run(cfg Config) (Report, error) {
 		return pass("case/slash variants stayed on one execution")
 	}))
 
-	rep.Probes = append(rep.Probes, probe("Lookalike resources are rejected", func() Probe {
+	rep.Probes = append(rep.Probes, probe("Cosmetic resource variants share one domain", func() Probe {
 		if control == "" {
-			return fail("--control is required to prove lookalike resources are rejected")
+			return fail("--control is required to prove cosmetic resource variants share one domain")
 		}
 		tok, err := auth.IssueBoxOfficeSession(cfg.HMACSecret, fmt.Sprintf("lookalike-%d", time.Now().UnixNano()), time.Hour)
 		if err != nil {
@@ -474,22 +474,48 @@ func Run(cfg Config) (Report, error) {
 			"Cookie":                simtix.CookieName + "=" + tok,
 			"X-Bruiser-Edge-Secret": cfg.EdgeSecret,
 		}
+		code1, body1 := postJSON(client, control+"/v1/authorize", hdr, map[string]string{
+			"method": "POST", "path": "/api/events/" + cfg.EventID + "/holds",
+		})
+		if code1 != http.StatusOK {
+			return fail("canonical authorize failed (%d) %s", code1, body1)
+		}
+		var a1 map[string]any
+		_ = json.Unmarshal([]byte(body1), &a1)
+		id1, _ := a1["execution_id"].(string)
 		for _, path := range []string{
-			"/api/events/ars:che/holds",
+			"/api/events/ars-che./holds",
+			"/api/events/ars-che-/holds",
+			"/api/events/ars-che_/holds",
+			"/api/events/ars-che!/holds",
+			"/api/events/ars-che@/holds",
 			"/api/events/ars–che/holds",
 			"/api/events/ars‐che/holds",
-			"/api/events/ars-che./holds",
 		} {
 			code, body := postJSON(client, control+"/v1/authorize", hdr, map[string]string{
 				"method": "POST", "path": path,
 			})
+			if code == http.StatusCreated {
+				return fail("variant %s minted a second ACTIVE (%d) %s", path, code, body)
+			}
+			if code == http.StatusBadRequest {
+				return fail("variant %s rejected instead of folding (%d) %s", path, code, body)
+			}
 			if code >= 200 && code < 300 {
-				if strings.Contains(body, `"status":"ALLOW"`) && strings.Contains(body, "execution_id") {
-					return fail("lookalike %s minted an execution (%d) %s", path, code, body)
+				var a2 map[string]any
+				_ = json.Unmarshal([]byte(body), &a2)
+				if id2, _ := a2["execution_id"].(string); id1 != "" && id2 != "" && id1 != id2 {
+					return fail("variant %s minted execution %s vs %s", path, id2, id1)
 				}
 			}
 		}
-		return pass("colon/Unicode/trailing-punct lookalikes did not mint a domain")
+		code, body := postJSON(client, control+"/v1/authorize", hdr, map[string]string{
+			"method": "POST", "path": "/api/events/ars:che/holds",
+		})
+		if code >= 200 && code < 300 && strings.Contains(body, "execution_id") && !strings.Contains(body, `"status":"BUSY"`) {
+			return fail("extra-colon lookalike minted an execution (%d) %s", code, body)
+		}
+		return pass("trailing punct and Unicode hyphens folded onto one domain")
 	}))
 
 	rep.Probes = append(rep.Probes, probe("Forged execution rejected at origin", func() Probe {

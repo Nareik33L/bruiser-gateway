@@ -21,6 +21,10 @@ type Profile struct {
 	Identity  Identity `yaml:"identity"`
 	Routes    []Route  `yaml:"routes"`
 	Policy    Policy   `yaml:"policy"`
+	// Resources is an optional merchant-scoped allowlist of canonical
+	// resource IDs. When set, inbound strings fold then must resolve to
+	// one of these IDs. Empty means fold-only (lab / ad-hoc IDs).
+	Resources []string `yaml:"resources"`
 }
 
 type Identity struct {
@@ -211,4 +215,9 @@ func Empty(merchantID string) Profile {
 		panic(err)
 	}
 	return p
+}
+
+// Catalogue returns the merchant resource allowlist. Empty means fold-only.
+func (p Profile) Catalogue() resource.Catalogue {
+	return resource.NewCatalogue(p.Resources)
 }

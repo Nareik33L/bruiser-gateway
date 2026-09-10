@@ -171,7 +171,7 @@ func TestEmbeddedRejectsMissingAndTampered(t *testing.T) {
 	if hold("") != http.StatusUnauthorized {
 		t.Fatal("missing token")
 	}
-	if hold("not-a-jwt") != http.StatusUnauthorized {
+	if hold("not-a-jwt") != http.StatusForbidden {
 		t.Fatal("tampered")
 	}
 

@@ -31,7 +31,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {
-		log.Info("simtix origin listening", "addr", originAddr, "lockdown", originSecret != "", "jwks", pub != nil)
+		log.Info("simtix origin listening", "addr", originAddr, "lockdown", originSecret != "", "jwks", pub != nil, "execution", "required")
 		if err := originSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Error("origin", "err", err)
 			os.Exit(1)

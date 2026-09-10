@@ -28,20 +28,25 @@ var (
 	ErrStaleFence    = errors.New("stale fence")
 	ErrWrongMerchant = errors.New("wrong merchant")
 	ErrWrongResource = errors.New("resource mismatch")
+	ErrWrongCustomer = errors.New("customer mismatch")
 	ErrRevoked       = errors.New("revoked execution")
 	ErrMissingToken  = errors.New("missing execution token")
 	ErrNoVerifier    = errors.New("execution verifier not configured")
+	ErrInvalidToken  = errors.New("invalid execution token")
 )
 
 type Config struct {
-	HMACSecret       string
-	OriginSecret     string // empty = origin lockdown off (path trust only)
-	Seats            int
-	MerchantID       string
-	Public           ed25519.PublicKey
-	IntrospectURL    string
-	RequireExecution bool
-	VerifyExecution  func(token string) error
+	HMACSecret            string
+	OriginSecret          string // empty = origin lockdown off (path trust only)
+	Seats                 int
+	MerchantID            string
+	Public                ed25519.PublicKey
+	IntrospectURL         string
+	RequireExecution      bool // deprecated: verification is on unless AllowOriginSecretOnly
+	AllowOriginSecretOnly bool // lab escape hatch; refused in production
+	Environment           string
+	VerifyExecution       func(token string) error
+	CustomerID            string // optional: require claims.CustomerID match
 }
 
 // Lab is the Edge/Proxy origin config: origin secret is path trust;
@@ -52,22 +57,24 @@ func Lab(hmac, originSecret, merchantID string, pub ed25519.PublicKey, controlUR
 		intro = strings.TrimRight(controlURL, "/") + "/v1/introspect"
 	}
 	return Config{
-		HMACSecret:       hmac,
-		OriginSecret:     originSecret,
-		MerchantID:       merchantID,
-		Public:           pub,
-		IntrospectURL:    intro,
-		Seats:            seats,
-		RequireExecution: true,
+		HMACSecret:    hmac,
+		OriginSecret:  originSecret,
+		MerchantID:    merchantID,
+		Public:        pub,
+		IntrospectURL: intro,
+		Seats:         seats,
+		Environment:   env("BRUISER_ENV", "lab"),
 	}
 }
 
 type Server struct {
-	cfg   Config
-	mu    sync.Mutex
-	event event
-	holds map[string]hold
-	seq   int
+	cfg     Config
+	mu      sync.Mutex
+	event   event
+	holds   map[string]hold
+	seq     int
+	fenceMu sync.Mutex
+	fences  map[string]int64
 }
 
 type event struct {
@@ -95,7 +102,16 @@ func New(cfg Config) *Server {
 	if cfg.Seats <= 0 {
 		cfg.Seats = 50
 	}
-	if !cfg.RequireExecution && (len(cfg.Public) > 0 || cfg.VerifyExecution != nil || cfg.IntrospectURL != "") {
+	if cfg.Environment == "" {
+		cfg.Environment = os.Getenv("BRUISER_ENV")
+	}
+	// Verification is fail-closed. AllowOriginSecretOnly is a lab-only
+	// escape hatch; production refuses it so the origin secret cannot
+	// authorise allocation by itself.
+	if cfg.AllowOriginSecretOnly && productionEnv(cfg.Environment) {
+		cfg.AllowOriginSecretOnly = false
+	}
+	if !cfg.AllowOriginSecretOnly {
 		cfg.RequireExecution = true
 	}
 	return &Server{
@@ -105,7 +121,8 @@ func New(cfg Config) *Server {
 			Name:  "Arsenal v Chelsea",
 			Seats: cfg.Seats,
 		},
-		holds: map[string]hold{},
+		holds:  map[string]hold{},
+		fences: map[string]int64{},
 	}
 }
 
@@ -278,6 +295,9 @@ func (s *Server) reset(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) executionOK(w http.ResponseWriter, r *http.Request, wantResource string) bool {
+	if s.cfg.AllowOriginSecretOnly {
+		return true
+	}
 	tok := r.Header.Get("X-Bruiser-Execution")
 	if tok == "" {
 		h := r.Header.Get("Authorization")
@@ -289,21 +309,24 @@ func (s *Server) executionOK(w http.ResponseWriter, r *http.Request, wantResourc
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing execution token"})
 		return false
 	}
-	if err := s.verifyExecution(tok, r.Header.Get("X-Bruiser-Fence"), wantResource); err != nil {
+	membership := membershipFrom(r, s.cfg.HMACSecret)
+	if err := s.verifyExecution(tok, r.Header.Get("X-Bruiser-Fence"), wantResource, membership); err != nil {
 		switch {
+		case errors.Is(err, ErrMissingToken):
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing execution token"})
 		case errors.Is(err, ErrStaleFence):
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "stale fence"})
-		case errors.Is(err, ErrWrongResource), errors.Is(err, ErrRevoked):
+		case errors.Is(err, ErrWrongResource), errors.Is(err, ErrRevoked), errors.Is(err, ErrWrongCustomer):
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
 		default:
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid execution token"})
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "invalid execution token"})
 		}
 		return false
 	}
 	return true
 }
 
-func (s *Server) verifyExecution(tok, fenceHdr, wantResource string) error {
+func (s *Server) verifyExecution(tok, fenceHdr, wantResource, customerID string) error {
 	if s.cfg.VerifyExecution != nil {
 		if err := s.cfg.VerifyExecution(tok); err != nil {
 			return err
@@ -311,26 +334,37 @@ func (s *Server) verifyExecution(tok, fenceHdr, wantResource string) error {
 		if fenceHdr != "" && len(s.cfg.Public) > 0 {
 			claims, err := auth.ParseExecution(tok, s.cfg.Public)
 			if err != nil {
+				return ErrInvalidToken
+			}
+			if err := s.checkClaims(claims, fenceHdr, wantResource, customerID); err != nil {
 				return err
 			}
-			return s.checkClaims(claims, fenceHdr, wantResource)
+			s.rememberFence(claims.Domain, claims.Fence)
+			return nil
 		}
-		return s.introspectLive(tok)
+		if err := s.introspectLive(tok); err != nil {
+			return err
+		}
+		return nil
 	}
 	if len(s.cfg.Public) == 0 {
 		return ErrNoVerifier
 	}
 	claims, err := auth.ParseExecution(tok, s.cfg.Public)
 	if err != nil {
+		return ErrInvalidToken
+	}
+	if err := s.checkClaims(claims, fenceHdr, wantResource, customerID); err != nil {
 		return err
 	}
-	if err := s.checkClaims(claims, fenceHdr, wantResource); err != nil {
+	if err := s.introspectLive(tok); err != nil {
 		return err
 	}
-	return s.introspectLive(tok)
+	s.rememberFence(claims.Domain, claims.Fence)
+	return nil
 }
 
-func (s *Server) checkClaims(claims auth.ExecutionClaims, fenceHdr, wantResource string) error {
+func (s *Server) checkClaims(claims auth.ExecutionClaims, fenceHdr, wantResource, customerID string) error {
 	if s.cfg.MerchantID != "" && claims.MerchantID != s.cfg.MerchantID {
 		return ErrWrongMerchant
 	}
@@ -341,13 +375,40 @@ func (s *Server) checkClaims(claims auth.ExecutionClaims, fenceHdr, wantResource
 			return ErrWrongResource
 		}
 	}
+	wantCust := customerID
+	if wantCust == "" {
+		wantCust = s.cfg.CustomerID
+	}
+	if wantCust != "" && claims.CustomerID != "" && claims.CustomerID != wantCust {
+		return ErrWrongCustomer
+	}
 	if fenceHdr != "" {
 		got, err := strconv.ParseInt(fenceHdr, 10, 64)
 		if err != nil || got != claims.Fence {
 			return ErrStaleFence
 		}
 	}
+	s.fenceMu.Lock()
+	prev, ok := s.fences[claims.Domain]
+	s.fenceMu.Unlock()
+	if ok && claims.Fence < prev {
+		return ErrStaleFence
+	}
 	return nil
+}
+
+func (s *Server) rememberFence(domain string, fence int64) {
+	if domain == "" {
+		return
+	}
+	s.fenceMu.Lock()
+	defer s.fenceMu.Unlock()
+	if prev, ok := s.fences[domain]; ok && fence < prev {
+		return
+	}
+	if fence > s.fences[domain] {
+		s.fences[domain] = fence
+	}
 }
 
 func (s *Server) originOK(w http.ResponseWriter, r *http.Request, allocation bool) bool {
@@ -400,4 +461,13 @@ func env(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func productionEnv(env string) bool {
+	switch strings.ToLower(strings.TrimSpace(env)) {
+	case "production", "prod", "live":
+		return true
+	default:
+		return false
+	}
 }

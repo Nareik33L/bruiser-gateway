@@ -15,6 +15,11 @@ name: Example merchant
 # Confirm with: bruiser authority-check --front … --origin … --control …
 unmatched: allow
 
+# Optional closed catalogue of canonical resource IDs. When set, inbound
+# strings fold then must resolve to one of these. Empty = fold-only.
+# resources:
+#   - sku:final
+
 identity:
   # Lab drop-in. Production refuses extractor: auto + unsigned header
   # unless identity.allow_unsigned_header: true is set on purpose.
