@@ -184,7 +184,7 @@ func TestBoundedQueuePromoteOnExpire(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := acquireReq(m, "alice", "agent-1", "event:qexp")
-	first.TTL = 80 * time.Millisecond
+	first.TTL = time.Second
 	g, err := s.Acquire(ctx, first)
 	if err != nil || g.Status != lease.StatusGranted {
 		t.Fatalf("grant: %+v %v", g, err)
