@@ -82,7 +82,7 @@ func (s *server) routes() http.Handler {
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		shared.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": "harchester"})
 	})
-	r.Handle("/assets/", staticHandler())
+	r.Handle("/assets/*", staticHandler())
 	r.Get("/", s.pageHome)
 	r.Get("/news", s.pageNews)
 	r.Get("/fixtures", s.pageFixtures)

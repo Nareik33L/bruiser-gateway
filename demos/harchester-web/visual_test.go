@@ -1,8 +1,12 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
 )
 
 func TestClubVisualTokens(t *testing.T) {
@@ -24,6 +28,23 @@ func TestClubVisualTokens(t *testing.T) {
 	} {
 		if _, err := staticFS.ReadFile(file); err != nil {
 			t.Fatalf("%s: %v", file, err)
+		}
+	}
+}
+
+func TestClubStaticAssetsServed(t *testing.T) {
+	r := chi.NewRouter()
+	r.Handle("/assets/*", staticHandler())
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+	for _, path := range []string{"/assets/club.css", "/assets/hero-stadium.jpg"} {
+		resp, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s → %d", path, resp.StatusCode)
 		}
 	}
 }
