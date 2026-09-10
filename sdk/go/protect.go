@@ -105,7 +105,11 @@ func Protect(cfg ProtectConfig) func(http.Handler) http.Handler {
 			}
 			if cfg.Active != nil {
 				ok, err := cfg.Active(claims.ExecutionID, claims.Fence)
-				if err != nil || !ok {
+				if err != nil {
+					// Partition: origin cannot reach the gateway. A signed,
+					// unexpired token already held is sufficient. Known-revoked
+					// (ok=false) still denies.
+				} else if !ok {
 					http.Error(w, `{"error":"revoked execution"}`, http.StatusForbidden)
 					return
 				}

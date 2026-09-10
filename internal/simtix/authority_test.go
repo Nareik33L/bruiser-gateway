@@ -255,3 +255,28 @@ func TestOriginIntrospectRejectsRevoked(t *testing.T) {
 		t.Fatalf("revoked %d", code)
 	}
 }
+
+func TestOriginPartitionAllowsHeldToken(t *testing.T) {
+	signer := testSigner(t, "arsenal")
+	intro := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	intro.Close()
+	s := New(Lab("dev-secret-change-me", "lock", "arsenal", signer.Public, intro.URL, 4))
+	s.cfg.IntrospectURL = intro.URL
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	tok := signExe(t, signer, "event:ars-che", 1, time.Hour)
+	if code := postHold(t, srv.URL, map[string]string{
+		"X-Bruiser-Origin-Secret": "lock",
+		"X-Bruiser-Execution":     tok,
+		"X-Bruiser-Fence":         "1",
+	}); code != http.StatusCreated {
+		t.Fatalf("held token while gateway partitioned want allow, got %d", code)
+	}
+	if code := postHold(t, srv.URL, map[string]string{
+		"X-Bruiser-Origin-Secret": "lock",
+	}); code != http.StatusUnauthorized {
+		t.Fatalf("no token on partition must deny, got %d", code)
+	}
+}
