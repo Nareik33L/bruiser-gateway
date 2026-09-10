@@ -10,6 +10,8 @@ import (
 
 func TestDoctorExampleProfile(t *testing.T) {
 	cfg := config.Load()
+	cfg.Environment = "lab"
+	cfg.DevAssertions = true
 	cfg.AdminSecret = "admin-secret-dev"
 	cfg.EdgeSecret = "edge-secret-dev"
 	cfg.OriginSecret = "origin-lock-dev"
@@ -41,6 +43,8 @@ func TestDoctorExampleProfile(t *testing.T) {
 
 func TestDoctorMissingRoutesFail(t *testing.T) {
 	cfg := config.Load()
+	cfg.Environment = "lab"
+	cfg.DevAssertions = true
 	cfg.AdminSecret = "admin-secret-dev"
 	cfg.EdgeSecret = "edge-secret-dev"
 	p := merchant.Empty("x")

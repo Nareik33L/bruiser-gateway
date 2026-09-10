@@ -28,6 +28,9 @@ BRUISER_ISSUER=https://idp.example
 BRUISER_AUDIENCE=bruiser
 ```
 
+`BRUISER_ENV` is required (`lab` or `production`). Empty is not lab.
+HMAC customer assertions require `BRUISER_ENV=lab`.
+
 Profile:
 
 ```yaml

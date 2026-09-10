@@ -146,13 +146,11 @@ Still **human-owned** (not software gaps):
   method.
 - Origin lockdown (`X-Bruiser-Origin-Secret`) is on for Edge/Proxy.
   Embedded origins verify the execution JWT + fence.
-- Embedded Dry Run does not mint an execution token. A `RequireExecution`
-  origin therefore stays locked at 0% / out-of-ramp; the app is expected
-  to continue without calling origin under Bruiser's token. Edge/Proxy 0%
-  stamps the origin secret so unaware traffic still reaches the locked
-  origin. `TestV1DeploymentAcceptance` asserts both. `bruiser
-  authority-check` is the Edge/Proxy front; Embedded authority is missing
-  / tampered / valid execution JWT against the origin.
+- Dry-run / 0% / out-of-ramp does not mint an execution token. The origin
+  stays locked: the origin secret is path trust only. Allocation requires
+  a Bruiser execution JWT + fence. `TestV1DeploymentAcceptance` asserts
+  that. `bruiser authority-check` is the Edge/Proxy front; Embedded
+  authority is missing / tampered / valid execution JWT against the origin.
 - Postgres is the backing store (one logical database, one or more
   Bruiser replicas).
 - Merchant identity is already authenticated; Bruiser consumes it.

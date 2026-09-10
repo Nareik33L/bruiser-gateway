@@ -7,10 +7,36 @@ import (
 
 func labConfig() Config {
 	c := Load()
+	c.Environment = "lab"
+	c.DevAssertions = true
 	c.AdminSecret = "admin-secret-dev"
 	c.EdgeSecret = "edge-secret-dev"
 	c.OriginSecret = "origin-lock-dev"
 	return c
+}
+
+func TestValidateRequiresExplicitEnvironment(t *testing.T) {
+	c := labConfig()
+	c.Environment = ""
+	if err := c.Validate(); err == nil {
+		t.Fatal("empty BRUISER_ENV must fail")
+	}
+	c.Environment = "staging"
+	if err := c.Validate(); err == nil {
+		t.Fatal("unknown BRUISER_ENV must fail")
+	}
+	c.Environment = "production"
+	c.DevAssertions = true
+	c.AdminSecret = "prod-admin-unique"
+	c.EdgeSecret = "prod-edge-unique"
+	c.OriginSecret = "prod-origin-unique"
+	c.DevHMACSecret = "prod-hmac-unique"
+	c.JWKSURL = "https://idp.example/.well-known/jwks.json"
+	c.Issuer = "https://idp.example"
+	c.Audience = "bruiser"
+	if err := c.Validate(); err == nil {
+		t.Fatal("HMAC assertions without lab posture must fail")
+	}
 }
 
 func TestValidateLeaseCompatibility(t *testing.T) {

@@ -29,6 +29,7 @@ import (
 	"github.com/Nareik33L/bruiser-gateway/internal/merchant"
 	"github.com/Nareik33L/bruiser-gateway/internal/ops"
 	"github.com/Nareik33L/bruiser-gateway/internal/policy"
+	"github.com/Nareik33L/bruiser-gateway/internal/resource"
 	pgstore "github.com/Nareik33L/bruiser-gateway/internal/store/postgres"
 )
 
@@ -344,7 +345,7 @@ func (s *Server) protocol(w http.ResponseWriter, _ *http.Request) {
 		"version":      "0.1-draft",
 		"capabilities": []string{"IDENTITY", "ACQUIRE", "RENEW", "HEARTBEAT", "RELEASE", "HANDOFF", "REVOKE", "WATCH", "QUEUE", "AUTHORIZE", "INTROSPECT", "POLICY", "ADMIN", "AUTHORITY_CHECK", "DRY_RUN", "RAMP", "CONTROLS", "SESSION_REVOKE", "REPLAY", "BUDGET"},
 		"states": map[string][]string{
-			"decision": {"ALLOW", "BUSY", "QUEUED", "DENIED"},
+			"decision":  {"ALLOW", "BUSY", "QUEUED", "DENIED"},
 			"execution": {lease.StateActive, lease.StateReleased, lease.StateExpired, lease.StateRevoked, lease.StateHandedOff, lease.StateQueued},
 		},
 	})
@@ -566,7 +567,11 @@ func (s *Server) acquire(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "resource required")
 		return
 	}
-	if canon, err := canonicalizeResource(body.Resource); err != nil {
+	if canon, err := s.canonicalizeResource(body.Resource); err != nil {
+		if err == resource.ErrUnknownResource {
+			writeErr(w, http.StatusBadRequest, "unknown resource")
+			return
+		}
 		writeErr(w, http.StatusBadRequest, "malformed resource")
 		return
 	} else {

@@ -9,8 +9,16 @@
   `BRUISER_DEV_ASSERTIONS`; production refuses that mode.
 - Authorize no longer returns the origin secret. Edge/Proxy inject it
   from local configuration. Origin verifies execution JWT + fence.
-- Canonical resource IDs; merchant execution budget; session logout;
-  replay keys; inbound `X-Bruiser-*` strip; keyed rate limits.
+- Canonical resource IDs fold (NFKC, dash/space/quote lookalikes,
+  strip trailing punct, collapse separators) onto `type:ident`.
+  Optional merchant `resources:` catalogue. Origin execution
+  verification is fail-closed; `AllowOriginSecretOnly` is refused in
+  production. Garbage execution tokens return 403 even with a valid
+  origin secret. Origin secret is path trust; allocation requires a
+  Bruiser execution JWT + fence. `BRUISER_ENV` must be `lab` or
+  `production`. Example budget is `max_ops: 1`. Production rejects
+  `extractor: auto` plus an unsigned customer header unless
+  `allow_unsigned_header` is set.
 - RC1 `make soak` (10k agents, 30m) re-run: ACTIVE=1, 3.46M requests,
   0 errors, p50 27ms / p99 51ms. About 12% fewer requests than the
   V1 3.94M baseline; latency and health at or better.

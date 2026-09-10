@@ -15,6 +15,7 @@ env:
   BRUISER_HEARTBEAT_INTERVAL: 20s
   BRUISER_LEASE_TTL: 60s
   BRUISER_MODE: enforce
+  BRUISER_ENV: production
   BRUISER_ENFORCE_PERCENT: "100"
 secrets:
   BRUISER_DATABASE_URL: postgres://bruiser:bruiser@postgres:5432/bruiser?sslmode=disable

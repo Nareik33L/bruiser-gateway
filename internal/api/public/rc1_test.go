@@ -3,6 +3,7 @@ package publicapi_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"testing"
@@ -58,6 +59,65 @@ func TestRC1CanonicalResourceOneDomain(t *testing.T) {
 	code, _, body = postAuth(t, srv.URL+"/v1/executions/acquire", `{"resource":"event:ars-che","action":"hold"}`, tok)
 	if code != http.StatusOK {
 		t.Fatalf("variant should resume same execution %d %v", code, body)
+	}
+}
+
+func TestRC1NineResourceVariantsOneActive(t *testing.T) {
+	srv, cfg := testlab.Gateway(t, testlab.ArsenalProfile(t))
+	variants := []string{
+		"ticket:cupfinal",
+		"ticket:cupfinal.",
+		"ticket:cupfinal-",
+		"ticket:cupfinal_",
+		"ticket:cupfinal!",
+		"ticket:cupfinal@",
+		"ticket:cupfinal   ",
+		"ticket:cupfinal\u2010",
+		"ticket:cupfinal\u2013",
+	}
+	created, denied := 0, 0
+	exe := ""
+	for i, res := range variants {
+		tok := mustAgentSession(t, srv.URL, cfg.DevHMACSecret, "7770001", fmt.Sprintf("agent-%d", i))
+		payload := fmt.Sprintf(`{"resource":%q,"action":"hold"}`, res)
+		code, raw, body := postAuth(t, srv.URL+"/v1/executions/acquire", payload, tok)
+		id, _ := body["execution_id"].(string)
+		switch code {
+		case http.StatusCreated:
+			created++
+			if exe == "" {
+				exe = id
+			} else if id != "" && id != exe {
+				t.Fatalf("%q minted second execution %s vs %s", res, id, exe)
+			}
+		case http.StatusConflict, http.StatusForbidden:
+			denied++
+		case http.StatusOK:
+			if exe != "" && id != "" && id != exe {
+				t.Fatalf("%q resumed different execution %s vs %s", res, id, exe)
+			}
+			denied++
+		default:
+			t.Fatalf("%q → %d %s (want 1 ACTIVE and 8 denials)", res, code, raw)
+		}
+	}
+	if created != 1 || denied != 8 {
+		t.Fatalf("created=%d denied=%d want 1 ACTIVE and 8 denials", created, denied)
+	}
+}
+
+func TestRC1CatalogueRejectsUnknown(t *testing.T) {
+	p := testlab.ArsenalProfile(t)
+	p.Resources = []string{"event:ars-che"}
+	srv, cfg := testlab.Gateway(t, p)
+	tok := mustAgentSession(t, srv.URL, cfg.DevHMACSecret, "alice", "cat")
+	code, raw, _ := postAuth(t, srv.URL+"/v1/executions/acquire", `{"resource":"ticket:cupfinal","action":"hold"}`, tok)
+	if code != http.StatusBadRequest {
+		t.Fatalf("unknown resource %d %s", code, raw)
+	}
+	code, raw, _ = postAuth(t, srv.URL+"/v1/executions/acquire", `{"resource":"event:ars-che.","action":"hold"}`, tok)
+	if code != http.StatusCreated {
+		t.Fatalf("catalogue fold %d %s", code, raw)
 	}
 }
 

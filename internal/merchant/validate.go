@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Nareik33L/bruiser-gateway/internal/policy"
+	"github.com/Nareik33L/bruiser-gateway/internal/resource"
 )
 
 // Issue is an actionable configuration problem on a merchant profile.
@@ -107,6 +108,14 @@ func (p Profile) ValidateIssues() []Issue {
 	}
 	if _, err := policy.Compile(p.PolicyDocument()); err != nil {
 		out = append(out, Issue{"FAIL", "policy", err.Error()})
+	}
+	for i, id := range p.Resources {
+		if _, err := resource.Canonical(id); err != nil {
+			out = append(out, Issue{"FAIL", "resources", fmt.Sprintf("resources[%d] %q is not a canonical resource ID", i, id)})
+		}
+	}
+	if len(p.Resources) == 0 {
+		out = append(out, Issue{"WARN", "resources", "empty catalogue: inbound IDs fold only; set resources: to a merchant-scoped allowlist"})
 	}
 	return out
 }

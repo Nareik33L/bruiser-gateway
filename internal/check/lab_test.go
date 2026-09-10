@@ -18,12 +18,8 @@ import (
 
 func startLab(t *testing.T, originSecret string) (edgeURL, originURL, gwURL, hmac string) {
 	t.Helper()
-	gw, cfg := testlab.Gateway(t, testlab.ArsenalProfile(t))
-	origin := simtix.New(simtix.Config{
-		HMACSecret:   cfg.DevHMACSecret,
-		OriginSecret: originSecret,
-		Seats:        20,
-	})
+	_, gw, cfg, signer := testlab.GatewayAPI(t, testlab.ArsenalProfile(t))
+	origin := simtix.New(simtix.Lab(cfg.DevHMACSecret, originSecret, cfg.MerchantID, signer.Public, gw.URL, 20))
 	originSrv := httptest.NewServer(origin.Handler())
 	t.Cleanup(originSrv.Close)
 	p, err := edge.New(edge.Config{
@@ -78,14 +74,14 @@ func TestAuthorityCheckLockdownOffFail(t *testing.T) {
 	if rep.Passed() {
 		t.Fatalf("lockdown off must FAIL\n%s", rep.String())
 	}
-	var bypass check.Probe
+	var pathTrust check.Probe
 	for _, p := range rep.Probes {
-		if p.Name == "Direct allocation bypass blocked" {
-			bypass = p
+		if p.Name == "Origin secret required with a valid execution" {
+			pathTrust = p
 		}
 	}
-	if bypass.Pass {
-		t.Fatalf("bypass probe should fail when lockdown is off: %+v", bypass)
+	if pathTrust.Pass {
+		t.Fatalf("path-trust probe should fail when lockdown is off: %+v", pathTrust)
 	}
 }
 

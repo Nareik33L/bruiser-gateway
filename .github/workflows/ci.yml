@@ -49,7 +49,8 @@ jobs:
           go-version: "1.25.x"
       - name: CycloneDX SBOM
         run: |
-          go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.9.1 mod -json -output bruiser.cdx.json
+          go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0
+          cyclonedx-gomod mod -json -output bruiser.cdx.json
           test -s bruiser.cdx.json
 
   govulncheck:

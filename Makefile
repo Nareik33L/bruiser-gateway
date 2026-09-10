@@ -5,6 +5,15 @@ SIMTIX    := bin/simtix
 DATABASE_URL ?= postgres://bruiser:bruiser@127.0.0.1:5432/bruiser?sslmode=disable
 TEST_DATABASE_URL ?= postgres://bruiser:bruiser@127.0.0.1:5432/bruiser_test?sslmode=disable
 
+# Lab posture for make serve / simtix / migrate. Production sets BRUISER_ENV
+# and generated secrets in the environment; these defaults are not silent HMAC.
+LAB_ENV ?= BRUISER_ENV=lab \
+	BRUISER_ADMIN_SECRET=admin-secret-dev \
+	BRUISER_EDGE_SECRET=edge-secret-dev \
+	BRUISER_ORIGIN_SECRET=origin-lock-dev \
+	BRUISER_DEV_HMAC_SECRET=dev-secret-change-me \
+	BRUISER_PROFILE=configs/arsenal.yaml
+
 .PHONY: all build test test-race lint fmt vet serve migrate tidy ci torture simtix authority-check eaf-demo eaf-nightly sdk-test doctor \
 	demo-1x10000 demo-1000x10 demo-handoff demo-bypass demo-unaware demo-up v1-accept soak
 
@@ -38,22 +47,26 @@ lint:
 	@command -v golangci-lint >/dev/null 2>&1 && golangci-lint run || echo "golangci-lint not installed; skipped"
 
 serve: build
-	BRUISER_DATABASE_URL="$(DATABASE_URL)" $(BIN) serve
+	$(LAB_ENV) BRUISER_DATABASE_URL="$(DATABASE_URL)" \
+	BRUISER_PROXY_ADDR=":8081" BRUISER_ORIGIN_URL="http://127.0.0.1:8090" \
+	$(BIN) serve
 
 simtix: build
-	SIMTIX_HTTP_ADDR=":8090" SIMTIX_EDGE_ADDR=":8091" \
+	$(LAB_ENV) SIMTIX_HTTP_ADDR=":8090" SIMTIX_EDGE_ADDR=":8091" \
 	SIMTIX_ORIGIN_SECRET="origin-lock-dev" \
 	SIMTIX_BRUISER_URL="http://127.0.0.1:8080" \
+	SIMTIX_ORIGIN_URL="http://127.0.0.1:8090" \
+	BRUISER_MERCHANT_ID="arsenal" \
 	$(SIMTIX)
 
 authority-check: build
-	$(BIN) authority-check --front http://127.0.0.1:8091 --origin http://127.0.0.1:8090 --control http://127.0.0.1:8080
+	$(LAB_ENV) $(BIN) authority-check --front http://127.0.0.1:8091 --origin http://127.0.0.1:8090 --control http://127.0.0.1:8080
 
 doctor: build
-	$(BIN) doctor --profile configs/example.yaml --skip-store
+	$(LAB_ENV) $(BIN) doctor --profile configs/example.yaml --skip-store
 
 config-validate: build
-	$(BIN) config validate configs/example.yaml
+	$(LAB_ENV) $(BIN) config validate configs/example.yaml
 
 eaf-demo: build
 	$(BIN) eaf-demo --front http://127.0.0.1:8091 --n 2000
@@ -100,6 +113,6 @@ demo-unaware: build
 	$(BIN) swarm --front http://127.0.0.1:8091 --profile unaware --n 200
 
 migrate: build
-	BRUISER_DATABASE_URL="$(DATABASE_URL)" $(BIN) migrate
+	$(LAB_ENV) BRUISER_DATABASE_URL="$(DATABASE_URL)" $(BIN) migrate
 
 ci: vet test-race build sdk-test

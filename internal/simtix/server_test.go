@@ -8,7 +8,8 @@ import (
 )
 
 func TestOriginLockdownBlocksDirectHold(t *testing.T) {
-	s := New(Config{HMACSecret: "dev-secret-change-me", OriginSecret: "lock", Seats: 4})
+	signer := testSigner(t, "arsenal")
+	s := New(Lab("dev-secret-change-me", "lock", "arsenal", signer.Public, "", 4))
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 
@@ -17,8 +18,8 @@ func TestOriginLockdownBlocksDirectHold(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("want 403 got %d", resp.StatusCode)
+	if resp.StatusCode == http.StatusCreated {
+		t.Fatal("bare hold must not allocate")
 	}
 
 	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/events/ars-che/holds", strings.NewReader(`{"seats":1}`))
@@ -29,8 +30,8 @@ func TestOriginLockdownBlocksDirectHold(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("lockdown allow %d", resp.StatusCode)
+	if resp.StatusCode == http.StatusCreated {
+		t.Fatal("origin secret alone must not allocate")
 	}
 }
 

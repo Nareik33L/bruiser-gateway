@@ -54,8 +54,9 @@ Dev assertions default to membership `1001234` (Alice in the Arsenal-like lab):
 `GET /healthz` liveness, `GET /readyz` store + signing key + mode, `GET /metrics` Prometheus.
 
 ```bash
-./bin/bruiser config validate configs/example.yaml
-./bin/bruiser doctor --profile configs/example.yaml --skip-store
+BRUISER_ENV=lab BRUISER_ADMIN_SECRET=admin-secret-dev \
+  ./bin/bruiser config validate configs/example.yaml
+BRUISER_ENV=lab ./bin/bruiser doctor --profile configs/example.yaml --skip-store
 # Production path, observe only, then ramp without redeploy:
 BRUISER_MODE=dry-run make serve
 # PUT /v1/admin/controls {"enforce_percent":10}

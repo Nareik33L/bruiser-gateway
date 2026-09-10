@@ -4,6 +4,11 @@ profile: arsenal-like-premier-league
 assumptions: unverified-best-guess
 unmatched: allow
 
+# Optional closed catalogue. When set, inbound IDs fold then must match.
+# Leave empty to fold only (lab / fixture templates like event:{event}).
+# resources:
+#   - event:ars-che
+
 identity:
   extractor: cookie-jwt
   cookie: boxoffice_session

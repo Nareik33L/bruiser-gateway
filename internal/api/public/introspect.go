@@ -8,7 +8,6 @@ import (
 
 	"github.com/Nareik33L/bruiser-gateway/internal/auth"
 	"github.com/Nareik33L/bruiser-gateway/internal/lease"
-	"github.com/Nareik33L/bruiser-gateway/internal/resource"
 	pgstore "github.com/Nareik33L/bruiser-gateway/internal/store/postgres"
 )
 
@@ -37,8 +36,8 @@ func (s *Server) introspect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Resource != "" {
-		want, err := resource.Canonical(body.Resource)
-		got, gerr := resource.Canonical(claims.Resource)
+		want, err := s.canonicalizeResource(body.Resource)
+		got, gerr := s.canonicalizeResource(claims.Resource)
 		if err != nil || gerr != nil || want != got {
 			writeErr(w, http.StatusForbidden, "resource mismatch")
 			return

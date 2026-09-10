@@ -54,20 +54,20 @@ func TestV1AdversarialOneCustomer(t *testing.T) {
 }
 
 type advLab struct {
-	watch   *originWatch
-	origin  string
-	frontA  string
-	frontB  string
-	gwA     string
-	gwB     string
-	hmac    string
-	admin   string
-	cfg     testlab.Lab
-	apiB    *publicapi.Server
-	srvB    *httptest.Server
-	storeB  *pgstore.Store
-	sticky  string
-	stolen  string // last forwarded execution JWT captured at origin
+	watch  *originWatch
+	origin string
+	frontA string
+	frontB string
+	gwA    string
+	gwB    string
+	hmac   string
+	admin  string
+	cfg    testlab.Lab
+	apiB   *publicapi.Server
+	srvB   *httptest.Server
+	storeB *pgstore.Store
+	sticky string
+	stolen string // last forwarded execution JWT captured at origin
 }
 
 type originWatch struct {
@@ -99,7 +99,7 @@ func startAdversarialLab(t *testing.T) *advLab {
 	apiB.Start(ctx)
 
 	watch := &originWatch{exes: map[string]int{}, phase: map[string]int{}}
-	origin := simtix.New(simtix.Config{HMACSecret: core.Cfg.DevHMACSecret, OriginSecret: core.Cfg.OriginSecret, Seats: 500})
+	origin := simtix.New(simtix.Lab(core.Cfg.DevHMACSecret, core.Cfg.OriginSecret, core.Cfg.MerchantID, core.Signer.Public, core.Server.URL, 500))
 	watch.next = origin.Handler()
 	originSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(3 * time.Millisecond)

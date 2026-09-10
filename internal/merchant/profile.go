@@ -21,21 +21,26 @@ type Profile struct {
 	Identity  Identity `yaml:"identity"`
 	Routes    []Route  `yaml:"routes"`
 	Policy    Policy   `yaml:"policy"`
+	// Resources is an optional merchant-scoped allowlist of canonical
+	// resource IDs. When set, inbound strings fold then must resolve to
+	// one of these IDs. Empty means fold-only (lab / ad-hoc IDs).
+	Resources []string `yaml:"resources"`
 }
 
 type Identity struct {
-	Extractor       string `yaml:"extractor"` // auto | cookie-jwt | bearer-jwt | header | introspect | edge-signed | oidc
-	Source          string `yaml:"source"`    // compact alias of extractor
-	Cookie          string `yaml:"cookie"`
-	Header          string `yaml:"header"`
-	PrincipalHeader string `yaml:"principal_header"`
-	SubjectClaim    string `yaml:"subject_claim"`
-	Claim           string `yaml:"claim"` // compact alias of subject_claim
-	HMACSecretEnv   string `yaml:"hmac_secret_env"`
-	IntrospectURL   string `yaml:"introspect_url"`
-	JWKSURL         string `yaml:"jwks_url"`
-	Issuer          string `yaml:"issuer"`
-	Audience        string `yaml:"audience"`
+	Extractor           string `yaml:"extractor"` // auto | cookie-jwt | bearer-jwt | header | introspect | edge-signed | oidc
+	Source              string `yaml:"source"`    // compact alias of extractor
+	Cookie              string `yaml:"cookie"`
+	Header              string `yaml:"header"`
+	PrincipalHeader     string `yaml:"principal_header"`
+	SubjectClaim        string `yaml:"subject_claim"`
+	Claim               string `yaml:"claim"` // compact alias of subject_claim
+	HMACSecretEnv       string `yaml:"hmac_secret_env"`
+	IntrospectURL       string `yaml:"introspect_url"`
+	JWKSURL             string `yaml:"jwks_url"`
+	Issuer              string `yaml:"issuer"`
+	Audience            string `yaml:"audience"`
+	AllowUnsignedHeader bool   `yaml:"allow_unsigned_header"`
 }
 
 // Compact fields — accepted at the document root so a merchant can write
@@ -196,10 +201,7 @@ func (r Route) ResourceFor(params map[string]string, bodyEventID string) string 
 	for k, v := range params {
 		res = strings.ReplaceAll(res, "{"+k+"}", v)
 	}
-	if canon := resource.MustCanonical(res); canon != "" {
-		return canon
-	}
-	return res
+	return resource.MustCanonical(res)
 }
 
 // Controlled is true when the route maps onto a scarcity action Bruiser must admit.
@@ -213,4 +215,9 @@ func Empty(merchantID string) Profile {
 		panic(err)
 	}
 	return p
+}
+
+// Catalogue returns the merchant resource allowlist. Empty means fold-only.
+func (p Profile) Catalogue() resource.Catalogue {
+	return resource.NewCatalogue(p.Resources)
 }

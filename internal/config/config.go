@@ -103,7 +103,7 @@ func Load() Config {
 		RatePrincipal:     envFloat("BRUISER_RATE_PRINCIPAL", 20),
 		RateIP:            envFloat("BRUISER_RATE_IP", 0),
 	}
-	c.DevAssertions = envBool("BRUISER_DEV_ASSERTIONS", !c.Production())
+	c.DevAssertions = envBool("BRUISER_DEV_ASSERTIONS", c.Lab())
 	return c
 }
 
@@ -117,7 +117,15 @@ func (c Config) Production() bool {
 	}
 }
 
+// Lab is true when the operator set an explicit lab posture.
+func (c Config) Lab() bool {
+	return strings.EqualFold(strings.TrimSpace(c.Environment), "lab")
+}
+
 func (c Config) Validate() error {
+	if err := c.ValidateEnvironment(); err != nil {
+		return err
+	}
 	if c.DatabaseURL == "" {
 		return fmt.Errorf("BRUISER_DATABASE_URL is required")
 	}
@@ -149,6 +157,23 @@ func (c Config) Validate() error {
 	}
 	if err := c.ValidateIdentity(); err != nil {
 		return err
+	}
+	return nil
+}
+
+// ValidateEnvironment refuses a missing or unknown BRUISER_ENV so HMAC
+// lab mode cannot start because someone forgot the variable.
+func (c Config) ValidateEnvironment() error {
+	env := strings.ToLower(strings.TrimSpace(c.Environment))
+	switch env {
+	case "lab", "production", "prod", "live":
+	case "":
+		return fmt.Errorf("BRUISER_ENV must be lab or production (empty is not lab)")
+	default:
+		return fmt.Errorf("BRUISER_ENV=%q is not lab or production", c.Environment)
+	}
+	if c.DevAssertions && !c.Lab() {
+		return fmt.Errorf("BRUISER_DEV_ASSERTIONS requires BRUISER_ENV=lab; HMAC lab mode is not silent")
 	}
 	return nil
 }

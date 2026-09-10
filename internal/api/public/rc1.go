@@ -7,7 +7,6 @@ import (
 
 	"github.com/Nareik33L/bruiser-gateway/internal/identity"
 	"github.com/Nareik33L/bruiser-gateway/internal/limit"
-	"github.com/Nareik33L/bruiser-gateway/internal/resource"
 	pgstore "github.com/Nareik33L/bruiser-gateway/internal/store/postgres"
 )
 
@@ -141,8 +140,8 @@ func (s *Server) claimReplay(w http.ResponseWriter, r *http.Request, kind string
 	return true
 }
 
-func canonicalizeResource(raw string) (string, error) {
-	return resource.Canonical(raw)
+func (s *Server) canonicalizeResource(raw string) (string, error) {
+	return s.profile.Catalogue().Canonical(raw)
 }
 
 func clientIP(r *http.Request) string {

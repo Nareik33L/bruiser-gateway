@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/Nareik33L/bruiser-gateway/internal/resource"
 )
 
 const (
@@ -154,8 +156,11 @@ type Store interface {
 	Ping(ctx context.Context) error
 }
 
-func DomainKey(merchantID, ruleName, customerID, resource string) string {
-	return merchantID + "/" + ruleName + "/customer=" + customerID + "/resource=" + resource
+func DomainKey(merchantID, ruleName, customerID, res string) string {
+	if canon, err := resource.Canonical(res); err == nil {
+		res = canon
+	}
+	return merchantID + "/" + ruleName + "/customer=" + customerID + "/resource=" + res
 }
 
 func DefaultRuleName() string { return "purchase-per-event" }
