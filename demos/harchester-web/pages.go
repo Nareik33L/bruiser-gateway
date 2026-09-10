@@ -9,13 +9,11 @@ import (
 	"github.com/Nareik33L/bruiser-gateway/demos/seed"
 )
 
-func (s *server) css(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/css; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=3600")
-	_, _ = w.Write([]byte(clubCSS))
+func (s *server) clubPage(w http.ResponseWriter, r *http.Request, title, body string) {
+	s.clubPageClass(w, r, title, "", body)
 }
 
-func (s *server) clubPage(w http.ResponseWriter, r *http.Request, title, body string) {
+func (s *server) clubPageClass(w http.ResponseWriter, r *http.Request, title, bodyClass, body string) {
 	m, logged := s.current(r)
 	who := "Sign in"
 	href := "/login"
@@ -27,73 +25,118 @@ func (s *server) clubPage(w http.ResponseWriter, r *http.Request, title, body st
 	fmt.Fprintf(w, `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>%s · Harchester United</title><link rel="stylesheet" href="/assets/club.css"></head>
-<body>
+<body class="%s">
 <header class="nav">
-  <a class="brand" href="/"><span class="crest">HUFC</span><span>Harchester United</span></a>
+  <a class="brand" href="/"><span class="crest">HU</span><span>Harchester United</span></a>
   <nav>
     <a href="/news">News</a>
     <a href="/fixtures">Fixtures</a>
+    <a href="/tickets/hfc-ars">Tickets</a>
     <a href="/members">Members</a>
-    <a href="%s">%s</a>
+    <a class="nav-cta" href="%s">%s</a>
   </nav>
 </header>
-<main>%s</main>
+%s
 <footer>
   <p>Harchester United Football Club · Dragon's Lair · Established 1896</p>
   <p>Fictional club for a closed demonstration. Not affiliated with any real club or broadcast.</p>
 </footer>
-</body></html>`, title, href, who, body)
+</body></html>`, title, bodyClass, href, who, body)
 }
 
 func (s *server) pageHome(w http.ResponseWriter, r *http.Request) {
 	s.clubPage(w, r, "Home", fmt.Sprintf(`
 <section class="hero">
-  <p class="kicker">Home · Premier League</p>
-  <h1>Harchester United</h1>
-  <p class="sub">Saturday 15:00 at the Dragon's Lair. Members' sale now open for the visit of %s.</p>
-  <a class="btn" href="/tickets/hfc-ars">Buy tickets</a>
+  <div class="hero-inner">
+    <h1>Members' sale open</h1>
+    <p class="sub">Harchester United vs %s · Saturday 15:00 · Dragon's Lair</p>
+    <a class="btn" href="/tickets/hfc-ars">Buy tickets</a>
+  </div>
 </section>
-<section class="grid">
-  <article><h2>Club news</h2><p>Okafor: "This group knows what the Lair sounds like on a Saturday."</p><a href="/news">Read news</a></article>
-  <article><h2>Fixtures</h2><p>Four matches listed, one on sale. Members first.</p><a href="/fixtures">See fixtures</a></article>
-  <article><h2>Membership</h2><p>Seven-digit membership. One supporter, one membership.</p><a href="/members">Join</a></article>
-</section>`, s.opponent))
+<div class="wrap">
+  <section class="section">
+    <h2>Latest news</h2>
+    <div class="news-grid">
+      <a class="news-card" href="/news">
+        <div class="news-photo" style="background-image:url('/assets/news-matchday.jpg')"></div>
+        <div class="body">
+          <p class="kicker">Matchday</p>
+          <h3>Dragon's Lair ready for %s — members' sale now live</h3>
+          <p class="meta">Today · Tickets</p>
+        </div>
+      </a>
+      <a class="news-card" href="/news">
+        <div class="news-photo" style="background-image:url('/assets/news-player.jpg')"></div>
+        <div class="body">
+          <p class="kicker">First team</p>
+          <h3>Squad update ahead of Saturday's clash</h3>
+          <p class="meta">Yesterday · News</p>
+        </div>
+      </a>
+      <a class="news-card" href="/members">
+        <div class="news-photo brand-tile">HUFC</div>
+        <div class="body">
+          <p class="kicker">Club</p>
+          <h3>Season membership benefits for 2026/27</h3>
+          <p class="meta">2 days ago · Members</p>
+        </div>
+      </a>
+    </div>
+  </section>
+  <section class="section">
+    <h2>Fixtures</h2>
+    <div class="fixture-strip">
+      <div class="left">
+        <span class="pill">Next match</span>
+        <div>
+          <strong>Harchester United vs %s <span class="badge-sale">On sale</span></strong>
+          <span>Sat 15:00 · Dragon's Lair · Premier League</span>
+        </div>
+      </div>
+      <a class="btn small" href="/tickets/hfc-ars">Buy tickets</a>
+    </div>
+  </section>
+</div>`, s.opponent, s.opponent, s.opponent))
 }
 
 func (s *server) pageNews(w http.ResponseWriter, r *http.Request) {
-	s.clubPage(w, r, "News", `
+	s.clubPage(w, r, "News", fmt.Sprintf(`
+<div class="wrap page-copy">
 <h1>News</h1>
-<article class="story"><p class="kicker">Match preview</p><h2>United prepare for a sold-out Lair</h2><p>The members' sale for Saturday's Premier League fixture is open. Season-ticket holders in Gold and Season Ticket tiers have already been written to.</p></article>
-<article class="story"><p class="kicker">Academy</p><h2>Two academy graduates named in the matchday squad</h2><p>The first-team staff have named a 21-man squad that includes two players who came through the Harchester schoolboys' side.</p></article>
-<article class="story"><p class="kicker">Club</p><h2>Dragon's Lair hospitality lounge reopens</h2><p>The West Stand lounge returns for Saturday after a short refurbishment. Hospitality is not part of the members' sale.</p></article>`)
+<article class="story"><p class="kicker">Match preview</p><h2>United prepare for a sold-out Lair</h2><p>The members' sale for Saturday's Premier League fixture against %s is open. Season-ticket holders in Gold and Season Ticket tiers have already been written to.</p></article>
+<article class="story"><p class="kicker">First team</p><h2>Squad update ahead of Saturday's clash</h2><p>Okafor: "This group knows what the Lair sounds like on a Saturday." Two academy graduates are named in the 21-man squad.</p></article>
+<article class="story"><p class="kicker">Club</p><h2>Season membership benefits for 2026/27</h2><p>Priority access to members' sales remains the core benefit. Hospitality is not part of this Saturday's returned-seat release.</p></article>
+</div>`, s.opponent))
 }
 
 func (s *server) pageFixtures(w http.ResponseWriter, r *http.Request) {
 	var b strings.Builder
-	b.WriteString(`<h1>Fixtures</h1><ul class="fixtures">`)
+	b.WriteString(`<div class="wrap page-copy"><h1>Fixtures</h1><ul class="fixtures">`)
 	for _, ev := range seed.Events(s.opponent) {
 		badge := "Scheduled"
 		link := ""
 		if ev.OnSale {
-			badge = "Members' sale open"
-			link = ` <a class="btn small" href="/tickets/hfc-ars">Tickets</a>`
+			badge = `<span class="badge-sale">On sale</span>`
+			link = ` <a class="btn small" href="/tickets/hfc-ars">Buy tickets</a>`
 		}
 		if ev.SoldOut {
 			badge = "Sold out"
 		}
-		fmt.Fprintf(&b, `<li><strong>%s</strong><span>%s · %s · %s</span><em>%s</em>%s</li>`,
+		fmt.Fprintf(&b, `<li><div><strong>%s</strong><span>%s · %s · %s</span></div><div>%s%s</div></li>`,
 			ev.Name, ev.Venue, ev.Kickoff, ev.Competition, badge, link)
 	}
-	b.WriteString(`</ul>`)
+	b.WriteString(`</ul></div>`)
 	s.clubPage(w, r, "Fixtures", b.String())
 }
 
 func (s *server) pageMembers(w http.ResponseWriter, r *http.Request) {
 	s.clubPage(w, r, "Members", `
+<div class="wrap page-copy">
 <h1>Membership</h1>
 <p class="lede">A Harchester membership is a seven-digit number, issued on registration. It is how the club knows you at the turnstile and in the ticket office.</p>
 <p>Junior · Bronze · Silver · Gold · Season Ticket.</p>
-<p><a class="btn" href="/login">Member sign in</a></p>`)
+<p><a class="btn" href="/login">Member sign in</a></p>
+</div>`)
 }
 
 func (s *server) pageLogin(w http.ResponseWriter, r *http.Request) {
@@ -106,15 +149,22 @@ func (s *server) renderLogin(w http.ResponseWriter, r *http.Request, errMsg stri
 	if errMsg != "" {
 		errHTML = `<p class="banner">` + errMsg + `</p>`
 	}
-	s.clubPage(w, r, "Sign in", fmt.Sprintf(`
-<h1>Member sign in</h1>
-%s
-<form method="post" action="/login" class="form">
-<input type="hidden" name="next" value="%s">
-<label>Membership number <input name="membership_number" inputmode="numeric" autocomplete="username" required></label>
-<label>Password <input type="password" name="password" autocomplete="current-password" required></label>
-<button class="btn" type="submit">Sign in</button>
-</form>`, errHTML, next))
+	s.clubPageClass(w, r, "Sign in", "is-login", fmt.Sprintf(`
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="crest">HU</div>
+    <h1>Member sign in</h1>
+    <p class="lede">Access tickets, membership and club benefits</p>
+    %s
+    <form method="post" action="/login" class="form">
+      <input type="hidden" name="next" value="%s">
+      <label>Membership number <input name="membership_number" inputmode="numeric" autocomplete="username" placeholder="e.g. 1001234" required></label>
+      <label>Password <input type="password" name="password" autocomplete="current-password" placeholder="Enter your password" required></label>
+      <button class="btn" type="submit">Sign in</button>
+    </form>
+    <p class="login-links"><a href="/members">Forgot password?</a> · <a href="/members">Join as a member</a></p>
+  </div>
+</div>`, errHTML, next))
 }
 
 func (s *server) pageAccount(w http.ResponseWriter, r *http.Request) {
@@ -124,11 +174,13 @@ func (s *server) pageAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.clubPage(w, r, "My tickets", fmt.Sprintf(`
+<div class="wrap page-copy">
 <h1>Hello, %s</h1>
 <p>Membership %s · %s · %d loyalty points</p>
 <h2>My tickets</h2>
 %s
-<form method="post" action="/logout"><button class="btn ghost" type="submit">Sign out</button></form>`,
+<form method="post" action="/logout"><button class="btn ghost" type="submit">Sign out</button></form>
+</div>`,
 		m.FirstName, m.MembershipNumber, m.MembershipTier, m.LoyaltyPoints, s.fetchOrders(r, m.MembershipNumber)))
 }
 
@@ -168,45 +220,37 @@ func (s *server) pageMatch(w http.ResponseWriter, r *http.Request) {
 	m, logged := s.current(r)
 	elig := ""
 	if logged && m.EligibleForArsenal {
-		elig = `<p class="ok">You are eligible for this sale.</p>`
+		elig = `<p class="ok">You are eligible for this members' sale</p>`
 	} else if logged {
 		elig = `<p class="banner">Your membership is not eligible for this members' sale.</p>`
 	}
 	s.clubPage(w, r, "Tickets", fmt.Sprintf(`
-<p class="kicker">Premier League · Members' sale</p>
-<h1>Harchester United vs %s</h1>
-<p class="lede">Saturday 15:00 · Dragon's Lair · 500 returned seats</p>
-%s
-<p><a class="btn" href="/tickets/hfc-ars/buy">Buy tickets</a></p>
-<p class="muted">You will complete your purchase with the club's ticketing partner.</p>`, s.opponent, elig))
+<section class="match-hero">
+  <div class="match-hero-inner">
+    <p class="kicker">Premier League · Match hub</p>
+    <h1>Harchester United vs %s</h1>
+  </div>
+</section>
+<div class="wrap match-grid">
+  <section class="card">
+    <div class="meta-row">
+      <p><span class="lbl">Kick-off</span><strong>Saturday 15:00</strong></p>
+      <p><span class="lbl">Venue</span><strong>Dragon's Lair</strong></p>
+      <p><span class="lbl">Competition</span><strong>Premier League</strong></p>
+    </div>
+    %s
+    <p><a class="btn" href="/tickets/hfc-ars/buy">Buy tickets</a></p>
+    <p class="muted">You will complete your purchase with the club's ticketing partner.</p>
+  </section>
+  <aside class="card">
+    <h2>Match details</h2>
+    <table class="details">
+      <tr><th>Home</th><td>Harchester United</td></tr>
+      <tr><th>Away</th><td>%s</td></tr>
+      <tr><th>Sale</th><td class="sale-accent">Members only</td></tr>
+      <tr><th>From</th><td>£45</td></tr>
+      <tr><th>Capacity</th><td>Limited release</td></tr>
+    </table>
+  </aside>
+</div>`, s.opponent, elig, s.opponent))
 }
-
-const clubCSS = `
-:root{--bg:#f4efe6;--ink:#1c1917;--muted:#57534e;--purple:#5b2a8c;--orange:#e85d04;--line:#e7e0d4}
-*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink);font-family:"Iowan Old Style",Palatino,Georgia,serif}
-a{color:var(--purple)}
-.nav{display:flex;justify-content:space-between;align-items:center;padding:18px 28px;border-bottom:1px solid var(--line);background:#f7f3eb;position:sticky;top:0}
-.brand{display:flex;gap:12px;align-items:center;text-decoration:none;color:var(--ink);font-weight:700;letter-spacing:.04em}
-.crest{width:42px;height:42px;border-radius:50%;background:var(--purple);color:#f4efe6;display:grid;place-items:center;font-size:11px;font-weight:800;letter-spacing:.04em}
-nav a{margin-left:20px;text-decoration:none;color:var(--ink);font-size:15px}
-main{width:min(920px,calc(100% - 40px));margin:0 auto;padding:36px 0 64px}
-.hero{padding:48px 0 24px}
-.kicker{letter-spacing:.28em;text-transform:uppercase;font-size:11px;color:var(--orange);font-weight:700;font-family:ui-sans-serif,system-ui,sans-serif}
-h1{font-size:clamp(2.2rem,6vw,4.2rem);line-height:.95;font-weight:500;margin:8px 0 16px}
-.sub,.lede,.muted{color:var(--muted);line-height:1.55}
-.btn{display:inline-block;background:var(--purple);color:#f4efe6;text-decoration:none;padding:12px 18px;border-radius:999px;font-family:ui-sans-serif,system-ui,sans-serif;font-weight:700;border:0;cursor:pointer;font-size:14px}
-.btn.small{padding:6px 12px;font-size:12px}
-.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
-.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:32px}
-.grid article{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px}
-.story{background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;margin:16px 0}
-.fixtures{list-style:none;padding:0}
-.fixtures li{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;margin:10px 0}
-.fixtures span,.fixtures em{display:block;color:var(--muted);font-style:normal;margin-top:4px;font-family:ui-sans-serif,system-ui,sans-serif;font-size:14px}
-.form label{display:block;margin:14px 0;font-family:ui-sans-serif,system-ui,sans-serif}
-.form input{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:#fff;font:inherit}
-.banner{background:#fff1e6;border:1px solid var(--orange);color:#9a3412;padding:12px;border-radius:10px}
-.ok{background:#f3e8ff;color:var(--purple);padding:12px;border-radius:10px}
-footer{padding:24px 28px;border-top:1px solid var(--line);color:var(--muted);font-size:13px;font-family:ui-sans-serif,system-ui,sans-serif}
-@media(max-width:800px){.grid{grid-template-columns:1fr}nav a{margin-left:12px;font-size:13px}}
-`

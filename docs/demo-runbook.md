@@ -21,7 +21,7 @@ observes would-block without blocking. Rollout % stays under Advanced.
 1. Open the club site. Confirm no Bruiser branding.
 2. Sign in as `1001234` / `password`.
 3. Fixtures → Arsenal → Buy tickets.
-4. Land on SimTix already signed in → Best available → Checkout → Confirmation.
+4. Land on SimTix already signed in → Find tickets → select a seat → Continue to checkout → Pay and confirm.
 5. Console: attempts 1, forwarded 1, observed EAF 1.0×.
 6. Optional: sign in as `1000002` and show SimTix refusing eligibility.
 

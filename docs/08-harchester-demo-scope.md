@@ -166,9 +166,12 @@ Pages: Home · News (3–5 seeded articles) · Fixtures (seeded, Arsenal highlig
 as "Members' sale now open") · Membership · Login · My Account / My Tickets ·
 Match page for Harchester United v Arsenal with **Buy Tickets**.
 
-Visual: warm ivory/beige ground, deep charcoal type, purple primary, orange
-accent, editorial football aesthetic, traditional English club feel. Original
-crest and photography placeholders (C13).
+Visual: contemporary Premier League club density (Arsenal.com-like), Harchester
+purple `#4C1D7A`, sticky nav `#0B0B0F`, page `#F3F1F5`, sale accent `#E85D04`
+sparingly, `system-ui`. Zero Bruiser branding. Locked look:
+[docs/demo-visual-brief.md](demo-visual-brief.md). Photography in
+`demos/harchester-web/static/`. The admin ops console stays ivory/charcoal/rust
+and is not part of this club restyle.
 
 Identity and session:
 
@@ -196,8 +199,9 @@ Public hostname: `tickets.bruiser-gateway.com`. Locally `tickets.localhost`
 or `http://127.0.0.1:8091`.
 
 A fictional ticketing platform that visibly is a different company: its own
-name, logo, navigation, colour system (cool neutrals, one strong brand colour that
-is not purple or orange), footer legal boilerplate, cookie banner.
+name, logo, navigation, colour system (Ticketmaster-like commercial navy
+`#0B1B3D` and accent `#026CDF`, light UI — not club purple), footer legal
+boilerplate. Locked look: [docs/demo-visual-brief.md](demo-visual-brief.md).
 
 Two listeners in one binary, exactly like today's `cmd/simtix`:
 
@@ -216,10 +220,11 @@ Two listeners in one binary, exactly like today's `cmd/simtix`:
   in-flight limit, and exposes `GET/PUT /_edge/config` and `GET /_edge/stats` on
   the compose network for the console.
 
-Pages (served by origin through the edge): SSO landing (`/sso`) · Event page ·
-Seat allocation (stand/block picker; "Best available" button) · Basket · Checkout
-(name/email prefilled from the handoff; card form that accepts any Luhn-valid
-number, no PSP) · Confirmation with order reference and a printable ticket.
+Pages (served by origin through the edge): SSO landing (`/sso`) · Event landing
+(breadcrumb, from £45, Find tickets) · Seat map (top-down SVG stadium bowl;
+available seats blue, selected green; Continue to checkout holds then pays) ·
+Basket (still routed) · Checkout (order summary + fictional card form; Pay and
+confirm; no PSP) · Confirmation with order reference and a printable ticket.
 
 Allocation API (matches `configs/harchester.yaml`, same shape as today's lab
 routes so `internal/check` works unchanged):
@@ -475,9 +480,10 @@ Every scenario starts from **Reset demo** and enforcement **100 %** unless state
 
 **Scenario 1 — Normal purchase (2 min).** Login as `1001234`/`password` on the
 club site → Fixtures → Arsenal → Buy Tickets → land on SimTix already signed in →
-Best available → Basket → Checkout → Confirmation. Console shows attempts 1,
-forwarded 1, EAF 1.0×. Nothing on either site mentions Bruiser. Then log in as
-`1000002` and show SimTix refusing eligibility: the platform still owns its rules.
+Find tickets → select a seat → Continue to checkout → Pay and confirm. Console
+shows attempts 1, forwarded 1, EAF 1.0×. Nothing on either site mentions Bruiser.
+Then log in as `1000002` and show SimTix refusing eligibility: the platform still
+owns its rules.
 
 **Scenario 2 — 10,000-agent swarm, one supporter (flagship, 3 min).** Agent Lab:
 membership `1001234`, 10,000 agents, spawn 1,000/s, single-supporter preset,

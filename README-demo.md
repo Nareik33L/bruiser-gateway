@@ -7,6 +7,7 @@ would deploy it.
 > The supporter never knows Bruiser exists.
 
 Full scope: [docs/08-harchester-demo-scope.md](docs/08-harchester-demo-scope.md).
+Visual brief (locked club purple / SimTix navy): [docs/demo-visual-brief.md](docs/demo-visual-brief.md).
 Runbook: [docs/demo-runbook.md](docs/demo-runbook.md).
 Presenter checklist: [docs/demo-presenter-checklist.md](docs/demo-presenter-checklist.md).
 Hosting (Fly origin; Cloudflare DNS/proxy + Access on admin):

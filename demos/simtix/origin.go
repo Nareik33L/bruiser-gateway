@@ -113,7 +113,7 @@ func (o *origin) handler() http.Handler {
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		shared.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": "simtix"})
 	})
-	r.Get("/assets/simtix.css", o.css)
+	r.Handle("/assets/", staticHandler())
 	r.Get("/", o.pageHome)
 	r.Get("/sso", o.sso)
 	r.Get("/events/{event}", o.pageEvent)
