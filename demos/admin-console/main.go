@@ -309,7 +309,8 @@ const dashboardHTML = `
 <div class="tiles" id="tiles"></div>
 <div class="row">
   <button class="primary" onclick="resetDemo()">Reset demo</button>
-  <select id="enf" onchange="setEnf()">
+  <span class="hint" id="resetStatus"></span>
+  <select id="enf" onchange="setEnf()" title="Per-customer rollout">
     <option value="off">Off</option>
     <option value="dry-run">Dry Run</option>
     <option value="10">10%</option>
@@ -321,6 +322,7 @@ const dashboardHTML = `
   <button onclick="runCheck()">Run Authority Check</button>
   <button onclick="loadAudit()">Refresh audit</button>
 </div>
+<p class="hint" id="enfHint">Percent is <strong>per-customer rollout</strong> (a stable hash: some customers fully enforced, others dry-run) — not “let through X% of an agent swarm.” Off skips Bruiser. Dry Run observes and forwards. 100% is one allow per customer.</p>
 <h2>Agent Lab</h2>
 <div class="row">
   <label class="mem-field" id="memWrap">Membership <input id="mem" value="1001234" placeholder="Membership"></label>
@@ -356,8 +358,10 @@ const toastEl = document.getElementById('toast');
 function toast(msg){
   toastEl.textContent = msg;
   toastEl.className = 'show';
+  const rs = document.getElementById('resetStatus');
+  if (rs) rs.textContent = msg;
   clearTimeout(toastEl._t);
-  toastEl._t = setTimeout(() => { toastEl.className = ''; }, 5000);
+  toastEl._t = setTimeout(() => { toastEl.className = ''; }, 8000);
 }
 function syncPreset(){
   const preset = document.getElementById('preset').value;

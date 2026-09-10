@@ -8,7 +8,7 @@ DDoS.
 ## Before the room
 
 - [ ] `make demo-up-local` (or Compose) is healthy: club `:8100`, tickets `:8091`, admin `:8110`.
-- [ ] Admin password `harchester`. Enforcement **100 %**.
+- [ ] Admin password `harchester`. Enforcement **100 %**. Control is Off · Dry Run · 10/25/50/75/100 % — percent is **per-customer rollout**, not “X% of the swarm.”
 - [ ] **Reset demo** so Scenario 1 starts clean. Confirm the toast: seats remaining + executions cleared.
 - [ ] Browser windows: club (supporter), admin (operator). Do not show the gateway port.
 - [ ] Confirm club home has no Bruiser branding.
@@ -51,7 +51,7 @@ DDoS.
 ## Scenario 4 — Rollout (~3 min)
 
 - [ ] Preset **1,000 × 10**. Run 10 %, reset, 50 %, reset, 100 %.
-- [ ] Same supporter stays in the same bucket (deterministic Edge assignment).
+- [ ] Same supporter stays in the same bucket (deterministic Edge assignment). Say: 10% means ~100 customers enforced, not “one in ten agents.”
 
 ## Close — Authority Check (~1 min)
 

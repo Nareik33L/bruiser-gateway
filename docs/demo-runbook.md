@@ -11,6 +11,12 @@ https://admin.bruiser-gateway.com (Access: `kiedl33@outlook.com`).
 Reset between every scenario. The admin toast confirms seats restored and
 executions cleared.
 
+Enforcement control stays **Off · Dry Run · 10 / 25 / 50 / 75 / 100 %**.
+Percent is **per-customer rollout** (stable hash: some customers fully
+enforced, others dry-run), not “let through X% of an agent swarm.” Off
+skips Bruiser. Dry Run observes and forwards. 100% is one allow per
+customer, rest BUSY.
+
 SimTix origin still applies a **per-account limit of 4** tickets. Off does
 not lift that origin rule; it only stops Bruiser from holding extra agents
 at BUSY.
@@ -71,7 +77,8 @@ Authority Check → **FAIL** (open path). Reset.
 ## Scenario 4 — Progressive rollout (~3 min)
 
 Preset **1,000 supporters × 10**. Run at 10 %, then 50 %, then 100 %, resetting
-executions and seats between runs. Same supporter stays in the same bucket.
+executions and seats between runs. Same supporter stays in the same bucket
+(per-customer rollout, not a fraction of each customer’s agents).
 
 ## Close — Authority Check (~1 min)
 
