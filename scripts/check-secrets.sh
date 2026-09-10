@@ -5,7 +5,7 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
 pattern='admin-secret-dev|edge-secret-dev|origin-lock-dev|operator-secret-dev|dev-secret-change-me'
-allow='(^|/)(Makefile|SECURITY\.md|\.gitleaks\.toml|scripts/check-secrets\.sh)$|_test\.go$|(^|/)internal/(testlab/|config/config\.go|check/check\.go)|(^|/)cmd/simtix/main\.go$'
+allow='(^|/)(Makefile|SECURITY\.md|\.gitleaks\.toml|scripts/check-secrets\.sh|scripts/demo-up-local\.sh)$|_test\.go$|(^|/)internal/(testlab/|config/config\.go|check/check\.go)|(^|/)cmd/simtix/main\.go$|(^|/)deploy/compose/docker-compose\.demo\.yml$|(^|/)deploy/fly/start\.sh$'
 
 hits="$(git grep -nI -E "$pattern" -- . ':!.git' || true)"
 if [[ -z "$hits" ]]; then

@@ -20,5 +20,7 @@ paths = [
     '''(^|/)cmd/simtix/main\.go$''',
     '''(^|/)\.gitleaks\.toml$''',
     '''(^|/)scripts/check-secrets\.sh$''',
-    '''(^|/)SECURITY\.md$''',
+    '''(^|/)scripts/demo-up-local\.sh$''',
+    '''(^|/)deploy/compose/docker-compose\.demo\.yml$''',
+    '''(^|/)deploy/fly/start\.sh$''',
 ]

@@ -77,6 +77,7 @@ type eafAcc struct {
 	attempts  map[string]float64
 	forwarded map[string]float64
 	customers map[string]map[string]struct{}
+	outcomes  map[string]map[string]float64
 }
 
 func newEAFAcc() *eafAcc {
@@ -84,6 +85,7 @@ func newEAFAcc() *eafAcc {
 		attempts:  map[string]float64{},
 		forwarded: map[string]float64{},
 		customers: map[string]map[string]struct{}{},
+		outcomes:  map[string]map[string]float64{},
 	}
 }
 
@@ -94,6 +96,10 @@ func (a *eafAcc) record(resource, customer, outcome string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.attempts[resource]++
+	if a.outcomes[resource] == nil {
+		a.outcomes[resource] = map[string]float64{}
+	}
+	a.outcomes[resource][outcome]++
 	allocationAttempts.WithLabelValues(resource, outcome).Inc()
 	if outcome == "allow" {
 		a.forwarded[resource]++
@@ -142,10 +148,19 @@ func (a *eafAcc) snapshotAll() []map[string]any {
 		if cust > 0 {
 			down = fwd / cust
 		}
+		var busy, denied, unauthorized float64
+		if oc := a.outcomes[res]; oc != nil {
+			busy = oc["busy"]
+			denied = oc["denied"]
+			unauthorized = oc["unauthorized"]
+		}
 		out = append(out, map[string]any{
 			"resource":       res,
 			"attempts":       att,
 			"forwarded":      fwd,
+			"busy":           busy,
+			"denied":         denied,
+			"unauthorized":   unauthorized,
 			"customers":      cust,
 			"observed_eaf":   obs,
 			"downstream_eaf": down,
@@ -254,6 +269,9 @@ func (s *Server) publicMux() http.Handler {
 			r.Get("/executions/{id}", s.get)
 			r.Get("/executions/{id}/watch", s.watch)
 		})
+		if s.cfg.OperatorSecret != "" {
+			s.mountOperator(r)
+		}
 	})
 	return r
 }

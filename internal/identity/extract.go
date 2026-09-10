@@ -45,12 +45,12 @@ type Input struct {
 
 func Extract(id merchant.Identity, secret, cookie, bearer, headerVal, principalHdr string) (Customer, error) {
 	return ExtractInput(context.Background(), Input{
-		Identity:           id,
-		Secret:             secret,
-		Cookie:             cookie,
-		Bearer:             bearer,
-		Header:             headerVal,
-		Principal:          principalHdr,
+		Identity:            id,
+		Secret:              secret,
+		Cookie:              cookie,
+		Bearer:              bearer,
+		Header:              headerVal,
+		Principal:           principalHdr,
 		AllowDevAssertions:  true,
 		AllowUnsignedHeader: true,
 	})
@@ -133,7 +133,14 @@ func merchantSource(src string) string {
 }
 
 func fromJWT(in Input, raw string) (Customer, error) {
-	if raw == "" || !in.AllowDevAssertions {
+	if raw == "" {
+		return Customer{}, auth.ErrUnauthorized
+	}
+	mode := strings.ToLower(strings.TrimSpace(in.Identity.Extractor))
+	cookieJWT := mode == "cookie-jwt" || mode == "cookie"
+	// HMAC box-office cookies are merchant identity when the extractor is
+	// cookie-jwt. Bearer HMAC lab assertions still require DevAssertions.
+	if !in.AllowDevAssertions && !cookieJWT {
 		return Customer{}, auth.ErrUnauthorized
 	}
 	opts := auth.AssertionOpts{

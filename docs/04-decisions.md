@@ -524,3 +524,26 @@ hypothetical. `CONTROL_CHANGED` includes the percent.
 **Revisit when.** A merchant needs request-level (not customer-level)
 bucketing — that would violate the customer-as-unit invariant.
 
+## ADR-032 — Harchester United is a reference Edge deployment, not product code
+
+**Decision.** The Harchester United / SimTix demonstration environment lives
+under `demos/` in this repository. Demo packages must not import `internal/`.
+They talk to the gateway over HTTP (`POST /v1/authorize`, `GET /metrics`,
+operator endpoints). Operator endpoints (`/v1/operator/*`, gated by
+`BRUISER_OPERATOR_SECRET`) revoke live executions through the store (so the
+busy cache forgets), list active executions and audit, and reset in-process
+EAF accumulators. They never delete `audit_events`. Demo supporter passwords
+are plaintext by design, in a separate `harchester` database, and must never
+be copied into production schema.
+
+**Why.** The demo is a reference Edge deployment of the product, not a mock.
+Keeping demo code out of `internal/` preserves the product/demo boundary the
+sales story depends on.
+
+**Consequences.** `configs/harchester.yaml` is the merchant profile the demo
+gateway loads. Percentage rollout for the Harchester Edge is a demo Edge
+setting. See `docs/08-harchester-demo-scope.md`.
+
+**Revisit when.** A design partner replaces Harchester as the standing demo
+merchant.
+

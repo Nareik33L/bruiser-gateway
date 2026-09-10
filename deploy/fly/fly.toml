@@ -1,0 +1,53 @@
+# fly.toml app configuration file generated for the Harchester Compose origin.
+#
+# Always-on packed Machine: Postgres volume + club + SimTix + gateway + admin
+# + load-lab + Caddy. Same demonstration scope as docker-compose.demo.yml.
+# Do not split into one Fly app per service on the free allowance (see docs/10).
+#
+# Deploy from repo root so the Docker context includes cmd/, demos/, configs/:
+#   bash deploy/fly/deploy.sh
+#   # or: fly deploy --config deploy/fly/fly.toml --dockerfile deploy/fly/Dockerfile
+
+app = "bruiser-harchester-demo"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "deploy/fly/Dockerfile"
+
+[env]
+  DEMO_CLUB_HOST = "club.bruiser-gateway.com"
+  DEMO_TICKETS_HOST = "tickets.bruiser-gateway.com"
+  DEMO_ADMIN_HOST = "admin.bruiser-gateway.com"
+  SIMTIX_PUBLIC_URL = "https://tickets.bruiser-gateway.com"
+  DEMO_OPPONENT = "Arsenal"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 1000
+    soft_limit = 500
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "2m"
+    method = "GET"
+    path = "/healthz"
+
+[mounts]
+  source = "harchester_pg"
+  destination = "/var/lib/postgresql/data"
+
+# Honest size for Postgres + gateway + five Go processes + 10k load-lab.
+# shared-cpu-1x 256MB (legacy free VM) is a documented blocker — do not shrink
+# the demo to fit it.
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "2048mb"

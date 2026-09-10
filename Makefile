@@ -19,7 +19,8 @@ LAB_ENV ?= BRUISER_ENV=lab \
 FUZZ_TIME ?= 10s
 
 .PHONY: all build test test-race lint fmt vet fuzz serve migrate tidy ci torture simtix authority-check eaf-demo eaf-nightly sdk-test doctor secrets-scan verify-mods \
-	demo-1x10000 demo-1000x10 demo-handoff demo-bypass demo-unaware demo-up v1-accept soak
+	demo-1x10000 demo-1000x10 demo-handoff demo-bypass demo-unaware demo-up v1-accept soak \
+	check-demo-boundary demo-build demo-up-local demo-down-local demo-reset demo-check demo-nuke demo-e2e
 
 all: build
 
@@ -31,6 +32,17 @@ build:
 	$(GO) build -o $(BIN) ./cmd/bruiser
 	$(GO) build -o $(SIMTIX) ./cmd/simtix
 	$(GO) build -o bin/swarm ./cmd/swarm
+
+demo-build:
+	mkdir -p bin
+	$(GO) build -o $(BIN) ./cmd/bruiser
+	$(GO) build -o bin/harchester ./demos/harchester-web
+	$(GO) build -o bin/simtix-demo ./demos/simtix
+	$(GO) build -o bin/admin ./demos/admin-console
+	$(GO) build -o bin/loadlab ./demos/load-lab
+
+check-demo-boundary:
+	bash scripts/check-demo-boundary.sh
 
 test:
 	BRUISER_TEST_DATABASE_URL="$(TEST_DATABASE_URL)" $(GO) test $(PKG) -count=1
@@ -116,6 +128,26 @@ demo-bypass: build
 demo-unaware: build
 	$(BIN) swarm --front http://127.0.0.1:8091 --profile unaware --n 200
 
+demo-check: demo-build
+	$(LAB_ENV) $(BIN) authority-check --edge http://127.0.0.1:8091 --origin http://127.0.0.1:8090 \
+		--membership 1001234 --event hfc-ars --json
+
+demo-e2e:
+	DEMO_E2E=1 BRUISER_BIN="$(CURDIR)/bin/bruiser" BRUISER_DEV_HMAC_SECRET="$${BRUISER_DEV_HMAC_SECRET:-dev-secret-change-me}" \
+		BRUISER_TEST_DATABASE_URL="$(TEST_DATABASE_URL)" $(GO) test ./demos/e2e -count=1 -timeout 240s
+
+demo-reset:
+	curl -sS -X POST http://127.0.0.1:8110/reset -H 'Cookie: admin_session=harchester-ok' || true
+
+demo-up-local: demo-build
+	bash scripts/demo-up-local.sh
+
+demo-down-local:
+	bash scripts/demo-down-local.sh
+
+demo-nuke:
+	@echo "Refusing to drop databases from Make. Use psql DROP DATABASE harchester / bruiser if you mean it."
+
 migrate: build
 	$(LAB_ENV) BRUISER_DATABASE_URL="$(DATABASE_URL)" $(BIN) migrate
 
@@ -128,4 +160,4 @@ secrets-scan:
 verify-mods:
 	$(GO) mod verify
 
-ci: secrets-scan verify-mods vet test-race fuzz build sdk-test
+ci: secrets-scan verify-mods vet test-race fuzz build sdk-test check-demo-boundary demo-build

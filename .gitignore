@@ -16,6 +16,7 @@ pycache/
 *.swp
 *.test
 tmp/
+.demo-pids/
 vendor/
 .vscode/
 AUTHORITY_CHECK.json

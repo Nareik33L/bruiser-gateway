@@ -1,0 +1,47 @@
+name: demo-nightly
+
+# Flagship 10,000-agent assertion against the real Compose/local stack.
+# Dispatch manually; schedule is the D6 nightly. This is not a Worker rewrite.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "20 3 * * *"
+
+jobs:
+  flagship:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bruiser
+          POSTGRES_PASSWORD: bruiser
+          POSTGRES_DB: bruiser
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bruiser"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+      - name: Start demo
+        env:
+          BRUISER_DATABASE_URL: postgres://bruiser:bruiser@127.0.0.1:5432/bruiser?sslmode=disable
+          HARCHESTER_DATABASE_URL: postgres://bruiser:bruiser@127.0.0.1:5432/harchester?sslmode=disable
+          POSTGRES_ADMIN_URL: postgres://bruiser:bruiser@127.0.0.1:5432/postgres?sslmode=disable
+        run: make demo-up-local
+      - name: 10,000-agent single-supporter
+        env:
+          DEMO_E2E: "1"
+          DEMO_E2E_AGENTS: "10000"
+          BRUISER_BIN: ${{ github.workspace }}/bin/bruiser
+        run: go test ./demos/e2e -count=1 -timeout 20m -run TestDemoSingleSupporterSwarm
+      - name: Stop demo
+        if: always()
+        run: make demo-down-local
