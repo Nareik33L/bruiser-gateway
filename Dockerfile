@@ -1,4 +1,4 @@
-FROM golang:1.25.0-bookworm AS build
+FROM golang:1.27.1-bookworm AS build
 WORKDIR /src
 ENV GOTOOLCHAIN=local
 ENV GOPROXY=https://proxy.golang.org,direct
