@@ -2,8 +2,8 @@
 
 **The demo is the Compose stack.** Club site, SimTix (origin + Go Edge), admin
 console, load-lab, Postgres, and the **real** Bruiser gateway. That scope is
-unchanged. This file is hosting notes only. It is not a product redesign and
-not a Worker rewrite of the demo.
+unchanged (founder direction: do not change it). This file is hosting notes
+only. It is not a product redesign and not a Worker rewrite of the demo.
 
 A `workers.dev` Worker is **not** a substitute for this environment. Do not
 replace `demos/` or `deploy/compose/docker-compose.demo.yml` with an in-Worker
@@ -40,4 +40,5 @@ make demo-up-local
 docker compose -f deploy/compose/docker-compose.demo.yml up --build
 ```
 
-See [README-demo.md](../README-demo.md) and [demo-runbook.md](demo-runbook.md).
+See [README-demo.md](../README-demo.md), [demo-runbook.md](demo-runbook.md),
+and [demo-presenter-checklist.md](demo-presenter-checklist.md).

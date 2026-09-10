@@ -71,6 +71,8 @@ func (c *console) routes() http.Handler {
 		r.Post("/swarm", c.swarm)
 		r.Post("/swarm/stop", c.swarmStop)
 		r.Post("/authority-check", c.authority)
+		r.Get("/audit", c.audit)
+		r.Get("/executions", c.executions)
 	})
 	return r
 }
@@ -220,6 +222,16 @@ func (c *console) authority(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write(out)
 }
 
+func (c *console) audit(w http.ResponseWriter, _ *http.Request) {
+	v := c.getJSON(c.gateway+"/v1/operator/audit?limit=40", map[string]string{"X-Bruiser-Operator-Secret": c.operatorSecret})
+	shared.WriteJSON(w, http.StatusOK, v)
+}
+
+func (c *console) executions(w http.ResponseWriter, _ *http.Request) {
+	v := c.getJSON(c.gateway+"/v1/operator/executions?limit=20", map[string]string{"X-Bruiser-Operator-Secret": c.operatorSecret})
+	shared.WriteJSON(w, http.StatusOK, v)
+}
+
 func errString(err error) string {
 	if err == nil {
 		return ""
@@ -235,6 +247,7 @@ func pageShell(title, body string) string {
 header{padding:16px 24px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between}
 main{width:min(1100px,calc(100%% - 32px));margin:24px auto}
 .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+@media (max-width:900px){.tiles{grid-template-columns:repeat(2,1fr)}}
 .tile{background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:14px;padding:14px}
 .tile b{display:block;font-size:1.6rem}
 .tile span{color:var(--muted);font-size:12px}
@@ -242,6 +255,10 @@ main{width:min(1100px,calc(100%% - 32px));margin:24px auto}
 button,select,input{background:#151821;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font:inherit}
 button.primary{background:var(--lime);color:#111;font-weight:800;border:0}
 pre{background:#151821;padding:12px;border-radius:10px;overflow:auto;max-height:320px;font-size:12px}
+.cert{background:#151821;padding:16px;border-radius:12px;border:1px solid var(--line);margin:12px 0}
+.cert.pass{border-color:var(--lime)}
+.cert.fail{border-color:#ff6b4a}
+.cert ul{margin:8px 0 0;padding-left:18px}
 .form label{display:block;margin:12px 0}
 h1{font-weight:500}
 </style></head><body>
@@ -251,7 +268,7 @@ h1{font-weight:500}
 
 const dashboardHTML = `
 <h1>One customer remains one customer.</h1>
-<p>Live view of the authoritative control layer in front of SimTix. Sources named on each tile.</p>
+<p>Live view of the authoritative control layer in front of SimTix. Sources named on each tile. Never a queue: held-back agents are BUSY.</p>
 <div class="tiles" id="tiles"></div>
 <div class="row">
   <button class="primary" onclick="resetDemo()">Reset demo</button>
@@ -265,6 +282,7 @@ const dashboardHTML = `
     <option value="100" selected>100%</option>
   </select>
   <button onclick="runCheck()">Run Authority Check</button>
+  <button onclick="loadAudit()">Refresh audit</button>
 </div>
 <h2>Agent Lab</h2>
 <div class="row">
@@ -272,15 +290,22 @@ const dashboardHTML = `
   <input id="pw" value="password" placeholder="Password">
   <select id="preset"><option value="single">Single supporter</option><option value="multi">1,000 × 10</option></select>
   <select id="n">
-    <option>1</option><option>50</option><option>500</option><option>5000</option><option selected>10000</option>
+    <option>1</option><option>50</option><option>200</option><option>500</option><option>5000</option><option selected>10000</option>
   </select>
   <button class="primary" onclick="launch()">Launch</button>
   <button onclick="stopSwarm()">Stop</button>
 </div>
+<h2>Authority Check certificate</h2>
+<div id="cert" class="cert idle">Run Authority Check to mint a certificate against this Edge.</div>
+<h2>Audit (append-only; reset does not delete)</h2>
+<pre id="audit">—</pre>
+<h2>Load-lab / edge</h2>
 <pre id="log">waiting for snapshot…</pre>
 <script>
 const tiles = document.getElementById('tiles');
 const log = document.getElementById('log');
+const cert = document.getElementById('cert');
+const auditEl = document.getElementById('audit');
 const es = new EventSource('/events');
 es.addEventListener('snapshot', (e) => {
   const d = JSON.parse(e.data);
@@ -329,9 +354,22 @@ async function launch(){
 }
 async function stopSwarm(){ await fetch('/swarm/stop', {method:'POST'}); }
 async function runCheck(){
+  cert.className = 'cert idle';
+  cert.textContent = 'Running…';
   const res = await fetch('/authority-check', {method:'POST'});
   const t = await res.text();
-  log.textContent = t;
+  let d;
+  try { d = JSON.parse(t); } catch(e) { cert.className='cert fail'; cert.textContent = t; return; }
+  const ok = d.overall === 'PASS';
+  cert.className = 'cert ' + (ok ? 'pass' : 'fail');
+  const probes = (d.probes||[]).map(p => '<li><strong>'+(p.pass?'PASS':'FAIL')+'</strong> '+p.name+(p.detail? ' — '+p.detail:'')+'</li>').join('');
+  cert.innerHTML = '<div><b>Overall Result: '+(d.overall||'?')+'</b></div><ul>'+probes+'</ul>';
 }
+async function loadAudit(){
+  const res = await fetch('/audit');
+  const d = await res.json();
+  auditEl.textContent = JSON.stringify(d, null, 2);
+}
+loadAudit();
 </script>
 `

@@ -1,3 +1,8 @@
+# Origin routing for the Harchester Compose demo (on the VM).
+# Public hosting puts Cloudflare DNS + proxy in front of this origin.
+# Optional Cloudflare Access belongs on the admin hostname, not here.
+# Gateway and load-lab stay unpublished.
+
 harchester.localhost {
 	reverse_proxy harchester:8100
 }

@@ -38,3 +38,39 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build container
         run: docker build -t bruiser-gateway:ci .
+
+  demo-e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bruiser
+          POSTGRES_PASSWORD: bruiser
+          POSTGRES_DB: bruiser
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bruiser"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+      - name: Start Harchester Compose demo (local binaries)
+        env:
+          BRUISER_DATABASE_URL: postgres://bruiser:bruiser@127.0.0.1:5432/bruiser?sslmode=disable
+          HARCHESTER_DATABASE_URL: postgres://bruiser:bruiser@127.0.0.1:5432/harchester?sslmode=disable
+          POSTGRES_ADMIN_URL: postgres://bruiser:bruiser@127.0.0.1:5432/postgres?sslmode=disable
+        run: make demo-up-local
+      - name: Demo e2e (200-agent single + 50×4 multi)
+        env:
+          DEMO_E2E: "1"
+          BRUISER_BIN: bin/bruiser
+        run: make demo-e2e
+      - name: Stop demo
+        if: always()
+        run: make demo-down-local

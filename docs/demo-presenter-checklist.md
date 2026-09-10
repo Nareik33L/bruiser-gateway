@@ -1,0 +1,51 @@
+# Presenter checklist — Harchester United demo
+
+Use with [demo-runbook.md](demo-runbook.md). Vocabulary (ADR-020): Bruiser is
+the **authoritative control layer** that ensures one customer remains one
+customer. Never: middleware, proxy, API gateway, bot detection, Redis lock,
+DDoS.
+
+## Before the room
+
+- [ ] `make demo-up-local` (or Compose) is healthy: club `:8100`, tickets `:8091`, admin `:8110`.
+- [ ] Admin password `harchester`. Enforcement **100 %**.
+- [ ] **Reset demo** so Scenario 1 starts clean.
+- [ ] Browser windows: club (supporter), admin (operator). Do not show the gateway port.
+- [ ] Confirm club home has no Bruiser branding.
+
+## Scenario 1 — Normal purchase (~2 min)
+
+- [ ] Sign in `1001234` / `password` (Alice Okafor, Gold).
+- [ ] Buy Arsenal tickets → land on SimTix already signed in → hold → checkout.
+- [ ] Admin: 1 attempt, 1 forwarded, observed EAF 1.0×, 1 seat sold.
+- [ ] Optional: `1000002` / `password` (Sam Quinn) is not eligible.
+
+## Scenario 2 — Flagship swarm (~3 min)
+
+- [ ] Agent Lab: `1001234`, **10,000**, single-supporter, Launch.
+- [ ] Say: every agent is a real login and a real hold against the **real** gateway.
+- [ ] Expect: 10,000 authenticated · **1** execution forwarded · ~9,999 held back (BUSY) · downstream EAF 1× · **1** seat sold.
+- [ ] If the run feels slow, blame Postgres session inserts (R4), not "a queue".
+
+## Scenario 3 — Dry Run (~2 min)
+
+- [ ] Reset demo → **Dry Run** → same swarm.
+- [ ] Expect would-have-blocked ≈ 9,999; seats churn; Authority Check **FAIL**.
+- [ ] Reset before the next scenario.
+
+## Scenario 4 — Rollout (~3 min)
+
+- [ ] Preset **1,000 × 10**. Run 10 %, reset, 50 %, reset, 100 %.
+- [ ] Same supporter stays in the same bucket (deterministic Edge assignment).
+
+## Close — Authority Check (~1 min)
+
+- [ ] Enforcement 100 %. Run Authority Check.
+- [ ] Overall **PASS**, including direct allocation bypass blocked.
+- [ ] Show the certificate (probes), not a screenshot of Prometheus.
+
+## Hosting (if asked)
+
+Cloudflare is DNS + proxy in front of the VM running this Compose stack.
+Optional Access on the admin hostname. A Worker Edge is stretch, not this demo.
+See [09-harchester-cloudflare.md](09-harchester-cloudflare.md).

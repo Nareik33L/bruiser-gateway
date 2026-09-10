@@ -25,6 +25,22 @@ export LOADLAB_URL=http://127.0.0.1:8120
 export BRUISER_URL=http://127.0.0.1:8080
 export BRUISER_BIN="$ROOT/bin/bruiser"
 
+bash "$ROOT/scripts/demo-prepare-db.sh"
+
+wait_http() {
+  local url="$1" name="$2"
+  for i in $(seq 1 120); do
+    if curl -fsS "$url" >/dev/null 2>&1; then
+      echo "$name ready"
+      return 0
+    fi
+    sleep 0.5
+  done
+  echo "$name failed to become ready: $url" >&2
+  tail -n 40 "$PIDDIR/${name}.log" >&2 || true
+  return 1
+}
+
 start() {
   local name="$1"; shift
   echo "starting $name"
@@ -37,6 +53,12 @@ start simtix "$ROOT/bin/simtix-demo"
 start harchester "$ROOT/bin/harchester"
 start loadlab "$ROOT/bin/loadlab"
 start admin "$ROOT/bin/admin"
+
+wait_http "http://127.0.0.1:8080/healthz" gateway
+wait_http "http://127.0.0.1:8090/healthz" simtix
+wait_http "http://127.0.0.1:8100/healthz" harchester
+wait_http "http://127.0.0.1:8120/healthz" loadlab
+wait_http "http://127.0.0.1:8110/healthz" admin
 
 echo "demo processes started. logs in $PIDDIR"
 echo "  club    http://127.0.0.1:8100"

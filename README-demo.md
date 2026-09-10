@@ -8,6 +8,7 @@ would deploy it.
 
 Full scope: [docs/08-harchester-demo-scope.md](docs/08-harchester-demo-scope.md).
 Runbook: [docs/demo-runbook.md](docs/demo-runbook.md).
+Presenter checklist: [docs/demo-presenter-checklist.md](docs/demo-presenter-checklist.md).
 Hosting (VM origin; Cloudflare DNS/proxy only): [docs/09-harchester-cloudflare.md](docs/09-harchester-cloudflare.md).
 
 ## DEMO ONLY — plaintext passwords
@@ -41,6 +42,7 @@ Then:
 ```bash
 make demo-check          # Authority Check against the live Edge
 make demo-reset          # seats, executions, swarm — not supporter rows
+make demo-e2e            # 200-agent + 50×4 swarms (stack must be up)
 make demo-down-local
 ```
 

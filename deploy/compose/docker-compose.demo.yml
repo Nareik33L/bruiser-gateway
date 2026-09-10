@@ -118,5 +118,19 @@ services:
       - loadlab
       - harchester
 
+  # Optional hostname front-door on the VM (D0). Public Cloudflare sits in
+  # front of this origin when hosted. Not a Worker rewrite.
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["hostnames"]
+    ports:
+      - "80:80"
+    volumes:
+      - ../caddy/Caddyfile.demo:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - harchester
+      - simtix
+      - admin
+
 volumes:
   bruiser-demo-pg:

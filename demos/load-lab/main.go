@@ -111,13 +111,14 @@ func (l *lab) auth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 type startReq struct {
-	Membership string `json:"membership_number"`
-	Password   string `json:"password"`
-	Agents     int    `json:"agents"`
-	SpawnPerS  int    `json:"spawn_per_s"`
-	RetrySec   int    `json:"retry_window_sec"`
-	Preset     string `json:"preset"` // single | multi
-	Supporters int    `json:"supporters"`
+	Membership      string `json:"membership_number"`
+	Password        string `json:"password"`
+	Agents          int    `json:"agents"`
+	SpawnPerS       int    `json:"spawn_per_s"`
+	RetrySec        int    `json:"retry_window_sec"`
+	Preset          string `json:"preset"` // single | multi
+	Supporters      int    `json:"supporters"`
+	StartMembership int    `json:"start_membership"`
 }
 
 func (l *lab) start(w http.ResponseWriter, r *http.Request) {
@@ -149,6 +150,9 @@ func (l *lab) start(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Supporters < 1 {
 		req.Supporters = 1000
+	}
+	if req.StartMembership < 1 {
+		req.StartMembership = seed.FirstMembership
 	}
 
 	l.mu.Lock()
@@ -264,7 +268,7 @@ func (l *lab) execute(ctx context.Context, rn *run, req startReq) {
 			defer func() { <-sem }()
 			mem := req.Membership
 			if req.Preset == "multi" {
-				mem = strconv.Itoa(seed.FirstMembership + (idx % req.Supporters))
+				mem = strconv.Itoa(req.StartMembership + (idx % req.Supporters))
 			}
 			res := l.agent(ctx, mem, req.Password, time.Duration(req.RetrySec)*time.Second)
 			if res.authenticated {

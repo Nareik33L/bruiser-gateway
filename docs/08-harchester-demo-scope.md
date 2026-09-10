@@ -8,6 +8,13 @@ in this tree, fills the gaps that would have surfaced during build, and sequence
 the work as milestones with exit criteria. Where this document changes the brief,
 the change is called out in **§2** so the original author can accept or reject it.
 
+**Scope lock.** This environment is the full Compose demo: club site, SimTix
+(origin + Edge), admin console, load-lab, Postgres, and the **real** Bruiser
+gateway. Do not replace it with a Worker-only or `workers.dev` rewrite, and do
+not gut `demos/` for a free-tier substitute. Cloudflare's role is documented in
+§9 (DNS + proxy in front of a VM origin; optional Access on admin). A Worker
+Edge remains stretch, not a scope replacement.
+
 The demo is the M6 "Demonstration" milestone of
 [03-execution-plan.md](03-execution-plan.md), made concrete: a fictional club
 website, a fictional ticketing platform, an operations console and a swarm
@@ -600,13 +607,14 @@ solved).
   when something is slow, and the ADR-020 vocabulary.
 - Hosting per §9; presenter checklist; recorded 90-second video (execution plan
   M6).
-- Stretch: Cloudflare Worker reference edge in `deploy/edge/cloudflare-worker/`
-  implementing §5.2, used in the hosted deployment instead of the Go edge. This
-  closes an M3 gap and makes "Cloudflare-ready" literal.
+- Stretch only (not a substitute for this environment): a Cloudflare Worker
+  reference Edge in `deploy/edge/cloudflare-worker/` that implements the same
+  `POST /v1/authorize` contract as the Go Edge. Hosted demos still run the full
+  Compose stack on a VM; Cloudflare in front is DNS + proxy, not the app.
 
 Exit: someone outside the team runs the demo from `README-demo.md` without help;
-hosted URLs live behind Cloudflare with the console behind Access; CI asserts the
-headline numbers.
+hosted URLs (when a domain exists) live behind Cloudflare DNS/proxy with the
+console behind optional Access; CI asserts the headline numbers.
 
 ---
 

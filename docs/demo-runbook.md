@@ -39,3 +39,5 @@ executions and seats between runs. Same supporter stays in the same bucket.
 
 At 100 %, Run Authority Check → PASS including "Direct allocation bypass
 blocked" → show the JSON certificate.
+
+Presenter checklist: [demo-presenter-checklist.md](demo-presenter-checklist.md).
