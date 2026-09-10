@@ -17,31 +17,46 @@ import (
 )
 
 type Config struct {
-	EdgeURL      string
-	OriginURL    string
-	ControlURL   string
-	AdminURL     string
-	HMACSecret   string
-	EdgeSecret   string
-	OriginSecret string
-	AdminSecret  string
-	Membership   string
-	EventID      string
-	Timeout      time.Duration
+	EdgeURL             string
+	OriginURL           string
+	ControlURL          string
+	AdminURL            string
+	HMACSecret          string
+	EdgeSecret          string
+	OriginSecret        string
+	AdminSecret         string
+	OperatorSecret      string
+	Membership          string
+	EventID             string
+	Timeout             time.Duration
+	StoreDownURL        string
+	StoreDownEdgeSecret string
+	StoreDownHMAC       string
+	CommitSHA           string
+	// Production forces certificate-mode detection. Leave false to read
+	// production from the admin status payload.
+	Production bool
+
+	detectedProduction bool
 }
 
 type Probe struct {
-	Name     string `json:"name"`
-	Pass     bool   `json:"pass"`
-	Status   string `json:"status"`
-	Detail   string `json:"detail"`
-	Blocking bool   `json:"blocking,omitempty"`
+	Name     string    `json:"name"`
+	Pass     bool      `json:"pass"`
+	Status   string    `json:"status"`
+	Detail   string    `json:"detail"`
+	Blocking bool      `json:"blocking,omitempty"`
+	Evidence *Evidence `json:"evidence,omitempty"`
 }
 
 type Report struct {
-	Probes  []Probe  `json:"probes"`
-	Overall string   `json:"overall"`
-	Covered []string `json:"covered"`
+	Probes        []Probe      `json:"probes"`
+	Overall       string       `json:"overall"`
+	Covered       []string     `json:"covered"`
+	CommitSHA     string       `json:"commit_sha"`
+	CorpusVersion string       `json:"corpus_version"`
+	Production    bool         `json:"production"`
+	Certificate   *Certificate `json:"certificate,omitempty"`
 }
 
 func (r Report) String() string {
@@ -62,6 +77,14 @@ func (r Report) String() string {
 		}
 	}
 	fmt.Fprintf(&b, "\n  Overall Result: %s\n", r.Overall)
+	fmt.Fprintf(&b, "  Commit: %s\n  Corpus: %s\n  Production: %t\n", r.CommitSHA, r.CorpusVersion, r.Production)
+	if r.Certificate != nil {
+		if r.Certificate.Issued {
+			fmt.Fprintf(&b, "\n  Certificate: ISSUED\n")
+		} else {
+			fmt.Fprintf(&b, "\n  Certificate: NOT ISSUED — %s\n", r.Certificate.Reason)
+		}
+	}
 	if len(r.Covered) > 0 {
 		b.WriteString("\n  Covered paths (lab; replace from discovery):\n")
 		for _, c := range r.Covered {
@@ -101,6 +124,21 @@ func Run(cfg Config) (Report, error) {
 	if cfg.AdminSecret == "" {
 		cfg.AdminSecret = "admin-secret-dev"
 	}
+	if cfg.OperatorSecret == "" {
+		cfg.OperatorSecret = os.Getenv("BRUISER_OPERATOR_SECRET")
+	}
+	if cfg.OperatorSecret == "" {
+		cfg.OperatorSecret = "operator-secret-dev"
+	}
+	if cfg.HMACSecret == "" {
+		cfg.HMACSecret = os.Getenv("BRUISER_DEV_HMAC_SECRET")
+	}
+	if cfg.HMACSecret == "" {
+		cfg.HMACSecret = "dev-secret-change-me"
+	}
+	if cfg.StoreDownURL == "" {
+		cfg.StoreDownURL = os.Getenv("BRUISER_STORE_DOWN_URL")
+	}
 	if cfg.AdminURL == "" {
 		cfg.AdminURL = os.Getenv("BRUISER_ADMIN_URL")
 	}
@@ -110,8 +148,19 @@ func Run(cfg Config) (Report, error) {
 	control := strings.TrimRight(cfg.ControlURL, "/")
 	admin := strings.TrimRight(cfg.AdminURL, "/")
 	holdPath := "/api/events/" + cfg.EventID + "/holds"
+	run := &runner{
+		cfg:     cfg,
+		client:  client,
+		origin:  origin,
+		control: control,
+		admin:   admin,
+	}
+	run.cfg.detectedProduction = run.detectProduction()
 
 	rep := Report{
+		CommitSHA:     resolveCommitSHA(cfg.CommitSHA),
+		CorpusVersion: CorpusVersion,
+		Production:    run.cfg.detectedProduction,
 		Covered: []string{
 			"GET /api/events (search, uncontrolled)",
 			"POST " + holdPath + " (hold, enforcement front)",
@@ -120,6 +169,9 @@ func Run(cfg Config) (Report, error) {
 			"spoofed identity headers",
 			"unlisted / alternate allocation paths",
 			"stale and tampered credentials",
+			"nine-variant + Unicode resource corpus",
+			"forged execution + origin secret",
+			"stale-fence token + origin secret",
 		},
 	}
 
@@ -428,140 +480,9 @@ func Run(cfg Config) (Report, error) {
 		return pass("spoofed host/path headers did not allocate (%d)", resp.StatusCode)
 	}))
 
-	rep.Probes = append(rep.Probes, probe("Resource variants share one domain", func() Probe {
-		if control == "" {
-			return fail("--control is required to prove canonical resource domains")
-		}
-		tok, err := auth.IssueBoxOfficeSession(cfg.HMACSecret, fmt.Sprintf("canon-%d", time.Now().UnixNano()), time.Hour)
-		if err != nil {
-			return fail("%s", err.Error())
-		}
-		hdr := map[string]string{
-			"Cookie":                simtix.CookieName + "=" + tok,
-			"X-Bruiser-Edge-Secret": cfg.EdgeSecret,
-		}
-		code1, body1 := postJSON(client, control+"/v1/authorize", hdr, map[string]string{
-			"method": "POST", "path": "/api/events/" + cfg.EventID + "/holds",
-		})
-		if code1 != http.StatusOK {
-			return fail("canonical authorize failed (%d) %s", code1, body1)
-		}
-		var a1 map[string]any
-		_ = json.Unmarshal([]byte(body1), &a1)
-		code2, body2 := postJSON(client, control+"/v1/authorize", hdr, map[string]string{
-			"method": "POST", "path": "/api/events/" + strings.ToUpper(cfg.EventID) + "/holds/",
-		})
-		if code2 == http.StatusConflict {
-			return fail("path variant created a second domain (%d) %s", code2, body2)
-		}
-		if code2 != http.StatusOK {
-			return fail("variant authorize %d %s", code2, body2)
-		}
-		var a2 map[string]any
-		_ = json.Unmarshal([]byte(body2), &a2)
-		if id1, _ := a1["execution_id"].(string); id1 != "" {
-			if id2, _ := a2["execution_id"].(string); id2 != "" && id1 != id2 {
-				return fail("variants minted two executions %s vs %s", id1, id2)
-			}
-		}
-		return pass("case/slash variants stayed on one execution")
-	}))
-
-	rep.Probes = append(rep.Probes, probe("Cosmetic resource variants share one domain", func() Probe {
-		if control == "" {
-			return fail("--control is required to prove cosmetic resource variants share one domain")
-		}
-		tok, err := auth.IssueBoxOfficeSession(cfg.HMACSecret, fmt.Sprintf("lookalike-%d", time.Now().UnixNano()), time.Hour)
-		if err != nil {
-			return fail("%s", err.Error())
-		}
-		hdr := map[string]string{
-			"Cookie":                simtix.CookieName + "=" + tok,
-			"X-Bruiser-Edge-Secret": cfg.EdgeSecret,
-		}
-		code1, body1 := postJSON(client, control+"/v1/authorize", hdr, map[string]string{
-			"method": "POST", "path": "/api/events/" + cfg.EventID + "/holds",
-		})
-		if code1 != http.StatusOK {
-			return fail("canonical authorize failed (%d) %s", code1, body1)
-		}
-		var a1 map[string]any
-		_ = json.Unmarshal([]byte(body1), &a1)
-		id1, _ := a1["execution_id"].(string)
-		for _, path := range []string{
-			"/api/events/ars-che./holds",
-			"/api/events/ars-che-/holds",
-			"/api/events/ars-che_/holds",
-			"/api/events/ars-che!/holds",
-			"/api/events/ars-che@/holds",
-			"/api/events/ars–che/holds",
-			"/api/events/ars‐che/holds",
-		} {
-			code, body := postJSON(client, control+"/v1/authorize", hdr, map[string]string{
-				"method": "POST", "path": path,
-			})
-			if code == http.StatusCreated {
-				return fail("variant %s minted a second ACTIVE (%d) %s", path, code, body)
-			}
-			if code == http.StatusBadRequest {
-				return fail("variant %s rejected instead of folding (%d) %s", path, code, body)
-			}
-			if code >= 200 && code < 300 {
-				var a2 map[string]any
-				_ = json.Unmarshal([]byte(body), &a2)
-				if id2, _ := a2["execution_id"].(string); id1 != "" && id2 != "" && id1 != id2 {
-					return fail("variant %s minted execution %s vs %s", path, id2, id1)
-				}
-			}
-		}
-		code, body := postJSON(client, control+"/v1/authorize", hdr, map[string]string{
-			"method": "POST", "path": "/api/events/ars:che/holds",
-		})
-		if code >= 200 && code < 300 && strings.Contains(body, "execution_id") && !strings.Contains(body, `"status":"BUSY"`) {
-			return fail("extra-colon lookalike minted an execution (%d) %s", code, body)
-		}
-		return pass("trailing punct and Unicode hyphens folded onto one domain")
-	}))
-
-	rep.Probes = append(rep.Probes, probe("Forged execution rejected at origin", func() Probe {
-		if origin == "" {
-			return fail("--origin is required")
-		}
-		code, body := postJSON(client, origin+holdPath, map[string]string{
-			"X-Bruiser-Origin-Secret": cfg.OriginSecret,
-			"X-Bruiser-Execution":     "forged.not.signed",
-			"X-Bruiser-Fence":         "1",
-		}, map[string]int{"seats": 1})
-		if code >= 200 && code < 300 {
-			return fail("origin accepted forged execution with a valid origin secret (%d) %s", code, body)
-		}
-		if code != http.StatusUnauthorized && code != http.StatusForbidden {
-			return fail("forged execution want 401/403 got %d %s", code, body)
-		}
-		return pass("forged execution + valid origin secret rejected (%d)", code)
-	}))
-
-	rep.Probes = append(rep.Probes, probe("Modified fence rejected", func() Probe {
-		if origin == "" || control == "" {
-			return fail("--origin and --control are required")
-		}
-		exe, err := mintHoldExecution(client, control, cfg, fmt.Sprintf("fence-%d", time.Now().UnixNano()))
-		if err != nil {
-			return fail("%s", err.Error())
-		}
-		code, body := postJSON(client, origin+holdPath, map[string]string{
-			"X-Bruiser-Origin-Secret": cfg.OriginSecret,
-			"X-Bruiser-Execution":     exe.Token,
-			"X-Bruiser-Fence":         "999999",
-		}, map[string]int{"seats": 1})
-		if code >= 200 && code < 300 {
-			return fail("origin accepted modified fence with a valid origin secret (%d) %s", code, body)
-		}
-		if code != http.StatusUnauthorized && code != http.StatusForbidden {
-			return fail("modified fence want 401/403 got %d %s", code, body)
-		}
-		return pass("valid token + modified fence rejected (%d)", code)
-	}))
+	rep.Probes = append(rep.Probes, probe("Resource variants share one domain", run.resourceVariants))
+	rep.Probes = append(rep.Probes, probe("Forged execution rejected at origin", run.forgedOrigin))
+	rep.Probes = append(rep.Probes, probe("Stale fence rejected at origin", run.staleFenceOrigin))
 
 	rep.Probes = append(rep.Probes, probe("Expired execution rejected at origin", func() Probe {
 		if origin == "" {
@@ -665,6 +586,14 @@ func Run(cfg Config) (Report, error) {
 		return fail("legitimate hold via Bruiser failed (%d) %s", code, body)
 	}))
 
+	rep.Probes = append(rep.Probes, probe("Identity forgery rejected (dev assertions off)", run.identityForgeryDevAssertionsOff))
+	rep.Probes = append(rep.Probes, probe("Session revocation takes effect", run.sessionRevocation))
+	rep.Probes = append(rep.Probes, probe("Replay rejected", run.replayRejected))
+	rep.Probes = append(rep.Probes, probe("Budget enforced", run.budgetEnforced))
+	rep.Probes = append(rep.Probes, probe("Admin surface not on public listener", run.adminNotOnPublic))
+	rep.Probes = append(rep.Probes, probe("Fail-closed on store outage", run.failClosedStoreOutage))
+	rep.Probes = append(rep.Probes, probe("Production secret validation", run.productionSecrets))
+
 	finalize(&rep)
 	return rep, nil
 }
@@ -688,7 +617,7 @@ func normalizeProbe(p *Probe) {
 			p.Status = "FAIL"
 		}
 	}
-	p.Pass = p.Status != "FAIL"
+	p.Pass = p.Status == "PASS"
 }
 
 func pass(format string, args ...any) Probe {
@@ -706,12 +635,14 @@ func failProbe(name, detail string) Probe {
 }
 
 func finalize(rep *Report) {
-	failN, blockWarn := 0, 0
+	failN, blockWarn, inconclusiveN := 0, 0, 0
 	for i := range rep.Probes {
 		normalizeProbe(&rep.Probes[i])
 		switch rep.Probes[i].Status {
 		case "FAIL":
 			failN++
+		case "INCONCLUSIVE":
+			inconclusiveN++
 		case "WARN":
 			if rep.Probes[i].Blocking {
 				blockWarn++
@@ -726,6 +657,8 @@ func finalize(rep *Report) {
 	default:
 		rep.Overall = "PASS"
 	}
+	_ = inconclusiveN
+	rep.Certificate = issueCertificate(rep)
 }
 
 func cookieHeader(tok string) map[string]string {

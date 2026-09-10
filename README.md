@@ -126,7 +126,7 @@ platform origin Bruiser sits in front of (Edge), not club-owned checkout
 export BRUISER_DATABASE_URL=postgres://bruiser:bruiser@127.0.0.1:5432/bruiser?sslmode=disable
 make serve            # :8080 control plane; BRUISER_PROXY_ADDR=:8081 for Proxy
 make simtix           # :8090 origin (lockdown) + :8091 Edge analogue
-make authority-check  # Overall Result PASS; writes AUTHORITY_CHECK
+make authority-check  # Overall Result PASS; writes AUTHORITY_CHECK.json
 make eaf-demo         # unaware swarm; observed EAF ~N×, downstream 1×
 # Dashboard: http://127.0.0.1:8080/admin  (admin/edge secret)
 ```

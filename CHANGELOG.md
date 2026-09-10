@@ -23,9 +23,16 @@
   Bruiser execution JWT + fence. Example budget is `max_ops: 1`.
   Production rejects `extractor: auto` plus an unsigned customer header
   unless `allow_unsigned_header` is set.
+- Authority Check is an adversarial checklist with request/response
+  evidence. Forged-token and stale-fence probes send the origin secret
+  with the bad credential (403). Resource variants use the nine-variant
+  Unicode corpus. INCONCLUSIVE is never PASS. A certificate is issued
+  only when every probe passes on a production-configured instance; it
+  embeds commit SHA and corpus version. `bruiser authority-check --json`.
 - RC1 `make soak` (10k agents, 30m) re-run: ACTIVE=1, 3.46M requests,
   0 errors, p50 27ms / p99 51ms. About 12% fewer requests than the
   V1 3.94M baseline; latency and health at or better.
+
 
 ### Added
 

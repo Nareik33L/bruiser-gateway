@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -23,6 +24,11 @@ func cmdAuthorityCheck() error {
 	secret := fs.String("hmac-secret", env("BRUISER_DEV_HMAC_SECRET", ""), "HMAC used to mint box-office cookies")
 	membership := fs.String("membership", "1001234", "7-digit membership number analogue")
 	eventID := fs.String("event", "ars-che", "event id")
+	storeDown := fs.String("store-down", env("BRUISER_STORE_DOWN_URL", ""), "control URL of an instance whose store is already down (fail-closed probe)")
+	jsonOut := fs.Bool("json", false, "print the report as JSON")
+	outFile := fs.String("out", "", "write JSON report to this path")
+	requireCert := fs.Bool("require-certificate", false, "exit non-zero unless a production certificate is issued")
+	commit := fs.String("commit", env("BRUISER_COMMIT_SHA", ""), "commit SHA to embed (default: VCS stamp)")
 	if err := fs.Parse(os.Args[2:]); err != nil {
 		return err
 	}
@@ -40,23 +46,46 @@ func cmdAuthorityCheck() error {
 		*adminURL = env("BRUISER_CHECK_ADMIN_URL", "http://127.0.0.1:8082")
 	}
 	rep, err := check.Run(check.Config{
-		EdgeURL:    front,
-		OriginURL:  *originURL,
-		ControlURL: *controlURL,
-		AdminURL:   *adminURL,
-		HMACSecret: *secret,
-		Membership: *membership,
-		EventID:    *eventID,
+		EdgeURL:      front,
+		OriginURL:    *originURL,
+		ControlURL:   *controlURL,
+		AdminURL:     *adminURL,
+		HMACSecret:   *secret,
+		Membership:   *membership,
+		EventID:      *eventID,
+		StoreDownURL: *storeDown,
+		CommitSHA:    *commit,
 	})
 	if err != nil {
 		return err
 	}
-	fmt.Print(rep.String())
+	raw, err := json.MarshalIndent(rep, "", "  ")
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	if *outFile != "" {
+		if err := os.WriteFile(*outFile, raw, 0o644); err != nil {
+			return err
+		}
+	}
+	if *jsonOut {
+		fmt.Print(string(raw))
+	} else {
+		fmt.Print(rep.String())
+	}
 	if err := persistAuthorityCheck(rep); err != nil {
 		fmt.Fprintf(os.Stderr, "authority-check audit not persisted: %v\n", err)
 	}
 	if !rep.Passed() {
 		return fmt.Errorf("authority check FAIL")
+	}
+	if *requireCert && !rep.CertificateIssued() {
+		reason := "certificate not issued"
+		if rep.Certificate != nil && rep.Certificate.Reason != "" {
+			reason = rep.Certificate.Reason
+		}
+		return fmt.Errorf("authority certificate: %s", reason)
 	}
 	return nil
 }
@@ -75,9 +104,13 @@ func persistAuthorityCheck(rep check.Report) error {
 	defer store.Close()
 	reason := rep.Overall
 	attrs := map[string]any{
-		"overall": rep.Overall,
-		"probes":  rep.Probes,
-		"covered": rep.Covered,
+		"overall":        rep.Overall,
+		"probes":         rep.Probes,
+		"covered":        rep.Covered,
+		"commit_sha":     rep.CommitSHA,
+		"corpus_version": rep.CorpusVersion,
+		"production":     rep.Production,
+		"certificate":    rep.Certificate,
 	}
 	return store.WriteAudit(ctx, cfg.MerchantID, "AUTHORITY_CHECK", reason, "", attrs)
 }

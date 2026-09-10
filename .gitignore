@@ -18,3 +18,4 @@ pycache/
 tmp/
 vendor/
 .vscode/
+AUTHORITY_CHECK.json

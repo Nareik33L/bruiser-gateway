@@ -34,17 +34,7 @@ const (
 // CosmeticVariants are the nine RC1 retest strings that used to mint nine
 // ACTIVE domains. They must fold to one identifier.
 func CosmeticVariants(base string) []string {
-	return []string{
-		base,
-		base + ".",
-		base + "-",
-		base + "_",
-		base + "!",
-		base + "@",
-		base + "   ",
-		base + string(rune(0x2010)),
-		base + string(rune(0x2013)),
-	}
+	return resource.CosmeticVariants(base)
 }
 
 func Folded(raw string) string {

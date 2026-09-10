@@ -5,25 +5,9 @@ import (
 	"unicode/utf8"
 )
 
-// cupfinalVariants are the nine RC1 retest strings that minted nine ACTIVE
-// domains for one customer. They must fold to one ID.
-func cupfinalVariants() []string {
-	return []string{
-		"ticket:cupfinal",
-		"ticket:cupfinal.",
-		"ticket:cupfinal-",
-		"ticket:cupfinal_",
-		"ticket:cupfinal!",
-		"ticket:cupfinal@",
-		"ticket:cupfinal   ",
-		"ticket:cupfinal" + string(rune(0x2010)), // U+2010 hyphen
-		"ticket:cupfinal" + string(rune(0x2013)), // U+2013 en dash
-	}
-}
-
 func TestCanonicalCupfinalVariants(t *testing.T) {
 	want := "ticket:cupfinal"
-	for _, in := range cupfinalVariants() {
+	for _, in := range CupfinalCorpus() {
 		got, err := Canonical(in)
 		if err != nil || got != want {
 			t.Fatalf("%q → %q %v want %s", in, got, err, want)
@@ -93,7 +77,7 @@ func TestCatalogueResolvesFoldedID(t *testing.T) {
 }
 
 func TestCanonicalIdempotent(t *testing.T) {
-	for _, in := range append(cupfinalVariants(), "EVENT:ARS-CHE/", "event:ars–che") {
+	for _, in := range append(CupfinalCorpus(), "EVENT:ARS-CHE/", "event:ars–che") {
 		got, err := Canonical(in)
 		if err != nil {
 			t.Fatalf("%q %v", in, err)
@@ -106,7 +90,7 @@ func TestCanonicalIdempotent(t *testing.T) {
 }
 
 func FuzzCanonical(f *testing.F) {
-	for _, in := range cupfinalVariants() {
+	for _, in := range CupfinalCorpus() {
 		f.Add(in)
 	}
 	for _, in := range []string{

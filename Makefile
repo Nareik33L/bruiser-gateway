@@ -64,7 +64,7 @@ simtix: build
 	$(SIMTIX)
 
 authority-check: build
-	$(LAB_ENV) $(BIN) authority-check --front http://127.0.0.1:8091 --origin http://127.0.0.1:8090 --control http://127.0.0.1:8080 --admin http://127.0.0.1:8082
+	$(LAB_ENV) $(BIN) authority-check --front http://127.0.0.1:8091 --origin http://127.0.0.1:8090 --control http://127.0.0.1:8080 --admin http://127.0.0.1:8082 --json --out AUTHORITY_CHECK.json
 
 doctor: build
 	$(LAB_ENV) $(BIN) doctor --profile configs/example.yaml --skip-store

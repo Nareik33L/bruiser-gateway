@@ -268,17 +268,20 @@ must be PASS.
 
 ## Authority Check classification
 
-Each probe is `PASS`, `FAIL`, or `WARN`.
+Each probe is `PASS`, `FAIL`, `WARN`, or `INCONCLUSIVE`.
 
-- **FAIL** — a request allocated around Bruiser. Overall `FAIL`.
+- **FAIL** — a request allocated around Bruiser, or an adversarial input
+  was accepted. Overall `FAIL`.
+- **INCONCLUSIVE** — the probe could not send the input it claims to
+  test (no store-down URL, HMAC lab assertions still on, unlimited
+  budget). INCONCLUSIVE is never PASS. Overall may still be `PASS`; a
+  certificate is not issued.
 - **WARN** (blocking) — a required surface was not provided (no origin
   URL), so authority cannot be proven. Overall `WARN`.
-- **WARN** (non-blocking) — an optional probe was skipped (no
-  `--control` URL) or an alternate path was absent (404). Overall stays
-  `PASS` if every required probe passed.
-- **PASS** overall — Bruiser is authoritative for the covered
-  allocation operation under that deployment.
+- **PASS** overall — no FAIL. Bruiser is authoritative for the covered
+  allocation operation under that deployment. A **certificate** requires
+  production configuration, a known commit SHA, and every probe PASS.
 
 ```bash
-bruiser authority-check --front <edge-or-proxy> --origin <origin> --control <bruiser>
+bruiser authority-check --front <edge-or-proxy> --origin <origin> --control <bruiser> --admin <admin> --json --out authority-certificate.json
 ```

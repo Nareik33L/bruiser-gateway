@@ -110,9 +110,11 @@ func (s *Server) statusPayload(ctx context.Context) map[string]any {
 			"absorbed":   absorbed,
 			"resources":  s.eaf.snapshotAll(),
 		},
-		"usage":      usage,
-		"executions": execs,
-		"waiters":    queued,
+		"usage":       usage,
+		"executions":  execs,
+		"waiters":     queued,
+		"environment": s.cfg.Environment,
+		"production":  s.cfg.Production(),
 	}
 	if ev, err := s.store.LastAudit(ctx, s.cfg.MerchantID, "AUTHORITY_CHECK"); err == nil {
 		body["last_authority_check"] = map[string]any{
@@ -305,9 +307,13 @@ func (s *Server) PersistAuthorityCheck(ctx context.Context, rep check.Report, re
 	}
 	reason := rep.Overall
 	attrs := map[string]any{
-		"overall": rep.Overall,
-		"probes":  rep.Probes,
-		"covered": rep.Covered,
+		"overall":        rep.Overall,
+		"probes":         rep.Probes,
+		"covered":        rep.Covered,
+		"commit_sha":     rep.CommitSHA,
+		"corpus_version": rep.CorpusVersion,
+		"production":     rep.Production,
+		"certificate":    rep.Certificate,
 	}
 	return s.store.WriteAudit(ctx, s.cfg.MerchantID, "AUTHORITY_CHECK", reason, requestID, attrs)
 }
