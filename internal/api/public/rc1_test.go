@@ -193,7 +193,7 @@ func TestRC1ExecutionBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req, _ := http.NewRequest(http.MethodPut, lab.Server.URL+"/v1/policy", bytes.NewReader(raw))
+	req, _ := http.NewRequest(http.MethodPut, lab.Admin.URL+"/v1/policy", bytes.NewReader(raw))
 	req.Header.Set("X-Bruiser-Admin-Secret", lab.Cfg.AdminSecret)
 	req.Header.Set("Content-Type", "application/yaml")
 	resp, err := http.DefaultClient.Do(req)

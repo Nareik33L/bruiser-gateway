@@ -188,6 +188,7 @@ type Server struct {
 	profile   merchant.Profile
 	eaf       *eafAcc
 	mux       http.Handler
+	admin     http.Handler
 	limit     *limit.PerExecution
 	rates     *rateGuards
 	compiled  atomic.Pointer[policy.Compiled]
@@ -213,18 +214,25 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 	}
 	s.initControls()
 	s.loadPolicy()
-	r := chi.NewRouter()
+	s.mux = s.publicMux()
+	s.admin = s.adminMux()
+	return s
+}
+
+func (s *Server) withBase(r *chi.Mux) {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(stripInboundBruiser)
 	r.Use(requestDeadline(8 * time.Second))
+}
+
+func (s *Server) publicMux() http.Handler {
+	r := chi.NewRouter()
+	s.withBase(r)
 	r.Get("/healthz", s.healthz)
 	r.Get("/readyz", s.readyz)
 	r.Handle("/metrics", promhttp.Handler())
-	r.Get("/admin", s.adminPage)
-	r.Post("/admin", s.adminPage)
-	r.Get("/demo", s.adminPage)
 	r.Get("/.well-known/bruiser/jwks.json", s.jwks)
 	r.Get("/.well-known/bruiser/protocol", s.protocol)
 	r.Route("/v1", func(r chi.Router) {
@@ -234,6 +242,30 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 		r.Post("/sessions/refresh", s.refreshSession)
 		r.Post("/authorize", s.authorize)
 		r.Post("/introspect", s.introspect)
+		r.Group(func(r chi.Router) {
+			r.Use(s.sessionAuth)
+			r.Post("/executions/acquire", s.acquire)
+			r.Post("/executions/{id}/renew", s.renew)
+			r.Post("/executions/{id}/heartbeat", s.renew)
+			r.Post("/executions/{id}/release", s.release)
+			r.Post("/executions/{id}/leave", s.release)
+			r.Post("/executions/{id}/handoff", s.handoff)
+			r.Post("/executions/{id}/revoke", s.revoke)
+			r.Get("/executions/{id}", s.get)
+			r.Get("/executions/{id}/watch", s.watch)
+		})
+	})
+	return r
+}
+
+func (s *Server) adminMux() http.Handler {
+	r := chi.NewRouter()
+	s.withBase(r)
+	r.Get("/healthz", s.healthz)
+	r.Get("/admin", s.adminPage)
+	r.Post("/admin", s.adminPage)
+	r.Get("/demo", s.adminPage)
+	r.Route("/v1", func(r chi.Router) {
 		r.Get("/policy", s.getPolicy)
 		r.Put("/policy", s.putPolicy)
 		r.Get("/policy/history", s.policyHistory)
@@ -251,27 +283,22 @@ func New(cfg config.Config, store *pgstore.Store, signer auth.Signer, log *slog.
 		r.Post("/admin/controls/revoke-all", s.adminRevokeAll)
 		r.Get("/admin/dry-run", s.adminDryRun)
 		r.Get("/admin/ramp", s.adminDryRun)
+		r.Post("/admin/token", s.adminMintToken)
 		r.Post("/authority-check", s.adminRunCheck)
 		r.Get("/authority-check", s.adminLastCheck)
-		r.Group(func(r chi.Router) {
-			r.Use(s.sessionAuth)
-			r.Post("/executions/acquire", s.acquire)
-			r.Post("/executions/{id}/renew", s.renew)
-			r.Post("/executions/{id}/heartbeat", s.renew)
-			r.Post("/executions/{id}/release", s.release)
-			r.Post("/executions/{id}/leave", s.release)
-			r.Post("/executions/{id}/handoff", s.handoff)
-			r.Post("/executions/{id}/revoke", s.revoke)
-			r.Get("/executions/{id}", s.get)
-			r.Get("/executions/{id}/watch", s.watch)
-		})
 	})
-	s.mux = r
-	return s
+	return r
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
+}
+
+func (s *Server) AdminHandler() http.Handler {
+	if s.admin != nil {
+		return s.admin
+	}
+	return http.NotFoundHandler()
 }
 
 func (s *Server) EAF(resource string) (attempts, forwarded, customers float64) {

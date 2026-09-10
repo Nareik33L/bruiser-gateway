@@ -60,7 +60,7 @@ const starterProfile = `# Bruiser drop-in profile.
 # 4. bruiser authority-check --front <edge-or-proxy> --origin <box-office>
 
 merchant_id: my-merchant
-unmatched: allow
+unmatched: deny
 
 identity:
   extractor: auto
@@ -70,6 +70,8 @@ identity:
   hmac_secret_env: BRUISER_DEV_HMAC_SECRET
 
 routes:
+  - match: { method: GET, path: "/api/catalog" }
+    action: search
   - match: { method: POST, path: "/api/holds" }
     resource_from: event_id
     resource_prefix: "sku:"
@@ -90,5 +92,8 @@ policy:
       precedence: [browser, agent]
       budget: { max_ops: 1 }
       # waiting: { mode: bounded, max_waiters: 1 }
+    - name: discovery
+      match: { action: [search] }
+      control: none
   fallback: deny
 `

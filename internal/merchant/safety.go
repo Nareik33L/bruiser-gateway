@@ -1,7 +1,10 @@
 package merchant
 
 import (
+	"fmt"
 	"strings"
+
+	"github.com/Nareik33L/bruiser-gateway/internal/policy"
 )
 
 // CommonAllocationPaths are hold/purchase aliases clubs often forget to list.
@@ -29,9 +32,36 @@ type SafetyOpts struct {
 	Audience     string
 }
 
+// FailOpenReasons lists profile-level fail-open behaviour: unmatched
+// allow and an allow-uncontrolled policy fallback. Discovery routes
+// with control: none are not fail-open.
+func (p Profile) FailOpenReasons() []string {
+	var reasons []string
+	if p.UnmatchedAllow() {
+		reasons = append(reasons, "unmatched: allow")
+	}
+	reasons = append(reasons, policy.FailOpenReasons(p.PolicyDocument())...)
+	return reasons
+}
+
+// ValidateProductionPolicy rejects a fail-open profile in production
+// unless BRUISER_ALLOW_UNSAFE_MODES acknowledged the risk.
+func ValidateProductionPolicy(p Profile, allowUnsafe bool) error {
+	reasons := p.FailOpenReasons()
+	if len(reasons) == 0 {
+		return nil
+	}
+	if allowUnsafe {
+		return nil
+	}
+	return fmt.Errorf("production policy is fail-open (%s); set BRUISER_ALLOW_UNSAFE_MODES=1 to acknowledge", strings.Join(reasons, ", "))
+}
+
 // SafetyIssues is the unmatched:allow / origin-lockdown boundary.
-// unmatched: allow stays the default (discovery fail-open) but production
-// cannot combine it with a missing origin lockdown.
+// unmatched: deny is the shipped default. unmatched: allow is fail-open
+// for unlisted routes; production cannot combine it with a missing
+// origin lockdown, and ValidateProductionPolicy additionally requires
+// BRUISER_ALLOW_UNSAFE_MODES.
 func (p Profile) SafetyIssues(opts SafetyOpts) []Issue {
 	var out []Issue
 	if opts.Production {

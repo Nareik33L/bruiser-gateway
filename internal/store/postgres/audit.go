@@ -37,6 +37,10 @@ type UsageFigures struct {
 }
 
 func (s *Store) WriteAudit(ctx context.Context, merchantID, typ, reason, requestID string, attrs map[string]any) error {
+	return s.WriteActorAudit(ctx, merchantID, typ, "", "", reason, requestID, attrs)
+}
+
+func (s *Store) WriteActorAudit(ctx context.Context, merchantID, typ, role, actor, reason, requestID string, attrs map[string]any) error {
 	if merchantID == "" || typ == "" {
 		return lease.ErrInvalidInput
 	}
@@ -45,9 +49,9 @@ func (s *Store) WriteAudit(ctx context.Context, merchantID, typ, reason, request
 		return err
 	}
 	_, err = s.pool.Exec(ctx, `
-		insert into audit_events (merchant_id, type, reason, request_id, attrs)
-		values ($1, $2, $3, $4, $5)`,
-		merchantID, typ, nullIfEmpty(reason), nullIfEmpty(requestID), attrsOrEmpty(raw),
+		insert into audit_events (merchant_id, type, principal_type, principal_id, reason, request_id, attrs)
+		values ($1, $2, $3, $4, $5, $6, $7)`,
+		merchantID, typ, nullIfEmpty(role), nullIfEmpty(actor), nullIfEmpty(reason), nullIfEmpty(requestID), attrsOrEmpty(raw),
 	)
 	return wrapStore(err)
 }

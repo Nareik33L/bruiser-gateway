@@ -83,8 +83,8 @@ func (p Profile) ValidateIssues() []Issue {
 	if n == 0 {
 		out = append(out, Issue{"FAIL", "routes", "no protected allocation routes (set resource or resource_from on hold/purchase paths)"})
 	}
-	if strings.EqualFold(p.Unmatched, "deny") {
-		out = append(out, Issue{"WARN", "unmatched", "unmatched deny fails closed on discovery traffic; default is allow"})
+	if strings.EqualFold(p.Unmatched, "allow") {
+		out = append(out, Issue{"WARN", "unmatched", "unmatched allow is fail-open for unlisted routes; production requires BRUISER_ALLOW_UNSAFE_MODES=1"})
 	}
 	if p.Policy.Waiting.Mode != "" && !strings.EqualFold(p.Policy.Waiting.Mode, "bounded") && !strings.EqualFold(p.Policy.Waiting.Mode, "off") {
 		out = append(out, Issue{"FAIL", "policy.waiting.mode", "waiting.mode must be bounded or off"})

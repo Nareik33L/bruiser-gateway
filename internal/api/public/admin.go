@@ -2,7 +2,6 @@ package publicapi
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -21,24 +20,32 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		_ = r.ParseForm()
 		secret := r.FormValue("secret")
-		want := s.adminSecret()
-		if want != "" && subtle.ConstantTimeCompare([]byte(secret), []byte(want)) == 1 {
-			http.SetCookie(w, &http.Cookie{
-				Name:     "bruiser_admin",
-				Value:    secret,
-				Path:     "/",
-				HttpOnly: true,
-				SameSite: http.SameSiteStrictMode,
-			})
-			http.Redirect(w, r, "/admin", http.StatusSeeOther)
-			return
+		role, actor := "", ""
+		switch {
+		case secretMatch(secret, s.cfg.AdminSecret):
+			role, actor = roleAdmin, "admin-secret"
+		case secretMatch(secret, s.cfg.OperatorSecret):
+			role, actor = roleOperator, "operator-secret"
+		}
+		if role != "" {
+			if tok, err := s.mintAccess(role, actor, 8*time.Hour); err == nil {
+				http.SetCookie(w, &http.Cookie{
+					Name:     adminCookie,
+					Value:    tok,
+					Path:     "/",
+					HttpOnly: true,
+					SameSite: http.SameSiteStrictMode,
+				})
+				http.Redirect(w, r, "/admin", http.StatusSeeOther)
+				return
+			}
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = io.WriteString(w, adminLoginHTML)
 		return
 	}
-	if !s.adminOK(r) {
+	if !s.identifyAdmin(r).ok() {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = io.WriteString(w, adminLoginHTML)
@@ -49,8 +56,7 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
-	if !s.adminOK(r) {
-		writeErr(w, http.StatusUnauthorized, "bad admin secret")
+	if _, ok := s.requireRole(w, r, roleOperator); !ok {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.statusPayload(r.Context()))
@@ -124,8 +130,7 @@ func (s *Server) statusPayload(ctx context.Context) map[string]any {
 }
 
 func (s *Server) adminStream(w http.ResponseWriter, r *http.Request) {
-	if !s.adminOK(r) {
-		writeErr(w, http.StatusUnauthorized, "bad admin secret")
+	if _, ok := s.requireRole(w, r, roleOperator); !ok {
 		return
 	}
 	flusher, ok := w.(http.Flusher)
@@ -153,8 +158,7 @@ func (s *Server) adminStream(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminAudit(w http.ResponseWriter, r *http.Request) {
-	if !s.adminOK(r) {
-		writeErr(w, http.StatusUnauthorized, "bad admin secret")
+	if _, ok := s.requireRole(w, r, roleOperator); !ok {
 		return
 	}
 	customer := r.URL.Query().Get("customer")
@@ -169,8 +173,7 @@ func (s *Server) adminAudit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminExport(w http.ResponseWriter, r *http.Request) {
-	if !s.adminOK(r) {
-		writeErr(w, http.StatusUnauthorized, "bad admin secret")
+	if _, ok := s.requireRole(w, r, roleOperator); !ok {
 		return
 	}
 	since := time.Now().UTC().Add(-24 * time.Hour)
@@ -197,8 +200,7 @@ func (s *Server) adminExport(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminCustomer(w http.ResponseWriter, r *http.Request) {
-	if !s.adminOK(r) {
-		writeErr(w, http.StatusUnauthorized, "bad admin secret")
+	if _, ok := s.requireRole(w, r, roleOperator); !ok {
 		return
 	}
 	cid := chi.URLParam(r, "id")
@@ -222,8 +224,8 @@ func (s *Server) adminCustomer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminRevoke(w http.ResponseWriter, r *http.Request) {
-	if !s.adminOK(r) {
-		writeErr(w, http.StatusUnauthorized, "bad admin secret")
+	actor, ok := s.requireRole(w, r, roleAdmin)
+	if !ok {
 		return
 	}
 	var body revokeReq
@@ -237,6 +239,7 @@ func (s *Server) adminRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	revokeTotal.Inc()
+	s.writeAdminAudit(r.Context(), r, actor, "ADMIN_REVOKE", body.Reason, map[string]any{"execution_id": e.ID})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"execution_id": e.ID,
 		"state":        e.State,
@@ -245,8 +248,7 @@ func (s *Server) adminRevoke(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminLastCheck(w http.ResponseWriter, r *http.Request) {
-	if !s.adminOK(r) {
-		writeErr(w, http.StatusUnauthorized, "bad admin secret")
+	if _, ok := s.requireRole(w, r, roleOperator); !ok {
 		return
 	}
 	ev, err := s.store.LastAudit(r.Context(), s.cfg.MerchantID, "AUTHORITY_CHECK")
@@ -266,8 +268,7 @@ func (s *Server) adminLastCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminRunCheck(w http.ResponseWriter, r *http.Request) {
-	if !s.adminOK(r) {
-		writeErr(w, http.StatusUnauthorized, "bad admin secret")
+	if _, ok := s.requireRole(w, r, roleOperator); !ok {
 		return
 	}
 	var body struct {
@@ -312,8 +313,7 @@ func (s *Server) PersistAuthorityCheck(ctx context.Context, rep check.Report, re
 }
 
 func (s *Server) adminGetControls(w http.ResponseWriter, r *http.Request) {
-	if !s.adminOK(r) {
-		writeErr(w, http.StatusUnauthorized, "bad admin secret")
+	if _, ok := s.requireRole(w, r, roleOperator); !ok {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.currentControls())
@@ -334,8 +334,8 @@ type controlsPatch struct {
 }
 
 func (s *Server) adminPutControls(w http.ResponseWriter, r *http.Request) {
-	if !s.adminOK(r) {
-		writeErr(w, http.StatusUnauthorized, "bad admin secret")
+	actor, ok := s.requireRole(w, r, roleOperator)
+	if !ok {
 		return
 	}
 	var patch controlsPatch
@@ -382,7 +382,7 @@ func (s *Server) adminPutControls(w http.ResponseWriter, r *http.Request) {
 	if patch.UpdatedBy != "" {
 		c.UpdatedBy = patch.UpdatedBy
 	} else {
-		c.UpdatedBy = "admin"
+		c.UpdatedBy = actor.Actor
 	}
 	c = ops.Normalize(c)
 	saved, err := s.store.PutControls(r.Context(), s.cfg.MerchantID, c)
@@ -391,12 +391,17 @@ func (s *Server) adminPutControls(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.controls.Store(&saved)
+	s.writeAdminAudit(r.Context(), r, actor, "CONTROLS_CHANGED", saved.Mode, map[string]any{
+		"enforce_percent": saved.EnforcePercent,
+		"enforcement":     saved.Enforcement,
+		"mode":            saved.Mode,
+	})
 	writeJSON(w, http.StatusOK, saved)
 }
 
 func (s *Server) adminDrain(w http.ResponseWriter, r *http.Request) {
-	if !s.adminOK(r) {
-		writeErr(w, http.StatusUnauthorized, "bad admin secret")
+	actor, ok := s.requireRole(w, r, roleOperator)
+	if !ok {
 		return
 	}
 	n, err := s.store.DrainWaiters(r.Context(), s.cfg.MerchantID, requestID(r))
@@ -404,12 +409,13 @@ func (s *Server) adminDrain(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, err)
 		return
 	}
+	s.writeAdminAudit(r.Context(), r, actor, "QUEUE_DRAINED", "drain", map[string]any{"drained": n})
 	writeJSON(w, http.StatusOK, map[string]any{"drained": n})
 }
 
 func (s *Server) adminRevokeAll(w http.ResponseWriter, r *http.Request) {
-	if !s.adminOK(r) {
-		writeErr(w, http.StatusUnauthorized, "bad admin secret")
+	actor, ok := s.requireRole(w, r, roleAdmin)
+	if !ok {
 		return
 	}
 	n, err := s.store.RevokeActive(r.Context(), s.cfg.MerchantID, requestID(r), "emergency")
@@ -421,12 +427,12 @@ func (s *Server) adminRevokeAll(w http.ResponseWriter, r *http.Request) {
 		cache.Reset()
 	}
 	revokeTotal.Add(float64(n))
+	s.writeAdminAudit(r.Context(), r, actor, "REVOKE_ALL", "emergency", map[string]any{"revoked": n})
 	writeJSON(w, http.StatusOK, map[string]any{"revoked": n})
 }
 
 func (s *Server) adminDryRun(w http.ResponseWriter, r *http.Request) {
-	if !s.adminOK(r) {
-		writeErr(w, http.StatusUnauthorized, "bad admin secret")
+	if _, ok := s.requireRole(w, r, roleOperator); !ok {
 		return
 	}
 	window := 24 * time.Hour

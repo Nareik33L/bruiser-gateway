@@ -61,7 +61,8 @@ func putPolicy(t *testing.T, url, secret, yaml string) {
 }
 
 func TestLiveMaxActiveChange(t *testing.T) {
-	srv, cfg := startServer(t)
+	lab := startLab(t)
+	srv, cfg := lab.Server, lab.Cfg
 	a1 := session(t, srv, cfg, "alice", "agent-1")
 	a2 := session(t, srv, cfg, "alice", "agent-2")
 	first := acquireJSON(t, srv, a1)
@@ -72,7 +73,7 @@ func TestLiveMaxActiveChange(t *testing.T) {
 	if second.StatusCode != http.StatusConflict {
 		t.Fatalf("second want 409 got %d %s", second.StatusCode, second.Raw)
 	}
-	putPolicy(t, srv.URL, cfg.AdminSecret, policyMax2)
+	putPolicy(t, lab.Admin.URL, cfg.AdminSecret, policyMax2)
 	again := acquireJSON(t, srv, a2)
 	if again.StatusCode != http.StatusCreated {
 		t.Fatalf("after max_active=2 want 201 got %d %s", again.StatusCode, again.Raw)
@@ -83,8 +84,9 @@ func TestLiveMaxActiveChange(t *testing.T) {
 }
 
 func TestHouseholdCapBlocksSecondAccount(t *testing.T) {
-	srv, cfg := startServer(t)
-	putPolicy(t, srv.URL, cfg.AdminSecret, policyHousehold)
+	lab := startLab(t)
+	srv, cfg := lab.Server, lab.Cfg
+	putPolicy(t, lab.Admin.URL, cfg.AdminSecret, policyHousehold)
 	alice := sessionAnchored(t, srv, cfg, "alice", "agent", "bot-a", map[string]string{"household_id": "hh-9"})
 	bob := sessionAnchored(t, srv, cfg, "bob", "agent", "bot-b", map[string]string{"household_id": "hh-9"})
 	missing := session(t, srv, cfg, "carol", "bot-c")
@@ -114,8 +116,9 @@ func TestHouseholdCapBlocksSecondAccount(t *testing.T) {
 }
 
 func TestAuthorizeHouseholdDeny(t *testing.T) {
-	_, srv, cfg, _ := testlab.GatewayAPI(t, testlab.ArsenalProfile(t))
-	putPolicy(t, srv.URL, cfg.AdminSecret, policyHousehold)
+	lab := testlab.Start(t, testlab.ArsenalProfile(t), nil)
+	srv, cfg := lab.Server, lab.Cfg
+	putPolicy(t, lab.Admin.URL, cfg.AdminSecret, policyHousehold)
 	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/authorize", strings.NewReader(`{"method":"POST","path":"/api/events/ars-che/holds"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Bruiser-Edge-Secret", cfg.EdgeSecret)

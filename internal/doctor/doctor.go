@@ -159,6 +159,12 @@ func checkRoutes(r *Report, p merchant.Profile) {
 }
 
 func checkUnmatched(r *Report, in Input) {
+	if in.Config.Production() {
+		if err := merchant.ValidateProductionPolicy(in.Profile, in.Config.AllowUnsafeModes); err != nil {
+			r.add("unmatched safety", Fail, err.Error())
+			return
+		}
+	}
 	issues := in.Profile.SafetyIssues(merchant.SafetyOpts{
 		OriginSecret: in.Config.OriginSecret,
 		OriginURL:    firstNonEmpty(in.OriginURL, in.Config.OriginURL),

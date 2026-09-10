@@ -9,11 +9,12 @@
 
 merchant_id: example
 name: Example merchant
-# unmatched: allow keeps discovery/static fail-open. Every scarce
-# hold/purchase path MUST be listed below. Origin lockdown
-# (BRUISER_ORIGIN_SECRET) is required; config validate FAILs without it.
+# unmatched: deny is the shipped default (fail closed on unlisted
+# routes). Discovery/static paths must be listed below with no
+# resource so they stay uncontrolled. unmatched: allow is fail-open
+# and needs BRUISER_ALLOW_UNSAFE_MODES=1 in production.
 # Confirm with: bruiser authority-check --front … --origin … --control …
-unmatched: allow
+unmatched: deny
 
 # Optional closed catalogue of canonical resource IDs. When set, inbound
 # strings fold then must resolve to one of these. Empty = fold-only.

@@ -15,14 +15,15 @@ import (
 )
 
 func TestAdminStatusAndAuditExport(t *testing.T) {
-	api, srv, cfg, _ := testlab.GatewayAPI(t, testlab.ArsenalProfile(t))
+	lab := testlab.Start(t, testlab.ArsenalProfile(t), nil)
+	api, srv, cfg := lab.API, lab.Server, lab.Cfg
 	tok := session(t, srv, cfg, "alice", "agent-1")
 	got := acquireJSON(t, srv, tok)
 	if got.StatusCode != http.StatusCreated {
 		t.Fatalf("acquire %d %s", got.StatusCode, got.Raw)
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/admin/status", nil)
+	req, _ := http.NewRequest(http.MethodGet, lab.Admin.URL+"/v1/admin/status", nil)
 	req.Header.Set("X-Bruiser-Admin-Secret", cfg.AdminSecret)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -45,7 +46,7 @@ func TestAdminStatusAndAuditExport(t *testing.T) {
 	if err := api.PersistAuthorityCheck(context.Background(), rep, "req-1"); err != nil {
 		t.Fatal(err)
 	}
-	req, _ = http.NewRequest(http.MethodGet, srv.URL+"/v1/admin/authority-check", nil)
+	req, _ = http.NewRequest(http.MethodGet, lab.Admin.URL+"/v1/admin/authority-check", nil)
 	req.Header.Set("X-Bruiser-Admin-Secret", cfg.AdminSecret)
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
@@ -57,7 +58,7 @@ func TestAdminStatusAndAuditExport(t *testing.T) {
 		t.Fatalf("last check %d %s", resp.StatusCode, b)
 	}
 
-	req, _ = http.NewRequest(http.MethodGet, srv.URL+"/v1/admin/export", nil)
+	req, _ = http.NewRequest(http.MethodGet, lab.Admin.URL+"/v1/admin/export", nil)
 	req.Header.Set("X-Bruiser-Admin-Secret", cfg.AdminSecret)
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
@@ -69,7 +70,7 @@ func TestAdminStatusAndAuditExport(t *testing.T) {
 		t.Fatalf("export %d %s", resp.StatusCode, raw)
 	}
 
-	req, _ = http.NewRequest(http.MethodGet, srv.URL+"/admin", nil)
+	req, _ = http.NewRequest(http.MethodGet, lab.Admin.URL+"/admin", nil)
 	req.Header.Set("X-Bruiser-Admin-Secret", cfg.AdminSecret)
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {

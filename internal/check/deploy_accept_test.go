@@ -53,6 +53,7 @@ type deployLab struct {
 	gw        string
 	hmac      string
 	admin     string
+	adminURL  string
 	edge      string
 	originSec string
 	merchant  string
@@ -75,10 +76,12 @@ type exeResult struct {
 
 func startDeploy(t *testing.T, kind deployKind) deployLab {
 	t.Helper()
-	api, gw, cfg, signer := testlab.GatewayAPI(t, testlab.ArsenalProfile(t))
+	core := testlab.Start(t, testlab.ArsenalProfile(t), nil)
+	api, gw, cfg, signer := core.API, core.Server, core.Cfg, core.Signer
 	lab := deployLab{
 		kind:      kind,
 		gw:        gw.URL,
+		adminURL:  core.Admin.URL,
 		hmac:      cfg.DevHMACSecret,
 		admin:     cfg.AdminSecret,
 		edge:      cfg.EdgeSecret,
@@ -469,7 +472,7 @@ func proveDryRun(t *testing.T, d deployLab) {
 			t.Fatalf("embedded origin stays locked without a token: %d", code)
 		}
 	}
-	req, _ := http.NewRequest(http.MethodGet, d.gw+"/v1/admin/dry-run", nil)
+	req, _ := http.NewRequest(http.MethodGet, d.adminURL+"/v1/admin/dry-run", nil)
 	req.Header.Set("X-Bruiser-Admin-Secret", d.admin)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -543,6 +546,7 @@ func proveAuthority(t *testing.T, d deployLab) {
 			EdgeURL:    d.front,
 			OriginURL:  d.origin,
 			ControlURL: d.gw,
+			AdminURL:   d.adminURL,
 			HMACSecret: d.hmac,
 			Membership: d.cust("authz"),
 			EventID:    "ars-che",
@@ -746,7 +750,7 @@ func (d deployLab) post(t *testing.T, url, body string, headers map[string]strin
 
 func (d deployLab) putControls(t *testing.T, body string) {
 	t.Helper()
-	req, _ := http.NewRequest(http.MethodPut, d.gw+"/v1/admin/controls", bytes.NewBufferString(body))
+	req, _ := http.NewRequest(http.MethodPut, d.adminURL+"/v1/admin/controls", bytes.NewBufferString(body))
 	req.Header.Set("X-Bruiser-Admin-Secret", d.admin)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
@@ -770,7 +774,7 @@ func (d deployLab) putWaiting(t *testing.T, maxWaiters int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req, _ := http.NewRequest(http.MethodPut, d.gw+"/v1/policy", bytes.NewReader(raw))
+	req, _ := http.NewRequest(http.MethodPut, d.adminURL+"/v1/policy", bytes.NewReader(raw))
 	req.Header.Set("X-Bruiser-Admin-Secret", d.admin)
 	req.Header.Set("Content-Type", "application/yaml")
 	resp, err := http.DefaultClient.Do(req)

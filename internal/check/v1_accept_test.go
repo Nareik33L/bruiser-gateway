@@ -22,17 +22,19 @@ import (
 )
 
 type proxyLab struct {
-	front  string
-	origin string
-	gw     string
-	hmac   string
-	admin  string
-	edge   string
+	front    string
+	origin   string
+	gw       string
+	adminURL string
+	hmac     string
+	admin    string
+	edge     string
 }
 
 func startProxyLabFull(t *testing.T) proxyLab {
 	t.Helper()
-	api, gw, cfg, signer := testlab.GatewayAPI(t, testlab.ArsenalProfile(t))
+	core := testlab.Start(t, testlab.ArsenalProfile(t), nil)
+	api, gw, cfg, signer := core.API, core.Server, core.Cfg, core.Signer
 	origin := simtix.New(simtix.Lab(cfg.DevHMACSecret, cfg.OriginSecret, cfg.MerchantID, signer.Public, gw.URL, 200))
 	originSrv := httptest.NewServer(origin.Handler())
 	t.Cleanup(originSrv.Close)
@@ -43,12 +45,13 @@ func startProxyLabFull(t *testing.T) proxyLab {
 	proxySrv := httptest.NewServer(ph)
 	t.Cleanup(proxySrv.Close)
 	return proxyLab{
-		front:  proxySrv.URL,
-		origin: originSrv.URL,
-		gw:     gw.URL,
-		hmac:   cfg.DevHMACSecret,
-		admin:  cfg.AdminSecret,
-		edge:   cfg.EdgeSecret,
+		front:    proxySrv.URL,
+		origin:   originSrv.URL,
+		gw:       gw.URL,
+		adminURL: core.Admin.URL,
+		hmac:     cfg.DevHMACSecret,
+		admin:    cfg.AdminSecret,
+		edge:     cfg.EdgeSecret,
 	}
 }
 
@@ -95,7 +98,7 @@ func (l proxyLab) originEvent(t *testing.T) (held, available, seats int) {
 
 func (l proxyLab) putControls(t *testing.T, body string) {
 	t.Helper()
-	req, _ := http.NewRequest(http.MethodPut, l.gw+"/v1/admin/controls", bytes.NewBufferString(body))
+	req, _ := http.NewRequest(http.MethodPut, l.adminURL+"/v1/admin/controls", bytes.NewBufferString(body))
 	req.Header.Set("X-Bruiser-Admin-Secret", l.admin)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
@@ -128,7 +131,7 @@ func (l proxyLab) authorize(t *testing.T, customer string) (int, http.Header, ma
 
 func (l proxyLab) adminStatus(t *testing.T) map[string]any {
 	t.Helper()
-	req, _ := http.NewRequest(http.MethodGet, l.gw+"/v1/admin/status", nil)
+	req, _ := http.NewRequest(http.MethodGet, l.adminURL+"/v1/admin/status", nil)
 	req.Header.Set("X-Bruiser-Admin-Secret", l.admin)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -302,7 +305,7 @@ func TestV1AcceptanceRampSemantics(t *testing.T) {
 	}
 	_ = code
 
-	req, _ := http.NewRequest(http.MethodGet, lab.gw+"/v1/admin/dry-run", nil)
+	req, _ := http.NewRequest(http.MethodGet, lab.adminURL+"/v1/admin/dry-run", nil)
 	req.Header.Set("X-Bruiser-Admin-Secret", lab.admin)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -322,6 +325,7 @@ func TestV1AcceptanceAuthorityAndControlPlane(t *testing.T) {
 		EdgeURL:    lab.front,
 		OriginURL:  lab.origin,
 		ControlURL: lab.gw,
+		AdminURL:   lab.adminURL,
 		HMACSecret: lab.hmac,
 		Membership: "1009999",
 		EventID:    "ars-che",

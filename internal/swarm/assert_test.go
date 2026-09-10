@@ -16,7 +16,8 @@ func TestDemoAssertion(t *testing.T) {
 	if os.Getenv("BRUISER_TEST_DATABASE_URL") == "" {
 		t.Skip("BRUISER_TEST_DATABASE_URL not set")
 	}
-	api, gw, cfg, signer := testlab.GatewayAPI(t, testlab.ArsenalProfile(t))
+	core := testlab.Start(t, testlab.ArsenalProfile(t), nil)
+	api, gw, cfg, signer := core.API, core.Server, core.Cfg, core.Signer
 	origin := simtix.New(simtix.Lab(cfg.DevHMACSecret, cfg.OriginSecret, cfg.MerchantID, signer.Public, gw.URL, 400))
 	originSrv := httptest.NewServer(origin.Handler())
 	t.Cleanup(originSrv.Close)
@@ -59,6 +60,7 @@ func TestDemoAssertion(t *testing.T) {
 		EdgeURL:    proxy.URL,
 		OriginURL:  originSrv.URL,
 		ControlURL: gw.URL,
+		AdminURL:   core.Admin.URL,
 		HMACSecret: cfg.DevHMACSecret,
 	})
 	if err != nil {

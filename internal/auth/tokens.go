@@ -51,6 +51,20 @@ type ExecutionClaims struct {
 	jwt.RegisteredClaims
 }
 
+const (
+	AccessTokenType = "bruiser_admin"
+	RoleAdmin       = "admin"
+	RoleOperator    = "operator"
+)
+
+type AccessClaims struct {
+	MerchantID string `json:"mid"`
+	Role       string `json:"role"`
+	Actor      string `json:"act"`
+	TokenType  string `json:"typ"`
+	jwt.RegisteredClaims
+}
+
 type Signer struct {
 	KID        string
 	MerchantID string
@@ -105,6 +119,59 @@ func ParseExecution(token string, pub ed25519.PublicKey) (ExecutionClaims, error
 	}
 	if claims.ExecutionID == "" || claims.CustomerID == "" || claims.MerchantID == "" {
 		return ExecutionClaims{}, ErrUnauthorized
+	}
+	return claims, nil
+}
+
+func (s Signer) SignAccess(role, actor string, ttl time.Duration) (string, error) {
+	if role != RoleAdmin && role != RoleOperator {
+		return "", fmt.Errorf("%w: unknown role", ErrForbidden)
+	}
+	if ttl <= 0 {
+		ttl = 5 * time.Minute
+	}
+	if ttl > time.Hour {
+		ttl = time.Hour
+	}
+	now := time.Now().UTC()
+	claims := AccessClaims{
+		MerchantID: s.MerchantID,
+		Role:       role,
+		Actor:      actor,
+		TokenType:  AccessTokenType,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "bruiser/" + s.MerchantID,
+			Subject:   actor,
+			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+			ID:        id.New("jti"),
+		},
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
+	tok.Header["kid"] = s.KID
+	return tok.SignedString(s.Private)
+}
+
+func ParseAccess(token string, pub ed25519.PublicKey) (AccessClaims, error) {
+	var claims AccessClaims
+	parsed, err := jwt.ParseWithClaims(token, &claims, func(t *jwt.Token) (any, error) {
+		if t.Method.Alg() != jwt.SigningMethodEdDSA.Alg() {
+			return nil, fmt.Errorf("%w: unexpected alg", ErrUnauthorized)
+		}
+		return pub, nil
+	}, jwt.WithLeeway(Skew), jwt.WithValidMethods([]string{jwt.SigningMethodEdDSA.Alg()}))
+	if err != nil || !parsed.Valid {
+		return AccessClaims{}, ErrUnauthorized
+	}
+	if claims.TokenType != AccessTokenType {
+		return AccessClaims{}, ErrUnauthorized
+	}
+	if claims.Role != RoleAdmin && claims.Role != RoleOperator {
+		return AccessClaims{}, ErrUnauthorized
+	}
+	if claims.ExpiresAt != nil && time.Now().UTC().After(claims.ExpiresAt.Time.Add(Skew)) {
+		return AccessClaims{}, ErrUnauthorized
 	}
 	return claims, nil
 }

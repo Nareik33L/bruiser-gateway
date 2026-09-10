@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -18,7 +19,17 @@ type PolicyRow struct {
 	Active     bool
 }
 
-func (s *Store) PutPolicy(ctx context.Context, merchantID, yamlText, requestID string) (PolicyRow, error) {
+type AdminAudit struct {
+	Actor     string
+	Role      string
+	IP        string
+	Auth      string
+	Before    string
+	After     string
+	RequestID string
+}
+
+func (s *Store) PutPolicy(ctx context.Context, merchantID, yamlText, requestID string, audit AdminAudit) (PolicyRow, error) {
 	if merchantID == "" || yamlText == "" {
 		return PolicyRow{}, lease.ErrInvalidInput
 	}
@@ -46,8 +57,17 @@ func (s *Store) PutPolicy(ctx context.Context, merchantID, yamlText, requestID s
 		values ($1, $2, $3, true)`, merchantID, next, yamlText); err != nil {
 		return PolicyRow{}, wrapStore(err)
 	}
+	attrs, _ := json.Marshal(map[string]any{
+		"actor":       audit.Actor,
+		"role":        audit.Role,
+		"auth":        audit.Auth,
+		"ip":          audit.IP,
+		"before_hash": audit.Before,
+		"after_hash":  audit.After,
+	})
 	if err := insertAudit(ctx, tx, merchantID, auditRow{
-		typ: "POLICY_UPDATED", reason: "put", requestID: requestID,
+		typ: "POLICY_CHANGED", reason: "put", requestID: requestID,
+		principalType: audit.Role, principalID: audit.Actor, attrs: attrs,
 	}); err != nil {
 		return PolicyRow{}, wrapStore(err)
 	}
