@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Production readiness (operator pack)
+
+- Production configuration checklist, staging IdP/JWKS procedure, closed
+  catalogue example, Authority Check certificate gate, deployment/rollback
+  runbook, and release/licensing/signing checklist:
+  [docs/13-production-readiness.md](docs/13-production-readiness.md).
+- Production refuses the lab `bruiser:bruiser@` database URL. HMAC is
+  unused in production (empty allowed; placeholders still refused).
+- Merchant profile JWKS/issuer/audience overlay empty environment values.
+- `bruiser authority-check --identity-token` uses a merchant-minted OIDC
+  JWT for legitimate staging probes. Adversarial probes are unchanged.
+- Example profile `configs/production.example.yaml`. Helm/image default
+  profile points at it (placeholders). Compose / `make serve` remain lab.
+- `NOTICE` third-party inventory (not a licence grant). No `LICENSE` file.
+
 ### RC1
 
 - Production identity: JWKS/OIDC with issuer, audience, expiry, merchant

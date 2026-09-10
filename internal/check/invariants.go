@@ -114,6 +114,7 @@ func (r *runner) staleFenceOrigin() Probe {
 		return p
 	}
 	p.Status, p.Pass, p.Detail = "PASS", true, fmt.Sprintf("stale-fence token (fence %s after %s) + origin secret rejected (%d)", first.Fence, second.Fence, stale.Status)
+	_ = r.release(sess, second.ID)
 	return p
 }
 
@@ -176,14 +177,16 @@ func (r *runner) identityForgeryDevAssertionsOff() Probe {
 	// honestly PASS this probe.
 	var hmacEx Exchange
 	hmacSent := false
-	if strings.TrimSpace(r.cfg.HMACSecret) != "" {
-		tok, err := auth.IssueDevAssertion(r.cfg.HMACSecret, "forged-alice", time.Hour, nil)
-		if err == nil {
-			hmacEx = capturePOST(r.client, r.control+"/v1/sessions", map[string]string{
-				"Authorization": "Bearer " + tok,
-			}, map[string]any{"principal": map[string]string{"type": "agent", "id": "hmac-probe"}})
-			hmacSent = true
-		}
+	hmac := strings.TrimSpace(r.cfg.HMACSecret)
+	if hmac == "" {
+		hmac = "authority-check-client-only-hmac"
+	}
+	tok, err := auth.IssueDevAssertion(hmac, "forged-alice", time.Hour, nil)
+	if err == nil {
+		hmacEx = capturePOST(r.client, r.control+"/v1/sessions", map[string]string{
+			"Authorization": "Bearer " + tok,
+		}, map[string]any{"principal": map[string]string{"type": "agent", "id": "hmac-probe"}})
+		hmacSent = true
 	}
 	exchanges := []Exchange{forged}
 	sent := []string{"not-a-jwt"}
@@ -277,14 +280,15 @@ func (r *runner) budgetEnforced() Probe {
 		return fail("--control is required")
 	}
 	cust := fmt.Sprintf("budget-%d", time.Now().UnixNano())
-	cookie, err := auth.IssueBoxOfficeSession(r.cfg.HMACSecret, cust, time.Hour)
+	hdr, err := r.cfg.customerHeaders(cust)
 	if err != nil {
 		return fail("%s", err.Error())
 	}
-	authzHdr := map[string]string{
-		"Cookie":                simtix.CookieName + "=" + cookie,
-		"X-Bruiser-Edge-Secret": r.cfg.EdgeSecret,
+	authzHdr := hdr
+	if authzHdr == nil {
+		authzHdr = map[string]string{}
 	}
+	authzHdr["X-Bruiser-Edge-Secret"] = r.cfg.EdgeSecret
 	path := "/api/events/" + r.cfg.EventID + "/holds"
 	first := capturePOST(r.client, r.control+"/v1/authorize", authzHdr, map[string]string{"method": "POST", "path": path})
 	second := capturePOST(r.client, r.control+"/v1/authorize", authzHdr, map[string]string{"method": "POST", "path": path})
@@ -354,18 +358,29 @@ func (r *runner) failClosedStoreOutage() Probe {
 	if edgeSec == "" {
 		edgeSec = r.cfg.EdgeSecret
 	}
-	hmac := r.cfg.StoreDownHMAC
-	if hmac == "" {
-		hmac = r.cfg.HMACSecret
+	var hdr map[string]string
+	if strings.TrimSpace(r.cfg.IdentityToken) != "" {
+		var err error
+		hdr, err = r.cfg.customerHeaders(fmt.Sprintf("down-%d", time.Now().UnixNano()))
+		if err != nil {
+			return fail("%s", err.Error())
+		}
+	} else {
+		hmac := r.cfg.StoreDownHMAC
+		if hmac == "" {
+			hmac = r.cfg.HMACSecret
+		}
+		cookie, err := auth.IssueBoxOfficeSession(hmac, fmt.Sprintf("down-%d", time.Now().UnixNano()), time.Hour)
+		if err != nil {
+			return fail("%s", err.Error())
+		}
+		hdr = map[string]string{"Cookie": simtix.CookieName + "=" + cookie}
 	}
-	cookie, err := auth.IssueBoxOfficeSession(hmac, fmt.Sprintf("down-%d", time.Now().UnixNano()), time.Hour)
-	if err != nil {
-		return fail("%s", err.Error())
+	if hdr == nil {
+		hdr = map[string]string{}
 	}
-	ex := capturePOST(r.client, down+"/v1/authorize", map[string]string{
-		"Cookie":                simtix.CookieName + "=" + cookie,
-		"X-Bruiser-Edge-Secret": edgeSec,
-	}, map[string]string{"method": "POST", "path": "/api/events/" + r.cfg.EventID + "/holds"})
+	hdr["X-Bruiser-Edge-Secret"] = edgeSec
+	ex := capturePOST(r.client, down+"/v1/authorize", hdr, map[string]string{"method": "POST", "path": "/api/events/" + r.cfg.EventID + "/holds"})
 	p := Probe{Evidence: &Evidence{Exchanges: []Exchange{ex}, Sent: []string{"store-down", down}}}
 	if ex.Status == http.StatusOK || ex.Status == http.StatusCreated {
 		p.Status, p.Pass, p.Detail = "FAIL", false, fmt.Sprintf("store-down authorize fail-opened (%d) %s", ex.Status, ex.Response)
@@ -447,12 +462,16 @@ func (r *runner) adminHeaders() map[string]string {
 }
 
 func (r *runner) mintAgentSession(customer, principal string) (string, error) {
-	if strings.TrimSpace(r.cfg.HMACSecret) == "" {
-		return "", fmt.Errorf("HMAC secret not provided")
-	}
-	assertion, err := auth.IssueDevAssertion(r.cfg.HMACSecret, customer, time.Hour, nil)
-	if err != nil {
-		return "", err
+	assertion := strings.TrimSpace(r.cfg.IdentityToken)
+	if assertion == "" {
+		if strings.TrimSpace(r.cfg.HMACSecret) == "" {
+			return "", fmt.Errorf("HMAC secret not provided")
+		}
+		var err error
+		assertion, err = auth.IssueDevAssertion(r.cfg.HMACSecret, customer, time.Hour, nil)
+		if err != nil {
+			return "", err
+		}
 	}
 	ex := capturePOST(r.client, r.control+"/v1/sessions", map[string]string{
 		"Authorization": "Bearer " + assertion,

@@ -19,7 +19,7 @@ LAB_ENV ?= BRUISER_ENV=lab \
 FUZZ_TIME ?= 10s
 
 .PHONY: all build test test-race lint fmt vet fuzz serve migrate tidy ci torture simtix authority-check eaf-demo eaf-nightly sdk-test doctor secrets-scan verify-mods \
-	demo-1x10000 demo-1000x10 demo-handoff demo-bypass demo-unaware demo-up v1-accept soak
+	demo-1x10000 demo-1000x10 demo-handoff demo-bypass demo-unaware demo-up v1-accept soak production-readiness
 
 all: build
 
@@ -71,6 +71,12 @@ doctor: build
 
 config-validate: build
 	$(LAB_ENV) $(BIN) config validate configs/example.yaml
+
+# Operator gate (documentation). Lab make authority-check is not a certificate.
+production-readiness:
+	@echo "Deploy → config validate → /readyz → Authority Check (certificate) → Dry Run → 10/25/50/75/100"
+	@echo "Docs: docs/13-production-readiness.md"
+	@echo "Profile example: configs/production.example.yaml"
 
 eaf-demo: build
 	$(BIN) eaf-demo --front http://127.0.0.1:8091 --n 2000

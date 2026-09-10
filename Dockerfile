@@ -21,6 +21,6 @@ COPY --from=build /out/bruiser /bruiser
 COPY --from=build /src/configs /configs
 USER nonroot:nonroot
 EXPOSE 8080 8081 8082
-ENV BRUISER_PROFILE=/configs/arsenal.yaml
+ENV BRUISER_PROFILE=/configs/production.example.yaml
 ENTRYPOINT ["/bruiser"]
 CMD ["serve"]

@@ -101,7 +101,9 @@ func checkConfig(r *Report, cfg config.Config) {
 		return
 	}
 	detail := cfg.StartupBanner()
-	if warns := append(cfg.SecretWarnings(), cfg.UnsafeModeWarnings()...); len(warns) > 0 {
+	warns := append(cfg.SecretWarnings(), cfg.UnsafeModeWarnings()...)
+	warns = append(warns, cfg.ProductionWarnings()...)
+	if len(warns) > 0 {
 		r.add("configuration", Warn, detail+"; "+strings.Join(warns, "; "))
 		return
 	}

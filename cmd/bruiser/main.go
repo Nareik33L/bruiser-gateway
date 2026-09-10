@@ -86,6 +86,7 @@ func cmdServe(cfg config.Config, log *slog.Logger) error {
 	if profile.Mode != "" && os.Getenv("BRUISER_MODE") == "" {
 		cfg.Mode = profile.Mode
 	}
+	cfg.OverlayProfile(profile.Identity.JWKSURL, profile.Identity.Issuer, profile.Identity.Audience, profile.MerchantID, profile.Name)
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
@@ -112,6 +113,9 @@ func cmdServe(cfg config.Config, log *slog.Logger) error {
 	}
 	for _, w := range cfg.UnsafeModeWarnings() {
 		log.Warn("unsafe mode", "detail", w)
+	}
+	for _, w := range cfg.ProductionWarnings() {
+		log.Warn("production config", "detail", w)
 	}
 	log.Info(cfg.StartupBanner())
 

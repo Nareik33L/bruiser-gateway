@@ -36,6 +36,12 @@ type Config struct {
 	// Production forces certificate-mode detection. Leave false to read
 	// production from the admin status payload.
 	Production bool
+	// IdentityToken is a merchant-minted staging/production JWT (OIDC).
+	// When set, legitimate session/acquire/authorize probes use it instead
+	// of lab HMAC cookies. Adversarial HMAC probes still mint HMAC material
+	// and expect rejection. Do not log this value.
+	IdentityToken string
+	CookieName    string
 
 	detectedProduction bool
 }
@@ -133,8 +139,14 @@ func Run(cfg Config) (Report, error) {
 	if cfg.HMACSecret == "" {
 		cfg.HMACSecret = os.Getenv("BRUISER_DEV_HMAC_SECRET")
 	}
-	if cfg.HMACSecret == "" {
+	if cfg.HMACSecret == "" && strings.TrimSpace(cfg.IdentityToken) == "" {
 		cfg.HMACSecret = "dev-secret-change-me"
+	}
+	if cfg.IdentityToken == "" {
+		cfg.IdentityToken = os.Getenv("BRUISER_IDENTITY_TOKEN")
+	}
+	if cfg.CookieName == "" {
+		cfg.CookieName = os.Getenv("BRUISER_IDENTITY_COOKIE")
 	}
 	if cfg.StoreDownURL == "" {
 		cfg.StoreDownURL = os.Getenv("BRUISER_STORE_DOWN_URL")
@@ -575,11 +587,11 @@ func Run(cfg Config) (Report, error) {
 		if edge == "" {
 			return fail("front URL not set")
 		}
-		tok, err := auth.IssueBoxOfficeSession(cfg.HMACSecret, fmt.Sprintf("auth-ok-%d", time.Now().UnixNano()), time.Hour)
+		hdr, err := cfg.customerHeaders(fmt.Sprintf("auth-ok-%d", time.Now().UnixNano()))
 		if err != nil {
 			return fail("%s", err.Error())
 		}
-		code, body := postJSON(client, edge+holdPath, cookieHeader(tok), map[string]int{"seats": 1})
+		code, body := postJSON(client, edge+holdPath, hdr, map[string]int{"seats": 1})
 		if code >= 200 && code < 300 {
 			return pass("front allocated through Bruiser (%d)", code)
 		}
@@ -665,6 +677,33 @@ func cookieHeader(tok string) map[string]string {
 	return map[string]string{"Cookie": simtix.CookieName + "=" + tok}
 }
 
+func (c Config) cookieName() string {
+	if strings.TrimSpace(c.CookieName) != "" {
+		return strings.TrimSpace(c.CookieName)
+	}
+	return simtix.CookieName
+}
+
+// customerHeaders returns Edge/origin identity headers for a legitimate
+// customer. Staging/production passes --identity-token (OIDC JWT). Lab
+// mints an HMAC box-office cookie for membership.
+func (c Config) customerHeaders(membership string) (map[string]string, error) {
+	if tok := strings.TrimSpace(c.IdentityToken); tok != "" {
+		return map[string]string{
+			"Cookie":        c.cookieName() + "=" + tok,
+			"Authorization": "Bearer " + tok,
+		}, nil
+	}
+	if membership == "" {
+		membership = c.Membership
+	}
+	tok, err := auth.IssueBoxOfficeSession(c.HMACSecret, membership, time.Hour)
+	if err != nil {
+		return nil, err
+	}
+	return cookieHeader(tok), nil
+}
+
 type mintedExecution struct {
 	Token string
 	Fence string
@@ -676,14 +715,15 @@ func mintHoldExecution(client *http.Client, control string, cfg Config, membersh
 }
 
 func mintPathExecution(client *http.Client, control string, cfg Config, membership, path string) (mintedExecution, error) {
-	tok, err := auth.IssueBoxOfficeSession(cfg.HMACSecret, membership, time.Hour)
+	hdr, err := cfg.customerHeaders(membership)
 	if err != nil {
 		return mintedExecution{}, err
 	}
-	code, body, hdr := postJSONHdr(client, control+"/v1/authorize", map[string]string{
-		"Cookie":                simtix.CookieName + "=" + tok,
-		"X-Bruiser-Edge-Secret": cfg.EdgeSecret,
-	}, map[string]string{"method": "POST", "path": path})
+	if hdr == nil {
+		hdr = map[string]string{}
+	}
+	hdr["X-Bruiser-Edge-Secret"] = cfg.EdgeSecret
+	code, body, rh := postJSONHdr(client, control+"/v1/authorize", hdr, map[string]string{"method": "POST", "path": path})
 	if code != http.StatusOK {
 		return mintedExecution{}, fmt.Errorf("authorize %d %s", code, body)
 	}
@@ -694,8 +734,8 @@ func mintPathExecution(client *http.Client, control string, cfg Config, membersh
 	}
 	_ = json.Unmarshal([]byte(body), &out)
 	exe := mintedExecution{
-		Token: hdr.Get("X-Bruiser-Execution"),
-		Fence: hdr.Get("X-Bruiser-Fence"),
+		Token: rh.Get("X-Bruiser-Execution"),
+		Fence: rh.Get("X-Bruiser-Fence"),
 		ID:    out.ExecutionID,
 	}
 	if exe.Token == "" {

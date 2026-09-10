@@ -15,6 +15,25 @@ func TestExampleProfileValidates(t *testing.T) {
 	}
 }
 
+func TestProductionExampleProfileValidates(t *testing.T) {
+	p, err := LoadFile("../../configs/production.example.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Resources) == 0 {
+		t.Fatal("production example must ship a closed catalogue")
+	}
+	issues := p.SafetyIssues(SafetyOpts{Production: true})
+	for _, i := range issues {
+		if i.Level == "FAIL" {
+			t.Fatalf("production example must pass SafetyIssues: %+v", issues)
+		}
+	}
+}
+
 func TestValidateMissingRoutes(t *testing.T) {
 	p := Empty("x")
 	if err := p.Validate(); err == nil {
