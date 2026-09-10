@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Nareik33L/bruiser-gateway/internal/api/public"
+	"github.com/Nareik33L/bruiser-gateway/internal/attacklab"
 	"github.com/Nareik33L/bruiser-gateway/internal/auth"
 	"github.com/Nareik33L/bruiser-gateway/internal/config"
 	"github.com/Nareik33L/bruiser-gateway/internal/merchant"
@@ -143,26 +144,39 @@ func cmdServe(cfg config.Config, log *slog.Logger) error {
 	if !cfg.Telemetry {
 		log.Info("telemetry disabled (merchant-controlled; no vendor phone-home)")
 	}
-	handler := publicapi.New(cfg, store, signer, log, profile)
-	if err := handler.CheckPolicySafety(); err != nil {
+	profile = withAttackLabRoutes(profile)
+	api := publicapi.New(cfg, store, signer, log, profile)
+	if err := api.CheckPolicySafety(); err != nil {
 		return err
 	}
-	handler.Start(ctx)
-	defer handler.Close()
+	api.Start(ctx)
+	defer api.Close()
 	if strings.TrimSpace(cfg.AdminAddr) == "" {
 		return fmt.Errorf("BRUISER_ADMIN_ADDR is required")
 	}
+	lab, err := attacklab.New(attacklab.Config{
+		HMACSecret:   cfg.DevHMACSecret,
+		EdgeSecret:   cfg.EdgeSecret,
+		OriginSecret: cfg.OriginSecret,
+		Gateway:      api,
+		Log:          log,
+	})
+	if err != nil {
+		return fmt.Errorf("attack lab: %w", err)
+	}
+	go sweepLab(lab, 30*time.Second, sweeperStop)
+	handler := composeSite(api, lab)
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      35 * time.Second,
-		IdleTimeout:       60 * time.Second,
+		WriteTimeout:      0,
+		IdleTimeout:       120 * time.Second,
 	}
 	adminSrv := &http.Server{
 		Addr:              cfg.AdminAddr,
-		Handler:           handler.AdminHandler(),
+		Handler:           api.AdminHandler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      35 * time.Second,
@@ -171,7 +185,7 @@ func cmdServe(cfg config.Config, log *slog.Logger) error {
 
 	errCh := make(chan error, 2)
 	go func() {
-		log.Info("listening", "addr", cfg.HTTPAddr, "merchant", cfg.MerchantID)
+		log.Info("listening", "addr", cfg.HTTPAddr, "merchant", cfg.MerchantID, "site", "/")
 		errCh <- srv.ListenAndServe()
 	}()
 	go func() {
@@ -181,7 +195,7 @@ func cmdServe(cfg config.Config, log *slog.Logger) error {
 
 	var proxySrv *http.Server
 	if cfg.ProxyAddr != "" {
-		ph, err := handler.ProxyHandler(cfg.OriginURL)
+		ph, err := api.ProxyHandler(cfg.OriginURL)
 		if err != nil {
 			return err
 		}

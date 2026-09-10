@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attack Lab — Bruiser</title>
+<link rel="stylesheet" href="/assets/css/site.css">
+<body>
+  <nav class="nav">
+    <a class="brand" href="/"><span class="mark">🛡</span> BRUISER</a>
+    <div class="nav-links">
+      <span>Attack Lab</span>
+      <a class="pill ghost" href="/">Main site</a>
+    </div>
+  </nav>
+
+  <header class="hero" id="hero">
+    <p class="kicker">ATTACK LAB</p>
+    <h1>Can your store survive the drop?</h1>
+    <p class="sub">Set up a protected store in seconds. Then unleash a swarm of simulated shoppers and watch Bruiser separate fans from bots.</p>
+    <div class="hero-actions">
+      <a class="pill" href="#create" id="launch">Launch Attack Lab →</a>
+    </div>
+    <p class="disclaimer">100% sandbox traffic. Nothing leaves this demo environment.</p>
+  </header>
+
+  <div class="wrap">
+    <div class="steps" id="progress" aria-hidden="true">
+      <span class="step" data-step="create">CREATE</span>
+      <span class="step" data-step="observe">OBSERVE</span>
+      <span class="step" data-step="dry">DRY RUN</span>
+      <span class="step" data-step="value">SEE THE VALUE</span>
+      <span class="step" data-step="enforce">ENFORCE</span>
+    </div>
+
+    <section class="section" id="create">
+      <h2>Create your demo store</h2>
+      <p class="lede">No API keys, domains, webhooks, or Shopify credentials. Bruiser hosts a temporary sandbox store.</p>
+      <form class="panel" id="create-form" style="margin-top:24px">
+        <div class="fields">
+          <div>
+            <label for="name">Store name</label>
+            <input id="name" name="name" type="text" value="Bruiser FC" maxlength="80" autocomplete="off">
+          </div>
+          <div>
+            <label for="product">Product</label>
+            <input id="product" name="product" type="text" value="Limited Edition Shirt" maxlength="80" autocomplete="off">
+          </div>
+          <div>
+            <label for="price">Price</label>
+            <input id="price" name="price" type="text" value="£50.00" maxlength="24" autocomplete="off">
+          </div>
+        </div>
+        <div class="row">
+          <button class="pill" type="submit">Create Store →</button>
+          <span class="muted" id="create-err"></span>
+        </div>
+      </form>
+    </section>
+
+    <section class="section hidden" id="live-store">
+      <p class="live">Your store is live.</p>
+      <h2>Limited drop, Bruiser in front.</h2>
+      <div class="store-preview">
+        <div class="kicker">LIMITED DROP</div>
+        <h3 id="pv-title">Bruiser FC × Special Edition</h3>
+        <p class="muted" id="pv-product">Limited Edition Shirt</p>
+        <div class="price" id="pv-price">£50.00</div>
+        <p class="muted" style="margin-top:16px">[ BUY NOW ]</p>
+      </div>
+      <div class="row">
+        <a class="pill ghost" id="view-store" href="#" target="_blank" rel="noopener">View Store</a>
+        <button class="pill" type="button" id="to-config">Continue →</button>
+      </div>
+    </section>
+
+    <section class="section hidden" id="config">
+      <h2>Bruiser configuration</h2>
+      <div class="panel" style="margin-top:20px">
+        <p class="muted" style="letter-spacing:.14em;font-size:12px;font-weight:700">YOUR DEMO STORE</p>
+        <p><span class="status-dot"></span><strong>Store online</strong> · <span id="cfg-name">Bruiser FC</span></p>
+        <p class="muted" style="letter-spacing:.14em;font-size:12px;font-weight:700;margin-top:22px">BRUISER</p>
+        <div class="mode-list" id="modes">
+          <label class="mode"><input type="radio" name="mode" value="off"> <div><b>○ Off</b><span>Gateway is not admitting traffic. The store is unprotected.</span></div></label>
+          <label class="mode on"><input type="radio" name="mode" value="dry-run" checked> <div><b>● Dry Run</b><span>Dry Run watches every request and makes decisions without blocking anyone.</span></div></label>
+          <label class="mode"><input type="radio" name="mode" value="enforce"> <div><b>○ Enforce</b><span>Bruiser will actively reject suspicious agents.</span></div></label>
+        </div>
+        <p class="muted" id="mode-copy">Dry Run watches every request and makes decisions without blocking anyone.</p>
+        <div class="row">
+          <button class="pill" type="button" id="to-agents">Continue →</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="section hidden" id="agents">
+      <h2>Unleash the agents.</h2>
+      <p class="lede mood" id="pre-mood">Your store looks peaceful.</p>
+      <div class="panel" style="margin-top:8px">
+        <div class="range-row">
+          <label for="swarm">Agent swarm</label>
+          <strong id="swarm-val">50 agents</strong>
+        </div>
+        <input id="swarm" type="range" min="10" max="100" value="50" step="1">
+        <p class="muted">Normal supporters, mobile fans, rapid-fire bots, multi-account bots, and duplicate purchasers — not identical requests.</p>
+        <div class="row">
+          <button class="attack-btn" type="button" id="attack">🤖 Release the bots</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="section hidden" id="live">
+      <h2>Live attack</h2>
+      <p class="mood" id="mood">They’re getting angry.</p>
+      <div class="viz-wrap">
+        <canvas id="swarm-canvas"></canvas>
+        <div class="shield-label">🛡 BRUISER</div>
+      </div>
+      <div class="metrics" id="metrics">
+        <div class="metric"><div class="n" data-k="total">0</div><div class="l">TOTAL REQUESTS</div></div>
+        <div class="metric"><div class="n" data-k="allowed">0</div><div class="l">ALLOWED</div></div>
+        <div class="metric"><div class="n" data-k="suspicious">0</div><div class="l">SUSPICIOUS</div></div>
+        <div class="metric"><div class="n" data-k="would_be_blocked">0</div><div class="l" id="block-label">WOULD BE BLOCKED</div></div>
+      </div>
+      <p class="muted" style="letter-spacing:.14em;font-size:12px;font-weight:700;margin:22px 0 8px">AGENT ACTIVITY</p>
+      <div class="feed" id="feed"></div>
+    </section>
+
+    <section class="section hidden" id="dry-results">
+      <p class="banner dry">DRY RUN</p>
+      <h2>Attack complete.</h2>
+      <div class="big-stat" id="dry-headline">0 would have been stopped</div>
+      <p class="lede">Nobody was blocked. That’s the point.</p>
+      <p class="muted">Bruiser simulated every decision against your store without changing the customer experience.</p>
+      <div class="panel" style="margin-top:22px">
+        <p class="muted" style="letter-spacing:.14em;font-size:12px;font-weight:700">ATTACK RESULTS</p>
+        <p>Total attempts: <strong id="dry-total">0</strong></p>
+        <p>Suspicious: <strong id="dry-sus">0</strong></p>
+        <p>Would be blocked: <strong id="dry-wbb">0</strong></p>
+        <p>Allowed: <strong id="dry-ok">0</strong></p>
+      </div>
+      <div class="row">
+        <button class="pill" type="button" id="enable-enforce">Enable Enforce →</button>
+      </div>
+    </section>
+
+    <section class="section hidden" id="enforce-live">
+      <p class="banner enf">🔴 ENFORCE ENABLED</p>
+      <h2>Okay. Now we’re fighting back.</h2>
+      <p class="lede">Bruiser will now actively enforce its decisions. Same swarm. Different ending.</p>
+    </section>
+
+    <section class="section hidden" id="final">
+      <h2>Bruiser won.</h2>
+      <div class="panel">
+        <p class="muted" style="letter-spacing:.14em;font-size:12px;font-weight:700">ATTACK RESULTS</p>
+        <p>Requests: <strong id="fin-total">0</strong></p>
+        <p>Allowed: <strong id="fin-ok">0</strong></p>
+        <p>Blocked: <strong id="fin-block">0</strong></p>
+      </div>
+      <div class="compare">
+        <article class="card">
+          <h3>WITHOUT BRUISER</h3>
+          <p id="without">Suspicious agents reach checkout</p>
+        </article>
+        <article class="card">
+          <h3>WITH BRUISER</h3>
+          <p id="with">Suspicious agents stopped</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section hidden" id="convert">
+      <h2>Ready to protect the real thing?</h2>
+      <p class="lede">Bruiser sits in front of your existing checkout and lets you test its decisions before enforcing them.</p>
+      <div class="row">
+        <a class="pill" href="mailto:hello@bruiser-gateway.com?subject=Protect%20my%20Shopify%20store">Protect my Shopify store →</a>
+        <a class="pill ghost" href="mailto:hello@bruiser-gateway.com?subject=Talk%20about%20my%20club">Talk to us about my club →</a>
+      </div>
+      <p class="muted" style="margin-top:18px">For football clubs: run the same test against your ticketing setup.</p>
+    </section>
+  </div>
+
+  <footer class="footer">
+    <span>Sandbox only. Agents cannot target third-party URLs.</span>
+    <span>© Bruiser Gateway</span>
+  </footer>
+  <script src="/assets/js/attack-lab.js"></script>
+</body>
+</html>
