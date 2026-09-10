@@ -172,6 +172,37 @@ func TestDemoOffBurnsSeats(t *testing.T) {
 	}
 }
 
+func TestDemoResetClearsFeed(t *testing.T) {
+	requireStack(t)
+	resetDemo(t)
+	setEdge(t, "enforce", 100)
+	_ = runSwarm(t, map[string]any{
+		"membership_number": "1001234",
+		"password":          "password",
+		"agents":            8,
+		"spawn_per_s":       8,
+		"retry_window_sec":  6,
+		"preset":            "single",
+	}, 25*time.Second)
+	lab := getenv("LOADLAB_URL", "http://127.0.0.1:8120")
+	adminSecret := getenv("DEMO_ADMIN_SECRET", "demo-admin-dev")
+	before := getJSON(t, lab+"/status", "X-Demo-Admin-Secret", adminSecret)
+	ev, _ := before["events"].([]any)
+	if len(ev) == 0 {
+		t.Fatal("expected live-feed events before reset")
+	}
+	resetDemo(t)
+	after := getJSON(t, lab+"/status", "X-Demo-Admin-Secret", adminSecret)
+	ev, _ = after["events"].([]any)
+	if len(ev) != 0 {
+		t.Fatalf("reset must clear live feed, got %d events: %v", len(ev), ev)
+	}
+	sum, _ := after["summary"].(map[string]any)
+	if asInt(sum["denied"]) != 0 || asInt(sum["authenticated"]) != 0 {
+		t.Fatalf("reset must clear summary, got %v", sum)
+	}
+}
+
 func TestAuthorityCheckCertificate(t *testing.T) {
 	requireStack(t)
 	bin := getenv("BRUISER_BIN", "")
@@ -229,7 +260,7 @@ func resetDemo(t *testing.T) {
 	opSecret := getenv("BRUISER_OPERATOR_SECRET", "operator-secret-dev")
 	reset(t, getenv("BRUISER_URL", "http://127.0.0.1:8080")+"/v1/operator/reset-executions", "X-Bruiser-Operator-Secret", opSecret)
 	reset(t, getenv("SIMTIX_ORIGIN_URL", "http://127.0.0.1:8090")+"/_admin/reset", "X-Demo-Admin-Secret", adminSecret)
-	reset(t, getenv("LOADLAB_URL", "http://127.0.0.1:8120")+"/stop", "X-Demo-Admin-Secret", adminSecret)
+	reset(t, getenv("LOADLAB_URL", "http://127.0.0.1:8120")+"/reset", "X-Demo-Admin-Secret", adminSecret)
 	setEdge(t, "enforce", 100)
 }
 

@@ -95,6 +95,8 @@ services:
       HARCHESTER_URL: http://harchester:8100
       SIMTIX_EDGE_URL: http://simtix:8091
       DEMO_ADMIN_SECRET: demo-admin-dev
+    extra_hosts:
+      - "tickets.localhost:host-gateway"
     depends_on:
       - harchester
       - simtix

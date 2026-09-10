@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -48,12 +49,13 @@ type lab struct {
 }
 
 type run struct {
-	cancel context.CancelFunc
-	events []event
-	subs   []chan event
-	sum    Summary
-	done   bool
-	preset string
+	cancel  context.CancelFunc
+	events  []event
+	subs    []chan event
+	sum     Summary
+	done    bool
+	preset  string
+	cleared bool
 }
 
 type event struct {
@@ -102,6 +104,7 @@ func (l *lab) routes() http.Handler {
 	r.Get("/status", l.auth(l.status))
 	r.Post("/run", l.auth(l.start))
 	r.Post("/stop", l.auth(l.stop))
+	r.Post("/reset", l.auth(l.reset))
 	r.Get("/events", l.auth(l.stream))
 	return r
 }
@@ -184,12 +187,27 @@ func (l *lab) start(w http.ResponseWriter, r *http.Request) {
 }
 
 func (l *lab) stop(w http.ResponseWriter, _ *http.Request) {
+	l.clear()
+	shared.WriteJSON(w, http.StatusOK, map[string]string{"status": "stopping"})
+}
+
+func (l *lab) reset(w http.ResponseWriter, _ *http.Request) {
+	l.clear()
+	shared.WriteJSON(w, http.StatusOK, map[string]string{"status": "reset"})
+}
+
+// clear cancels the current swarm and drops its live feed so Reset does not
+// keep painting stale agent rows.
+func (l *lab) clear() {
 	l.mu.Lock()
+	defer l.mu.Unlock()
 	if l.run != nil {
 		l.run.cancel()
+		l.run.events = nil
+		l.run.sum = Summary{}
+		l.run.cleared = true
 	}
-	l.mu.Unlock()
-	shared.WriteJSON(w, http.StatusOK, map[string]string{"status": "stopping"})
+	l.running = false
 }
 
 func (l *lab) status(w http.ResponseWriter, r *http.Request) {
@@ -198,11 +216,13 @@ func (l *lab) status(w http.ResponseWriter, r *http.Request) {
 	body := map[string]any{"running": l.running}
 	if l.run != nil {
 		events := l.run.events
-		if len(events) > 80 {
+		if l.run.cleared {
+			events = nil
+		} else if len(events) > 80 {
 			events = events[len(events)-80:]
 		}
 		body["summary"] = l.run.sum
-		body["done"] = l.run.done
+		body["done"] = l.run.done || l.run.cleared
 		body["preset"] = l.run.preset
 		body["events"] = append([]event(nil), events...)
 	}
@@ -244,7 +264,9 @@ func (l *lab) stream(w http.ResponseWriter, r *http.Request) {
 func (l *lab) execute(ctx context.Context, rn *run, req startReq) {
 	defer func() {
 		l.mu.Lock()
-		l.running = false
+		if l.run == rn {
+			l.running = false
+		}
 		rn.done = true
 		for _, ch := range rn.subs {
 			close(ch)
@@ -271,6 +293,9 @@ func (l *lab) execute(ctx context.Context, rn *run, req startReq) {
 		}
 	}
 	publish := func(e event) {
+		if rn.cleared {
+			return
+		}
 		e.At = time.Now().UnixMilli()
 		rn.events = append(rn.events, e)
 		if len(rn.events) > 400 {
@@ -312,7 +337,9 @@ func (l *lab) execute(ctx context.Context, rn *run, req startReq) {
 			finished.Add(1)
 			publishLive := idx < 80 || res.ordered || idx%25 == 0 || idx == req.Agents-1
 			l.mu.Lock()
-			rn.sum = snapshot()
+			if !rn.cleared {
+				rn.sum = snapshot()
+			}
 			if publishLive {
 				publish(event{
 					Type: "agent", ID: idx + 1, Membership: mem, Path: pathClubEdge,
@@ -328,8 +355,10 @@ func (l *lab) execute(ctx context.Context, rn *run, req startReq) {
 	}
 	wg.Wait()
 	l.mu.Lock()
-	rn.sum = snapshot()
-	publish(event{Type: "done", Detail: "complete", Path: pathClubEdge})
+	if !rn.cleared {
+		rn.sum = snapshot()
+		publish(event{Type: "done", Detail: "complete", Path: pathClubEdge})
+	}
 	l.mu.Unlock()
 	l.log.Info("run complete", "summary", rn.sum)
 }
@@ -404,7 +433,7 @@ func (l *lab) agent(ctx context.Context, membership, password string, retryWindo
 		out.denied++
 		return out
 	}
-	loc := resp.Header.Get("Location")
+	loc := rewriteHandoffURL(resp.Header.Get("Location"), l.edgeURL)
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
 	_ = resp.Body.Close()
 	if loc == "" {
@@ -567,4 +596,28 @@ func originDetail(b []byte) string {
 		s = s[:120]
 	}
 	return s
+}
+
+// rewriteHandoffURL replaces the club buy Location's scheme/host/port with
+// SIMTIX_EDGE_URL so Compose load-lab can follow SSO. Club emits
+// tickets.localhost (browser hostname); that name does not resolve inside
+// the loadlab container. Path and query are kept so the SSO token survives.
+func rewriteHandoffURL(loc, edgeBase string) string {
+	if loc == "" {
+		return ""
+	}
+	base, err := url.Parse(edgeBase)
+	if err != nil || base.Scheme == "" || base.Host == "" {
+		return loc
+	}
+	u, err := url.Parse(loc)
+	if err != nil {
+		return loc
+	}
+	u.Scheme = base.Scheme
+	u.Host = base.Host
+	if u.Path == "" {
+		u.Path = "/"
+	}
+	return u.String()
 }

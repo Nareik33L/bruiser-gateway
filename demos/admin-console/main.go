@@ -185,7 +185,7 @@ func (c *console) reset(w http.ResponseWriter, _ *http.Request) {
 	h := map[string]string{"X-Demo-Admin-Secret": c.adminSecret}
 	sim := c.post(c.simtixOrigin+"/_admin/reset", h, nil)
 	c.post(c.simtixEdge+"/_edge/reset-stats", h, nil)
-	c.post(c.loadlab+"/stop", h, nil)
+	c.post(c.loadlab+"/reset", h, nil)
 	gw := c.post(c.gateway+"/v1/operator/reset-executions", map[string]string{"X-Bruiser-Operator-Secret": c.operatorSecret}, nil)
 	seats := seed.HeadlineSeats
 	if v, ok := sim["available"].(float64); ok {
@@ -355,6 +355,7 @@ const log = document.getElementById('log');
 const cert = document.getElementById('cert');
 const auditEl = document.getElementById('audit');
 const feed = document.getElementById('feed');
+let holdFeed = false;
 function toast(msg){
   const rs = document.getElementById('resetStatus');
   if (rs) rs.textContent = msg;
@@ -411,9 +412,12 @@ es.addEventListener('snapshot', (e) => {
   tiles.innerHTML = items.map(([k,v,s,hot]) => '<div class="tile'+(hot?' hot':'')+'"><span>'+k+'</span><b>'+(v??'—')+'</b><span>'+s+'</span></div>').join('');
   const events = lab.events || [];
   const rows = events.filter(x => x.type === 'agent').slice(-40).reverse();
-  if (!rows.length) {
+  if (holdFeed && !lab.running) {
+    feed.innerHTML = '<tr><td colspan="5">Waiting for a run…</td></tr>';
+  } else if (!rows.length) {
     feed.innerHTML = '<tr><td colspan="5">'+(lab.running ? 'Swarm running…' : 'Waiting for a run…')+'</td></tr>';
   } else {
+    if (lab.running) holdFeed = false;
     feed.innerHTML = rows.map(x => {
       const st = (x.status||'').toLowerCase();
       return '<tr><td>'+(x.id||'')+'</td><td>'+(x.membership||'—')+'</td><td class="st-'+st+'">'+(x.status||'—')+'</td><td>'+(x.path||'club → Edge hold/order')+'</td><td>'+(x.detail||'')+'</td></tr>';
@@ -427,6 +431,8 @@ async function resetDemo(){
     const res = await fetch('/reset', {method:'POST'});
     const d = await res.json().catch(() => ({}));
     toast(d.message || ('Reset: '+(d.seats_remaining??'—')+' seats remaining, executions cleared.'));
+    holdFeed = true;
+    feed.innerHTML = '<tr><td colspan="5">Waiting for a run…</td></tr>';
   } catch (err) {
     toast('Reset failed: '+(err && err.message ? err.message : err));
   }
@@ -448,6 +454,7 @@ async function launch(){
   const body = { password: document.getElementById('pw').value, agents, spawn_per_s: 1000, retry_window_sec: 8, preset };
   if (preset === 'single') body.membership_number = document.getElementById('mem').value;
   if (preset === 'multi') { body.supporters = 1000; body.start_membership = 1000001; }
+  holdFeed = false;
   await fetch('/swarm', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
 }
 async function stopSwarm(){ await fetch('/swarm/stop', {method:'POST'}); }
