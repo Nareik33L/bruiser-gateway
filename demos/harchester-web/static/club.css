@@ -311,8 +311,9 @@ img { max-width: 100%; display: block; }
   text-transform: uppercase;
   font-size: 11px;
   font-weight: 800;
-  opacity: .85;
+  color: #f3e8ff;
   margin: 0 0 8px;
+  text-shadow: 0 1px 8px rgba(0,0,0,.45);
 }
 .match-hero h1 {
   font-size: clamp(1.8rem, 4vw, 2.6rem);

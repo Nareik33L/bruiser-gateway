@@ -159,13 +159,16 @@ a { color: var(--accent); text-decoration: none; }
   border-radius: 8px;
   border: 1px solid #fecaca;
 }
+.is-seats footer { display: none; }
+.is-seats { overflow: hidden; }
 .seats-page {
   display: grid;
   grid-template-columns: 1.7fr .9fr;
-  min-height: calc(100vh - 58px);
+  height: calc(100vh - 58px);
   background: #f7f9fc;
+  overflow: hidden;
 }
-.seats-main { padding: 18px 24px 32px; }
+.seats-main { padding: 12px 24px 20px; overflow: auto; }
 .seats-main h1 { font-size: 1.35rem; margin: 8px 0 12px; letter-spacing: -.02em; }
 .legend { display: flex; gap: 16px; font-size: 13px; color: var(--muted); margin: 0 0 12px; }
 .legend i {
@@ -182,7 +185,7 @@ a { color: var(--accent); text-decoration: none; }
   border-radius: 16px;
   padding: 18px;
 }
-.bowl { width: 100%; height: auto; display: block; }
+.bowl { width: 100%; height: auto; display: block; max-height: calc(100vh - 170px); }
 .seat { cursor: pointer; }
 .seat.taken { cursor: default; }
 .rail {
@@ -191,6 +194,7 @@ a { color: var(--accent); text-decoration: none; }
   padding: 18px 22px 24px;
   display: flex;
   flex-direction: column;
+  overflow: auto;
 }
 .hold-pill {
   align-self: flex-end;
@@ -330,7 +334,8 @@ footer {
 }
 @media (max-width: 900px) {
   .event-layout, .seats-page, .checkout-grid, .event-meta, .row-2 { grid-template-columns: 1fr; }
-  .seats-page { min-height: auto; }
+  .seats-page { min-height: auto; height: auto; overflow: visible; }
+  .is-seats { overflow: auto; }
   .rail { border-left: 0; border-top: 1px solid var(--line); }
   .wrap, .crumb { width: min(1120px, calc(100% - 28px)); }
 }

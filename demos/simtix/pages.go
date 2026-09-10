@@ -12,17 +12,21 @@ import (
 )
 
 func simtixPage(w http.ResponseWriter, title, body string) {
+	simtixPageClass(w, title, "", body)
+}
+
+func simtixPageClass(w http.ResponseWriter, title, bodyClass, body string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprintf(w, `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>%s · SimTix</title><link rel="stylesheet" href="/assets/simtix.css"></head>
-<body>
+<body class="%s">
 <header class="nav"><a class="brand" href="/">SimTix</a>
 <nav><a href="/">Help</a><a href="/basket">My tickets</a><a href="/">Sign in</a></nav></header>
 %s
 <footer><p>SimTix Ltd · Independent ticketing platform · Not affiliated with any club.</p>
 <p>Fictional demonstration environment. No real payments are taken.</p></footer>
-</body></html>`, title, body)
+</body></html>`, title, bodyClass, body)
 }
 
 func (o *origin) pageHome(w http.ResponseWriter, _ *http.Request) {
@@ -147,10 +151,10 @@ func (o *origin) pageSeats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	west, selected := westSeatDots()
-	simtixPage(w, "Select seats", fmt.Sprintf(`
-<p class="crumb wrap"><a href="/events/%s">Event</a> / Select seats</p>
+	simtixPageClass(w, "Select seats", "is-seats", fmt.Sprintf(`
 <div class="seats-page">
   <div class="seats-main">
+    <p class="crumb" style="padding:0 0 8px;width:auto;margin:0"><a href="/events/%s">Event</a> / Select seats</p>
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
       <h1>Dragon's Lair — seat map</h1>
       <div class="legend">
