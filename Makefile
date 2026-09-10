@@ -129,17 +129,18 @@ demo-unaware: build
 	$(BIN) swarm --front http://127.0.0.1:8091 --profile unaware --n 200
 
 demo-check: demo-build
-	$(BIN) authority-check --edge http://127.0.0.1:8091 --origin http://127.0.0.1:8090 \
+	$(LAB_ENV) $(BIN) authority-check --edge http://127.0.0.1:8091 --origin http://127.0.0.1:8090 \
 		--membership 1001234 --event hfc-ars --json
+
+demo-e2e:
+	DEMO_E2E=1 BRUISER_BIN="$(CURDIR)/bin/bruiser" BRUISER_DEV_HMAC_SECRET="$${BRUISER_DEV_HMAC_SECRET:-dev-secret-change-me}" \
+		BRUISER_TEST_DATABASE_URL="$(TEST_DATABASE_URL)" $(GO) test ./demos/e2e -count=1 -timeout 240s
 
 demo-reset:
 	curl -sS -X POST http://127.0.0.1:8110/reset -H 'Cookie: admin_session=harchester-ok' || true
 
 demo-up-local: demo-build
 	bash scripts/demo-up-local.sh
-
-demo-e2e:
-	DEMO_E2E=1 BRUISER_BIN="$(CURDIR)/bin/bruiser" BRUISER_TEST_DATABASE_URL="$(TEST_DATABASE_URL)" $(GO) test ./demos/e2e -count=1 -timeout 180s
 
 demo-down-local:
 	bash scripts/demo-down-local.sh

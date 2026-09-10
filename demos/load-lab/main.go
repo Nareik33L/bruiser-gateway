@@ -10,6 +10,7 @@ import (
 	"net/http/cookiejar"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,6 +20,8 @@ import (
 	"github.com/Nareik33L/bruiser-gateway/demos/seed"
 	"github.com/Nareik33L/bruiser-gateway/demos/shared"
 )
+
+const pathClubEdge = "club → Edge hold/order"
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -50,14 +53,17 @@ type run struct {
 	subs   []chan event
 	sum    Summary
 	done   bool
+	preset string
 }
 
 type event struct {
-	Type   string `json:"type"`
-	At     int64  `json:"at"`
-	ID     int    `json:"id,omitempty"`
-	Detail string `json:"detail,omitempty"`
-	Status string `json:"status,omitempty"`
+	Type       string `json:"type"`
+	At         int64  `json:"at"`
+	ID         int    `json:"id,omitempty"`
+	Membership string `json:"membership,omitempty"`
+	Path       string `json:"path,omitempty"`
+	Status     string `json:"status,omitempty"`
+	Detail     string `json:"detail,omitempty"`
 }
 
 type Summary struct {
@@ -116,7 +122,7 @@ type startReq struct {
 	Agents          int    `json:"agents"`
 	SpawnPerS       int    `json:"spawn_per_s"`
 	RetrySec        int    `json:"retry_window_sec"`
-	Preset          string `json:"preset"` // single | multi
+	Preset          string `json:"preset"` // single | ten | multi
 	Supporters      int    `json:"supporters"`
 	StartMembership int    `json:"start_membership"`
 }
@@ -126,9 +132,6 @@ func (l *lab) start(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		shared.WriteErr(w, http.StatusBadRequest, "invalid json")
 		return
-	}
-	if req.Membership == "" {
-		req.Membership = seed.AliceMembership
 	}
 	if req.Password == "" {
 		req.Password = seed.DefaultPassword
@@ -145,8 +148,13 @@ func (l *lab) start(w http.ResponseWriter, r *http.Request) {
 	if req.RetrySec < 1 {
 		req.RetrySec = 8
 	}
-	if req.Preset == "" {
+	switch req.Preset {
+	case "multi", "ten":
+	default:
 		req.Preset = "single"
+	}
+	if req.Preset == "single" && req.Membership == "" {
+		req.Membership = seed.AliceMembership
 	}
 	if req.Supporters < 1 {
 		req.Supporters = 1000
@@ -162,13 +170,17 @@ func (l *lab) start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	rn := &run{cancel: cancel}
+	rn := &run{cancel: cancel, preset: req.Preset}
 	l.run = rn
 	l.running = true
 	l.mu.Unlock()
 
 	go l.execute(ctx, rn, req)
-	shared.WriteJSON(w, http.StatusAccepted, map[string]any{"status": "started", "agents": req.Agents, "preset": req.Preset})
+	body := map[string]any{"status": "started", "agents": req.Agents, "preset": req.Preset}
+	if req.Preset == "ten" {
+		body["memberships"] = seed.TenMemberships()
+	}
+	shared.WriteJSON(w, http.StatusAccepted, body)
 }
 
 func (l *lab) stop(w http.ResponseWriter, _ *http.Request) {
@@ -180,13 +192,19 @@ func (l *lab) stop(w http.ResponseWriter, _ *http.Request) {
 	shared.WriteJSON(w, http.StatusOK, map[string]string{"status": "stopping"})
 }
 
-func (l *lab) status(w http.ResponseWriter, _ *http.Request) {
+func (l *lab) status(w http.ResponseWriter, r *http.Request) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	body := map[string]any{"running": l.running}
 	if l.run != nil {
+		events := l.run.events
+		if len(events) > 80 {
+			events = events[len(events)-80:]
+		}
 		body["summary"] = l.run.sum
 		body["done"] = l.run.done
+		body["preset"] = l.run.preset
+		body["events"] = append([]event(nil), events...)
 	}
 	shared.WriteJSON(w, http.StatusOK, body)
 }
@@ -241,7 +259,16 @@ func (l *lab) execute(ctx context.Context, rn *run, req startReq) {
 	if interval < time.Millisecond {
 		interval = time.Millisecond
 	}
+	tenIDs := seed.TenMemberships()
 
+	snapshot := func() Summary {
+		return Summary{
+			Agents: req.Agents, Authenticated: int(authN.Load()), Attempts: int(attempts.Load()),
+			Allowed: int(allowed.Load()), Busy: int(busy.Load()), Denied: int(denied.Load()),
+			Orders: int(orders.Load()), Waiting: int(waiting.Load()), Finished: int(finished.Load()),
+			ElapsedMS: time.Since(start).Milliseconds(),
+		}
+	}
 	publish := func(e event) {
 		e.At = time.Now().UnixMilli()
 		rn.events = append(rn.events, e)
@@ -266,10 +293,7 @@ func (l *lab) execute(ctx context.Context, rn *run, req startReq) {
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			mem := req.Membership
-			if req.Preset == "multi" {
-				mem = strconv.Itoa(req.StartMembership + (idx % req.Supporters))
-			}
+			mem := membershipFor(req, idx, tenIDs)
 			res := l.agent(ctx, mem, req.Password, time.Duration(req.RetrySec)*time.Second)
 			if res.authenticated {
 				authN.Add(1)
@@ -285,11 +309,16 @@ func (l *lab) execute(ctx context.Context, rn *run, req startReq) {
 				waiting.Add(1)
 			}
 			finished.Add(1)
-			if idx < 40 || idx == req.Agents-1 || idx%500 == 0 {
-				l.mu.Lock()
-				publish(event{Type: "agent", ID: idx + 1, Status: res.status, Detail: res.detail})
-				l.mu.Unlock()
+			publishLive := idx < 80 || res.ordered || idx%25 == 0 || idx == req.Agents-1
+			l.mu.Lock()
+			rn.sum = snapshot()
+			if publishLive {
+				publish(event{
+					Type: "agent", ID: idx + 1, Membership: mem, Path: pathClubEdge,
+					Status: res.status, Detail: res.detail,
+				})
 			}
+			l.mu.Unlock()
 		}()
 		select {
 		case <-ctx.Done():
@@ -297,17 +326,25 @@ func (l *lab) execute(ctx context.Context, rn *run, req startReq) {
 		}
 	}
 	wg.Wait()
-	sum := Summary{
-		Agents: req.Agents, Authenticated: int(authN.Load()), Attempts: int(attempts.Load()),
-		Allowed: int(allowed.Load()), Busy: int(busy.Load()), Denied: int(denied.Load()),
-		Orders: int(orders.Load()), Waiting: int(waiting.Load()), Finished: int(finished.Load()),
-		ElapsedMS: time.Since(start).Milliseconds(),
-	}
 	l.mu.Lock()
-	rn.sum = sum
-	publish(event{Type: "done", Detail: "complete"})
+	rn.sum = snapshot()
+	publish(event{Type: "done", Detail: "complete", Path: pathClubEdge})
 	l.mu.Unlock()
-	l.log.Info("run complete", "summary", sum)
+	l.log.Info("run complete", "summary", rn.sum)
+}
+
+func membershipFor(req startReq, idx int, ten []string) string {
+	switch req.Preset {
+	case "ten":
+		if len(ten) == 0 {
+			return seed.AliceMembership
+		}
+		return ten[idx%len(ten)]
+	case "multi":
+		return strconv.Itoa(req.StartMembership + (idx % req.Supporters))
+	default:
+		return req.Membership
+	}
 }
 
 type agentRes struct {
@@ -327,14 +364,17 @@ func (l *lab) agent(ctx context.Context, membership, password string, retryWindo
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
-		out.status = "login-error"
-		out.detail = err.Error()
+		out.status = "denied"
+		out.detail = "login-error: " + err.Error()
+		out.denied++
 		return out
 	}
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
 	_ = resp.Body.Close()
 	if resp.StatusCode >= 300 && resp.StatusCode != http.StatusFound {
-		out.status = "login-fail"
+		out.status = "denied"
+		out.detail = "login-fail"
+		out.denied++
 		return out
 	}
 	out.authenticated = true
@@ -342,20 +382,26 @@ func (l *lab) agent(ctx context.Context, membership, password string, retryWindo
 	req, _ = http.NewRequestWithContext(ctx, http.MethodGet, l.clubURL+"/tickets/hfc-ars/buy", nil)
 	resp, err = client.Do(req)
 	if err != nil {
-		out.status = "buy-error"
+		out.status = "denied"
+		out.detail = "buy-error"
+		out.denied++
 		return out
 	}
 	loc := resp.Header.Get("Location")
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
 	_ = resp.Body.Close()
 	if loc == "" {
-		out.status = "no-handoff"
+		out.status = "denied"
+		out.detail = "no-handoff"
+		out.denied++
 		return out
 	}
 	req, _ = http.NewRequestWithContext(ctx, http.MethodGet, loc, nil)
 	resp, err = client.Do(req)
 	if err != nil {
-		out.status = "sso-error"
+		out.status = "denied"
+		out.detail = "sso-error"
+		out.denied++
 		return out
 	}
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
@@ -370,38 +416,42 @@ func (l *lab) agent(ctx context.Context, membership, password string, retryWindo
 		resp, err = client.Do(req)
 		if err != nil {
 			out.denied++
-			out.status = "hold-error"
+			out.status = "denied"
+			out.detail = "hold-error"
 			return out
 		}
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 		_ = resp.Body.Close()
 		decision := resp.Header.Get("X-Bruiser-Lab-Decision")
-		if decision == "" && resp.StatusCode == http.StatusConflict {
-			decision = "BUSY"
-		}
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		kind := classifyHold(decision, resp.StatusCode)
+		switch kind {
+		case "allow":
 			out.allowed++
 			var h struct {
 				ID string `json:"hold_id"`
 			}
 			_ = json.Unmarshal(b, &h)
-			if h.ID != "" {
-				oreq, _ := http.NewRequestWithContext(ctx, http.MethodPost, l.edgeURL+"/api/orders", bytes.NewBufferString(
-					`{"event_id":"`+seed.HeadlineEventID+`","hold_id":"`+h.ID+`"}`))
-				oreq.Header.Set("Content-Type", "application/json")
-				oresp, err := client.Do(oreq)
-				if err == nil {
-					_, _ = io.Copy(io.Discard, io.LimitReader(oresp.Body, 1<<16))
-					_ = oresp.Body.Close()
-					if oresp.StatusCode >= 200 && oresp.StatusCode < 300 {
-						out.ordered = true
-					}
+			if h.ID == "" {
+				var alt struct {
+					ID string `json:"id"`
 				}
+				_ = json.Unmarshal(b, &alt)
+				h.ID = alt.ID
+			}
+			if h.ID == "" {
+				out.status = "allow"
+				out.detail = "hold-no-id"
+				return out
+			}
+			if l.completeOrder(ctx, client, h.ID, deadline) {
+				out.ordered = true
+				out.status = "order"
+				return out
 			}
 			out.status = "allow"
+			out.detail = "hold-no-order"
 			return out
-		}
-		if decision == "BUSY" || resp.StatusCode == http.StatusConflict {
+		case "busy":
 			out.busy++
 			out.waiting = true
 			if time.Now().After(deadline) || ctx.Err() != nil {
@@ -415,10 +465,83 @@ func (l *lab) agent(ctx context.Context, membership, password string, retryWindo
 			case <-time.After(2 * time.Second):
 			}
 			continue
+		default:
+			out.denied++
+			out.status = "denied"
+			out.detail = originDetail(b)
+			return out
 		}
-		out.denied++
-		out.status = "denied"
-		out.detail = string(b)
-		return out
 	}
+}
+
+func (l *lab) completeOrder(ctx context.Context, client *http.Client, holdID string, deadline time.Time) bool {
+	payload := `{"event_id":"` + seed.HeadlineEventID + `","hold_id":"` + holdID + `"}`
+	for i := 0; i < 4; i++ {
+		if ctx.Err() != nil {
+			return false
+		}
+		oreq, _ := http.NewRequestWithContext(ctx, http.MethodPost, l.edgeURL+"/api/orders", bytes.NewBufferString(payload))
+		oreq.Header.Set("Content-Type", "application/json")
+		oresp, err := client.Do(oreq)
+		if err != nil {
+			if time.Now().After(deadline) {
+				return false
+			}
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		b, _ := io.ReadAll(io.LimitReader(oresp.Body, 1<<16))
+		_ = oresp.Body.Close()
+		kind := classifyHold(oresp.Header.Get("X-Bruiser-Lab-Decision"), oresp.StatusCode)
+		if oresp.StatusCode >= 200 && oresp.StatusCode < 300 {
+			return true
+		}
+		if kind == "busy" {
+			if time.Now().After(deadline) {
+				return false
+			}
+			select {
+			case <-ctx.Done():
+				return false
+			case <-time.After(500 * time.Millisecond):
+			}
+			continue
+		}
+		_ = b
+		return false
+	}
+	return false
+}
+
+// classifyHold maps Edge + origin outcomes. Bruiser BUSY is only the
+// Edge decision header. Origin 409 (per-account limit / sold out) is
+// denied, including when Off stamps X-Bruiser-Lab-Decision: ALLOW.
+func classifyHold(decision string, status int) string {
+	switch strings.ToUpper(strings.TrimSpace(decision)) {
+	case "BUSY":
+		return "busy"
+	case "DENIED":
+		if status >= 200 && status < 300 {
+			return "allow"
+		}
+		return "denied"
+	}
+	if status >= 200 && status < 300 {
+		return "allow"
+	}
+	return "denied"
+}
+
+func originDetail(b []byte) string {
+	var m map[string]string
+	if json.Unmarshal(b, &m) == nil {
+		if m["error"] != "" {
+			return m["error"]
+		}
+	}
+	s := strings.TrimSpace(string(b))
+	if len(s) > 120 {
+		s = s[:120]
+	}
+	return s
 }

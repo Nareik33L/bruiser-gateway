@@ -15,8 +15,6 @@ import (
 	"github.com/Nareik33L/bruiser-gateway/demos/shared"
 )
 
-const perAccountLimit = 4
-
 type originConfig struct {
 	HMACSecret   string
 	SSOSecret    string
@@ -229,7 +227,7 @@ func (o *origin) createHold(w http.ResponseWriter, r *http.Request) {
 				held += ord.Seats
 			}
 		}
-		if held+body.Seats > perAccountLimit {
+		if held+body.Seats > seed.PerAccountLimit {
 			shared.WriteErr(w, http.StatusConflict, "per-account limit")
 			return
 		}
@@ -350,7 +348,20 @@ func (o *origin) adminReset(w http.ResponseWriter, r *http.Request) {
 		ev.Held = 0
 		ev.Sold = 0
 	}
-	shared.WriteJSON(w, http.StatusOK, map[string]string{"status": "reset"})
+	ev := o.events[seed.HeadlineEventID]
+	available := 0
+	seats := seed.HeadlineSeats
+	if ev != nil {
+		available = ev.Available()
+		seats = ev.Seats
+	}
+	shared.WriteJSON(w, http.StatusOK, map[string]any{
+		"status":    "reset",
+		"seats":     seats,
+		"available": available,
+		"sold":      0,
+		"held":      0,
+	})
 }
 
 func (o *origin) adminClearLogs(w http.ResponseWriter, r *http.Request) {

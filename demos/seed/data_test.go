@@ -31,6 +31,31 @@ func TestGenerateSupporters(t *testing.T) {
 	}
 }
 
+func TestTenMemberships(t *testing.T) {
+	ids := seed.TenMemberships()
+	if len(ids) != seed.TenCustomerCount {
+		t.Fatalf("got %d", len(ids))
+	}
+	if ids[0] != seed.AliceMembership {
+		t.Fatalf("alice first, got %s", ids[0])
+	}
+	all := seed.GenerateSupporters(2000)
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if seen[id] {
+			t.Fatalf("dup %s", id)
+		}
+		seen[id] = true
+		s, ok := seed.Find(all, id)
+		if !ok || !s.EligibleForArsenal {
+			t.Fatalf("not an eligible seeded member: %s ok=%v", id, ok)
+		}
+		if id == seed.IneligibleMember {
+			t.Fatal("Sam must not be in the 10×N preset")
+		}
+	}
+}
+
 func TestHeadlineEventSeats(t *testing.T) {
 	ev := seed.Events("")
 	if ev[0].ID != seed.HeadlineEventID || ev[0].Seats != seed.HeadlineSeats {

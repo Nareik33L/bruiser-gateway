@@ -9,7 +9,7 @@ DDoS.
 
 - [ ] `make demo-up-local` (or Compose) is healthy: club `:8100`, tickets `:8091`, admin `:8110`.
 - [ ] Admin password `harchester`. Enforcement **100 %**.
-- [ ] **Reset demo** so Scenario 1 starts clean.
+- [ ] **Reset demo** so Scenario 1 starts clean. Confirm the toast: seats remaining + executions cleared.
 - [ ] Browser windows: club (supporter), admin (operator). Do not show the gateway port.
 - [ ] Confirm club home has no Bruiser branding.
 
@@ -22,15 +22,30 @@ DDoS.
 
 ## Scenario 2 — Flagship swarm (~3 min)
 
-- [ ] Agent Lab: `1001234`, **10,000**, single-supporter, Launch.
+- [ ] Agent Lab: **Single supporter**, `1001234`, **10,000**, Launch.
 - [ ] Say: every agent is a real login and a real hold against the **real** gateway.
 - [ ] Expect: 10,000 authenticated · **1** execution forwarded · ~9,999 held back (BUSY) · downstream EAF 1× · **1** seat sold.
+- [ ] Live feed: membership `1001234`, path club → Edge hold/order, one `order`, rest `busy`.
 - [ ] If the run feels slow, blame Postgres session inserts (R4), not "a queue".
+
+## Scenario Off — burn seats (~2 min)
+
+- [ ] **Reset demo** (toast confirms seats/executions cleared).
+- [ ] Enforcement **Off**. Preset **10 × N** (membership box hidden). Launch.
+- [ ] Watch **Seats remaining** drop and **Orders** rise. Feed shows ten distinct membership IDs completing `order`.
+- [ ] Origin 409 is capacity/limit, not Bruiser BUSY. Per-account cap is 4 (~40 orders from 10 customers). For a sell-out, Reset → Off → **1,000 × 10**.
+- [ ] **Reset** and set **100 %** before the next scenario.
+
+## Scenario 10×N enforce (~2 min)
+
+- [ ] **Reset demo**. Enforcement **100 %**. Preset **10 × N**. Launch.
+- [ ] Expect **10 orders**, rest **BUSY**. One purchase per customer. Live feed: ten memberships.
+- [ ] **Reset** before Dry Run / rollout.
 
 ## Scenario 3 — Dry Run (~2 min)
 
 - [ ] Reset demo → **Dry Run** → same swarm.
-- [ ] Expect would-have-blocked ≈ 9,999; seats churn; Authority Check **FAIL**.
+- [ ] Expect would-have-blocked high; seats churn; Authority Check **FAIL**.
 - [ ] Reset before the next scenario.
 
 ## Scenario 4 — Rollout (~3 min)

@@ -8,6 +8,13 @@ Start from **Reset demo**, enforcement **100 %**. Hosted:
 https://club.bruiser-gateway.com · https://tickets.bruiser-gateway.com ·
 https://admin.bruiser-gateway.com (Access: `kiedl33@outlook.com`).
 
+Reset between every scenario. The admin toast confirms seats restored and
+executions cleared.
+
+SimTix origin still applies a **per-account limit of 4** tickets. Off does
+not lift that origin rule; it only stops Bruiser from holding extra agents
+at BUSY.
+
 ## Scenario 1 — Normal purchase (~2 min)
 
 1. Open the club site. Confirm no Bruiser branding.
@@ -19,17 +26,46 @@ https://admin.bruiser-gateway.com (Access: `kiedl33@outlook.com`).
 
 ## Scenario 2 — 10,000-agent swarm, one supporter (flagship, ~3 min)
 
-Agent Lab: membership `1001234`, 10,000 agents, single-supporter preset, Launch.
+Agent Lab: **Single supporter**, membership `1001234`, N = **10,000**, Launch.
 
 Expect: 10,000 authenticated · 10,000 allocation attempts · **1 execution
 forwarded** · ~9,999 held back · observed EAF ≈ 10,000× · downstream EAF 1× ·
-**1 seat sold**.
+**1 seat sold**. Live feed shows membership `1001234`, status `order` once
+and `busy` for the rest. Path is club → Edge hold/order.
+
+## Scenario Off — burn seats (no guardrails, ~2 min)
+
+Reset demo → enforcement **Off** → Agent Lab **10 × N** (N = 50 or 200).
+
+The membership box is hidden: ten seeded eligible IDs (Alice `1001234` plus
+nine others) each send N agents. Bruiser is not asked. Agents that reach
+origin complete holds **and orders** until that account hits the 4-ticket
+cap or the stand sells out.
+
+Expect: **Seats remaining drops**, **Orders rise** (about 40 checkouts from
+10×4). Origin 409 (limit / sold out) is **denied**, not Bruiser BUSY. Live
+feed shows distinct membership IDs and `order` rows.
+
+To empty the stand (500 seats), Reset then Off then **1,000 × 10**. Do not
+use Single + Off if you want a visible burn (one customer still caps at 4).
+
+Reset and switch enforcement back to **100 %** before the next beat.
+
+## Scenario 10×N enforce (~2 min)
+
+Reset demo → **100 %** → Agent Lab **10 × N** (N = 50 or 200).
+
+Expect: **exactly 10 orders** (one agent per customer purchases) and the
+rest **BUSY**. Live feed shows ten membership IDs; one `order` each, others
+`busy`. Seats remaining drops by 10.
+
+This is the same one-customer-one-purchase rule as Single, times ten.
 
 ## Scenario 3 — Dry Run (~2 min)
 
-Reset demo → Dry Run → same swarm.
+Reset demo → Dry Run → Single 10,000 (or 10×N).
 
-Expect: attempts forwarded; would-have-blocked ≈ 9,999; seats churn on SimTix.
+Expect: attempts forwarded; would-have-blocked high; seats churn on SimTix.
 Authority Check → **FAIL** (open path). Reset.
 
 ## Scenario 4 — Progressive rollout (~3 min)

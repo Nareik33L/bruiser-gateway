@@ -15,12 +15,14 @@ const (
 	FirstMembership  = 1000001
 	AliceMembership  = "1001234"
 	IneligibleMember = "1000002"
+	TenCustomerCount = 10
 	HeadlineEventID  = "hfc-ars"
 	HeadlineSeats    = 500
 	ClubName         = "Harchester United"
 	OpponentDefault  = "Arsenal"
 	Stadium          = "Dragon's Lair"
 	KickoffDisplay   = "Saturday 15:00"
+	PerAccountLimit  = 4
 )
 
 type Supporter struct {
@@ -162,6 +164,25 @@ func Blocks(eventID string) []Block {
 		{ID: "south-upper", EventID: eventID, Name: "South Stand Upper", PriceBand: "Category 2", PricePence: 4000, Capacity: 160},
 		{ID: "west-paddock", EventID: eventID, Name: "West Paddock", PriceBand: "Category 3", PricePence: 3000, Capacity: 80},
 	}
+}
+
+// TenMemberships is the Agent Lab 10×N preset: Alice plus nine other
+// eligible seeded supporters, in a stable order so the live feed shows
+// distinct membership IDs from the first ten agents.
+func TenMemberships() []string {
+	all := GenerateSupporters(2000)
+	out := make([]string, 0, TenCustomerCount)
+	out = append(out, AliceMembership)
+	for _, s := range all {
+		if s.MembershipNumber == AliceMembership || !s.EligibleForArsenal {
+			continue
+		}
+		out = append(out, s.MembershipNumber)
+		if len(out) == TenCustomerCount {
+			break
+		}
+	}
+	return out
 }
 
 func Find(all []Supporter, membership string) (Supporter, bool) {

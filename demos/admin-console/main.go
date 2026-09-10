@@ -155,7 +155,7 @@ func (c *console) getJSON(url string, headers map[string]string) any {
 	return v
 }
 
-func (c *console) post(url string, headers map[string]string, body any) {
+func (c *console) post(url string, headers map[string]string, body any) map[string]any {
 	var rdr io.Reader
 	if body != nil {
 		b, _ := json.Marshal(body)
@@ -169,19 +169,41 @@ func (c *console) post(url string, headers map[string]string, body any) {
 		req.Header.Set(k, v)
 	}
 	resp, err := http.DefaultClient.Do(req)
-	if err == nil {
-		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
+	if err != nil {
+		return map[string]any{"error": err.Error()}
 	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	var out map[string]any
+	if json.Unmarshal(raw, &out) != nil {
+		return map[string]any{"status": resp.Status, "raw": string(raw)}
+	}
+	return out
 }
 
 func (c *console) reset(w http.ResponseWriter, _ *http.Request) {
 	h := map[string]string{"X-Demo-Admin-Secret": c.adminSecret}
-	c.post(c.simtixOrigin+"/_admin/reset", h, nil)
+	sim := c.post(c.simtixOrigin+"/_admin/reset", h, nil)
 	c.post(c.simtixEdge+"/_edge/reset-stats", h, nil)
 	c.post(c.loadlab+"/stop", h, nil)
-	c.post(c.gateway+"/v1/operator/reset-executions", map[string]string{"X-Bruiser-Operator-Secret": c.operatorSecret}, nil)
-	shared.WriteJSON(w, http.StatusOK, map[string]string{"status": "reset"})
+	gw := c.post(c.gateway+"/v1/operator/reset-executions", map[string]string{"X-Bruiser-Operator-Secret": c.operatorSecret}, nil)
+	seats := seed.HeadlineSeats
+	if v, ok := sim["available"].(float64); ok {
+		seats = int(v)
+	} else if v, ok := sim["seats"].(float64); ok {
+		seats = int(v)
+	}
+	revoked := 0
+	if v, ok := gw["revoked"].(float64); ok {
+		revoked = int(v)
+	}
+	msg := fmt.Sprintf("Demo reset: %d seats remaining, executions cleared (%d revoked).", seats, revoked)
+	shared.WriteJSON(w, http.StatusOK, map[string]any{
+		"status":          "reset",
+		"seats_remaining": seats,
+		"revoked":         revoked,
+		"message":         msg,
+	})
 }
 
 func (c *console) enforcement(w http.ResponseWriter, r *http.Request) {
@@ -207,9 +229,11 @@ func (c *console) swarmStop(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (c *console) authority(w http.ResponseWriter, _ *http.Request) {
+	hmac := shared.Env("BRUISER_DEV_HMAC_SECRET", "dev-secret-change-me")
 	cmd := exec.Command(c.bruiserBin, "authority-check",
 		"--edge", c.simtixEdge, "--origin", c.simtixOrigin,
-		"--membership", seed.AliceMembership, "--event", seed.HeadlineEventID, "--json")
+		"--membership", seed.AliceMembership, "--event", seed.HeadlineEventID,
+		"--hmac-secret", hmac, "--json")
 	out, err := cmd.CombinedOutput()
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
@@ -261,9 +285,21 @@ pre{background:#151821;padding:12px;border-radius:10px;overflow:auto;max-height:
 .cert ul{margin:8px 0 0;padding-left:18px}
 .form label{display:block;margin:12px 0}
 h1{font-weight:500}
+.hint{color:var(--muted);font-size:13px;margin:0 0 12px}
+.tile.hot{border-color:var(--lime)}
+table.feed{width:100%%;border-collapse:collapse;font-size:13px}
+table.feed th,table.feed td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+table.feed th{color:var(--muted);font-weight:600}
+.st-order{color:var(--lime);font-weight:700}
+.st-allow{color:#9ad4ff}
+.st-busy{color:#ffcc66}
+.st-denied{color:#ff6b4a}
+#toast{position:fixed;right:20px;bottom:20px;background:var(--lime);color:#111;font-weight:700;padding:12px 16px;border-radius:10px;display:none;max-width:420px;z-index:9}
+#toast.show{display:block}
+.mem-field.hidden{display:none}
 </style></head><body>
 <header><strong>Bruiser</strong><span>Harchester United · operations</span></header>
-<main>%s</main></body></html>`, title, body)
+<main>%s</main><div id="toast"></div></body></html>`, title, body)
 }
 
 const dashboardHTML = `
@@ -286,15 +322,23 @@ const dashboardHTML = `
 </div>
 <h2>Agent Lab</h2>
 <div class="row">
-  <input id="mem" value="1001234" placeholder="Membership">
+  <label class="mem-field" id="memWrap">Membership <input id="mem" value="1001234" placeholder="Membership"></label>
   <input id="pw" value="password" placeholder="Password">
-  <select id="preset"><option value="single">Single supporter</option><option value="multi">1,000 × 10</option></select>
-  <select id="n">
-    <option>1</option><option>50</option><option>200</option><option>500</option><option>5000</option><option selected>10000</option>
+  <select id="preset" onchange="syncPreset()">
+    <option value="single">Single supporter</option>
+    <option value="ten">10 × N</option>
+    <option value="multi">1,000 × 10</option>
   </select>
+  <label>N <select id="n">
+    <option>1</option><option>50</option><option selected>200</option><option>500</option><option>5000</option><option>10000</option>
+  </select></label>
   <button class="primary" onclick="launch()">Launch</button>
   <button onclick="stopSwarm()">Stop</button>
 </div>
+<p class="hint" id="presetHint">Membership IDs come from the preset (seeded eligible supporters).</p>
+<h2>Live feed</h2>
+<p class="hint">Agents reach SimTix through club → Edge hold/order. Status: <span class="st-order">order</span> purchased, <span class="st-allow">allow</span> forwarded, <span class="st-busy">busy</span> held back, <span class="st-denied">denied</span> origin/login.</p>
+<table class="feed"><thead><tr><th>Agent</th><th>Membership</th><th>Status</th><th>Path</th><th>Detail</th></tr></thead><tbody id="feed"><tr><td colspan="5">Waiting for a run…</td></tr></tbody></table>
 <h2>Authority Check certificate</h2>
 <div id="cert" class="cert idle">Run Authority Check to mint a certificate against this Edge.</div>
 <h2>Audit (append-only; reset does not delete)</h2>
@@ -306,6 +350,30 @@ const tiles = document.getElementById('tiles');
 const log = document.getElementById('log');
 const cert = document.getElementById('cert');
 const auditEl = document.getElementById('audit');
+const feed = document.getElementById('feed');
+const toastEl = document.getElementById('toast');
+function toast(msg){
+  toastEl.textContent = msg;
+  toastEl.className = 'show';
+  clearTimeout(toastEl._t);
+  toastEl._t = setTimeout(() => { toastEl.className = ''; }, 5000);
+}
+function syncPreset(){
+  const preset = document.getElementById('preset').value;
+  const single = preset === 'single';
+  document.getElementById('memWrap').classList.toggle('hidden', !single);
+  document.getElementById('mem').disabled = !single;
+  document.getElementById('presetHint').textContent = single
+    ? 'Single supporter: every agent uses the membership box (Alice 1001234 by default).'
+    : (preset === 'ten'
+      ? '10 × N: ten seeded eligible memberships (Alice + nine others). N is agents per customer. Total agents = 10 × N. The membership box is not used.'
+      : '1,000 × 10: one thousand sequential seeded memberships × 10 agents (10,000 total). The membership box is not used.');
+  if (preset === 'ten') {
+    const n = document.getElementById('n');
+    if (parseInt(n.value,10) > 500) n.value = '50';
+  }
+}
+syncPreset();
 const es = new EventSource('/events');
 es.addEventListener('snapshot', (e) => {
   const d = JSON.parse(e.data);
@@ -313,27 +381,44 @@ es.addEventListener('snapshot', (e) => {
   const eaf = (g.eaf && g.eaf[0]) || {};
   const sim = d.simtix || {};
   const edge = d.edge || {};
-  const es = d.edge_stats || {};
+  const est = d.edge_stats || {};
   const lab = d.loadlab || {};
   const club = d.club || {};
+  const sum = lab.summary || {};
   const items = [
-    ['Seats remaining', sim.available, 'SimTix origin'],
-    ['Held / sold', (sim.held||0)+' / '+(sim.sold||0), 'SimTix origin'],
-    ['Customers online', club.customers_online, 'Harchester sessions (10 min)'],
-    ['Allocation attempts', eaf.attempts, 'gateway operator / EAF'],
-    ['Executions forwarded', eaf.forwarded, 'gateway operator / EAF'],
-    ['Held back (BUSY)', eaf.busy, 'gateway operator / EAF'],
-    ['Observed EAF', (eaf.observed_eaf||0).toFixed ? (eaf.observed_eaf||0).toFixed(1)+'×' : eaf.observed_eaf, 'headline KPI'],
-    ['Downstream EAF', eaf.downstream_eaf, 'gateway operator / EAF'],
-    ['Active executions', g.active_executions, 'gateway operator'],
-    ['Would-have-blocked', es.would_block, 'SimTix edge'],
-    ['Enforcement', (edge.mode||'')+' '+(edge.percent||'')+'%', 'SimTix edge'],
-    ['Agents finished', (lab.summary&&lab.summary.finished)||0, 'load-lab']
+    ['Seats remaining', sim.available, 'SimTix origin', true],
+    ['Orders', sim.orders ?? sum.orders ?? 0, 'SimTix origin (sold checkouts)', true],
+    ['Held / sold', (sim.held||0)+' / '+(sim.sold||0), 'SimTix origin', false],
+    ['Swarm orders', sum.orders||0, 'load-lab completed checkouts', true],
+    ['Customers online', club.customers_online, 'Harchester sessions (10 min)', false],
+    ['Allocation attempts', eaf.attempts, 'gateway operator / EAF', false],
+    ['Executions forwarded', eaf.forwarded, 'gateway operator / EAF', false],
+    ['Held back (BUSY)', eaf.busy ?? sum.busy, 'gateway operator / EAF', false],
+    ['Observed EAF', (eaf.observed_eaf||0).toFixed ? (eaf.observed_eaf||0).toFixed(1)+'×' : eaf.observed_eaf, 'headline KPI', false],
+    ['Downstream EAF', eaf.downstream_eaf, 'gateway operator / EAF', false],
+    ['Active executions', g.active_executions, 'gateway operator', false],
+    ['Would-have-blocked', est.would_block, 'SimTix edge', false],
+    ['Enforcement', (edge.mode||'')+' '+(edge.percent||'')+'%', 'SimTix edge', false],
+    ['Agents finished', sum.finished||0, 'load-lab', false]
   ];
-  tiles.innerHTML = items.map(([k,v,s]) => '<div class="tile"><span>'+k+'</span><b>'+(v??'—')+'</b><span>'+s+'</span></div>').join('');
-  log.textContent = JSON.stringify({loadlab: lab, edge, eaf}, null, 2);
+  tiles.innerHTML = items.map(([k,v,s,hot]) => '<div class="tile'+(hot?' hot':'')+'"><span>'+k+'</span><b>'+(v??'—')+'</b><span>'+s+'</span></div>').join('');
+  const events = lab.events || [];
+  const rows = events.filter(x => x.type === 'agent').slice(-40).reverse();
+  if (!rows.length) {
+    feed.innerHTML = '<tr><td colspan="5">'+(lab.running ? 'Swarm running…' : 'Waiting for a run…')+'</td></tr>';
+  } else {
+    feed.innerHTML = rows.map(x => {
+      const st = (x.status||'').toLowerCase();
+      return '<tr><td>'+(x.id||'')+'</td><td>'+(x.membership||'—')+'</td><td class="st-'+st+'">'+(x.status||'—')+'</td><td>'+(x.path||'club → Edge hold/order')+'</td><td>'+(x.detail||'')+'</td></tr>';
+    }).join('');
+  }
+  log.textContent = JSON.stringify({loadlab: {running: lab.running, done: lab.done, preset: lab.preset, summary: sum}, edge, eaf}, null, 2);
 });
-async function resetDemo(){ await fetch('/reset', {method:'POST'}); }
+async function resetDemo(){
+  const res = await fetch('/reset', {method:'POST'});
+  const d = await res.json().catch(() => ({}));
+  toast(d.message || ('Reset: '+(d.seats_remaining??'—')+' seats remaining, executions cleared.'));
+}
 async function setEnf(){
   const v = document.getElementById('enf').value;
   let mode='enforce', percent=100;
@@ -345,12 +430,13 @@ async function setEnf(){
 async function launch(){
   const n = parseInt(document.getElementById('n').value,10);
   const preset = document.getElementById('preset').value;
-  const agents = preset==='multi' ? 10000 : n;
-  await fetch('/swarm', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
-    membership_number: document.getElementById('mem').value,
-    password: document.getElementById('pw').value,
-    agents, spawn_per_s: 1000, retry_window_sec: 8, preset, supporters: 1000
-  })});
+  let agents = n;
+  if (preset === 'multi') agents = 10000;
+  if (preset === 'ten') agents = 10 * n;
+  const body = { password: document.getElementById('pw').value, agents, spawn_per_s: 1000, retry_window_sec: 8, preset };
+  if (preset === 'single') body.membership_number = document.getElementById('mem').value;
+  if (preset === 'multi') { body.supporters = 1000; body.start_membership = 1000001; }
+  await fetch('/swarm', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
 }
 async function stopSwarm(){ await fetch('/swarm/stop', {method:'POST'}); }
 async function runCheck(){
